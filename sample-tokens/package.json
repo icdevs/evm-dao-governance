@@ -1,0 +1,42 @@
+{
+  "name": "se-2",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "packages/*"
+    ]
+  },
+  "scripts": {
+    "account": "yarn workspace @se-2/hardhat account",
+    "chain": "yarn workspace @se-2/hardhat chain",
+    "compile": "yarn workspace @se-2/hardhat compile",
+    "deploy": "yarn workspace @se-2/hardhat deploy",
+    "deploy:tokens": "yarn workspace @se-2/hardhat deploy --tags MockTokens",
+    "setup:tokens": "yarn workspace @se-2/hardhat run scripts/setupTokenDistribution.ts",
+    "setup:mainnet-like": "yarn workspace @se-2/hardhat run scripts/createMainnetLikeDistribution.ts",
+    "flatten": "yarn workspace @se-2/hardhat flatten",
+    "fork": "yarn workspace @se-2/hardhat fork",
+    "format": "yarn hardhat:format",
+    "generate": "yarn workspace @se-2/hardhat generate",
+    "hardhat-verify": "yarn workspace @se-2/hardhat hardhat-verify",
+    "hardhat:format": "yarn workspace @se-2/hardhat format",
+    "hardhat:lint": "yarn workspace @se-2/hardhat lint",
+    "hardhat:test": "yarn workspace @se-2/hardhat test",
+    "test": "yarn hardhat:test",
+    "verify": "yarn workspace @se-2/hardhat verify"
+  },
+  "devDependencies": {
+    "husky": "~8.0.3",
+    "lint-staged": "~13.2.2"
+  },
+  "packageManager": "yarn@3.2.3",
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "ethers": "^6.13.3",
+    "hardhat": "^2.22.17"
+  }
+}

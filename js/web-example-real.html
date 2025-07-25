@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaMask Balance Proof Generator - REAL VERSION</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007cba;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #005a87;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .connected {
+            background-color: #28a745;
+        }
+        .connected:hover {
+            background-color: #218838;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            word-break: break-all;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .loading {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .proof-section {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .proof-section h4 {
+            margin-top: 0;
+        }
+        code {
+            background-color: #f1f1f1;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        small {
+            color: #666;
+            font-size: 12px;
+            display: block;
+            margin-top: 5px;
+        }
+        .wallet-info {
+            background-color: #e8f5e8;
+            border: 1px solid #4caf50;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .wallet-info strong {
+            color: #2e7d32;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .warning h3 {
+            margin-top: 0;
+            color: #b45309;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🦊 MetaMask Balance Proof Generator - REAL VERSION</h1>
+        <div class="warning">
+            <h3>⚠️ No More Mock Data + Security Validation!</h3>
+            <p>This version uses REAL MetaMask integration with actual blockchain data. The fake mock data has been removed and replaced with real eth_getProof calls via MetaMask.</p>
+            <p><strong>🔒 Security Features:</strong> Validates storage slots to prevent spoofing attacks by comparing storage values with balanceOf() results.</p>
+        </div>
+        
+        <p>Generate cryptographic proofs of ERC20 token balances or ERC721 token ownership using your MetaMask wallet. No RPC endpoints required!</p>
+        
+        <div id="walletStatus" class="result" style="display: none;"></div>
+        
+        <div class="form-group">
+            <button id="connectBtn" onclick="connectWallet()">Connect MetaMask</button>
+            <button id="refreshBtn" onclick="refreshWalletInfo()" style="display: none;">Refresh Wallet Info</button>
+        </div>
+
+        <form id="proofForm" style="display: none;">
+            <div class="form-group">
+                <label for="tokenType">Token Type:</label>
+                <select id="tokenType" onchange="toggleTokenIdField()">
+                    <option value="ERC20">ERC20 (Balance Proof)</option>
+                    <option value="ERC721">ERC721 (Ownership Proof)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="contractAddress">Contract Address:</label>
+                <input type="text" id="contractAddress" placeholder="0x..." value="0xA0b86a33E6441f8F20e2DC5dCb5E32C8A6b8e68a">
+                <small>Enter the contract address of the token</small>
+                <details style="margin-top: 10px;">
+                    <summary style="cursor: pointer; color: #007cba;">🔍 Popular Token Examples (click to expand)</summary>
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                        <p><strong>Mainnet ERC20 Tokens:</strong></p>
+                        <p>• <strong>USDC:</strong> <code onclick="document.getElementById('contractAddress').value='0xA0b86a33E6441f8F20e2DC5dCb5E32C8A6b8e68a'" style="cursor: pointer; background: #e3f2fd;">0xA0b86a33E6441f8F20e2DC5dCb5E32C8A6b8e68a</code></p>
+                        <p>• <strong>USDT:</strong> <code onclick="document.getElementById('contractAddress').value='0xdAC17F958D2ee523a2206206994597C13D831ec7'" style="cursor: pointer; background: #e3f2fd;">0xdAC17F958D2ee523a2206206994597C13D831ec7</code></p>
+                        <p>• <strong>WETH:</strong> <code onclick="document.getElementById('contractAddress').value='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'" style="cursor: pointer; background: #e3f2fd;">0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2</code></p>
+                        <p>• <strong>UNI:</strong> <code onclick="document.getElementById('contractAddress').value='0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984'" style="cursor: pointer; background: #e3f2fd;">0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984</code></p>
+                        <p><strong>Arbitrum One ERC20 Tokens:</strong></p>
+                        <p>• <strong>USDC (Arbitrum):</strong> <code onclick="setContractAndSlot('0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 9)" style="cursor: pointer; background: #e8f5e8;">0xaf88d065e77c8cC2239327C5EDb3A432268e5831</code> <span style="color: #28a745; font-weight: bold;">(Slot 9)</span></p>
+                        <p>• <strong>USDT (Arbitrum):</strong> <code onclick="setContractAndSlot('0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', 0)" style="cursor: pointer; background: #e8f5e8;">0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9</code></p>
+                        <small>Click any address to auto-fill. Green = contract you mentioned having balance in! Make sure you're on the right network.</small>
+                    </div>
+                </details>
+            </div>
+
+            <div class="form-group" id="tokenIdGroup" style="display: none;">
+                <label for="tokenId">Token ID:</label>
+                <input type="number" id="tokenId" placeholder="123">
+                <small>Required for ERC721 ownership proofs</small>
+            </div>
+
+            <div class="form-group">
+                <label for="blockTag">Block Tag:</label>
+                <input type="text" id="blockTag" placeholder="latest" value="latest">
+                <small>Use "latest" for current block, or specific block number</small>
+            </div>
+
+            <div class="form-group">
+                <label for="slotIndex">Storage Slot Index:</label>
+                <input type="number" id="slotIndex" placeholder="0" value="0">
+                <small>ERC20: usually 0, but can be 1, 9, or higher for proxy contracts. ERC721: usually 2. <strong>USDC on Arbitrum uses slot 9!</strong></small>
+                <div style="margin-top: 10px;">
+                    <button type="button" onclick="findCorrectSlot()" style="background-color: #28a745; font-size: 14px; padding: 8px 16px;">🔍 Auto-Find Correct Slot</button>
+                    <button type="button" onclick="document.getElementById('slotIndex').value='9'" style="background-color: #fd7e14; font-size: 14px; padding: 8px 16px;">🎯 Try Slot 9 (USDC)</button>
+                    <small style="display: block; margin-top: 5px;">Auto-find tests slots 0-10, or click "Try Slot 9" for USDC on Arbitrum specifically</small>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <button type="button" onclick="generateProof()">Generate Proof</button>
+                <button type="button" onclick="compareBalances()" style="background-color: #6f42c1;">🔍 Compare Balances Only</button>
+            </div>
+        </form>
+
+        <div id="result" style="display: none;"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.15.0/ethers.umd.min.js"></script>
+    <script src="metamask-balance-proof-secure.js"></script>
+    <script>
+        console.log('✅ SECURE MetaMask implementation loaded with anti-spoofing validation!');
+        console.log('Ethers available:', typeof ethers !== 'undefined');
+        console.log('MetaMaskBalanceProofGenerator available:', typeof MetaMaskBalanceProofGenerator !== 'undefined');
+    </script>
+    <script>
+        let generator = null;
+        let isConnected = false;
+        let userAddress = null;
+
+        async function connectWallet() {
+            const connectBtn = document.getElementById('connectBtn');
+            const walletStatus = document.getElementById('walletStatus');
+            const proofForm = document.getElementById('proofForm');
+            const refreshBtn = document.getElementById('refreshBtn');
+
+            try {
+                // Check if MetaMask is available
+                if (typeof MetaMaskBalanceProofGenerator === 'undefined') {
+                    throw new Error('MetaMask Balance Proof Generator not loaded. Please refresh the page.');
+                }
+
+                if (!MetaMaskBalanceProofGenerator.isMetaMaskAvailable()) {
+                    throw new Error('MetaMask not found. Please install MetaMask extension.');
+                }
+
+                connectBtn.disabled = true;
+                connectBtn.textContent = 'Connecting...';
+
+                // Initialize generator
+                generator = new MetaMaskBalanceProofGenerator();
+                
+                // Connect to wallet
+                userAddress = await generator.connectWallet();
+                const chainId = await generator.getChainId();
+
+                // Update UI
+                isConnected = true;
+                connectBtn.style.display = 'none';
+                refreshBtn.style.display = 'inline-block';
+                proofForm.style.display = 'block';
+
+                walletStatus.innerHTML = `
+                    <div class="wallet-info">
+                        <strong>✅ Connected to MetaMask</strong><br>
+                        Address: <code>${userAddress}</code><br>
+                        Chain ID: <strong>${chainId}</strong> ${getNetworkName(chainId)}<br>
+                        <small>This is REAL wallet data from MetaMask, not mock data!</small>
+                    </div>
+                `;
+                walletStatus.style.display = 'block';
+
+                console.log('✅ Real MetaMask connection established:', { userAddress, chainId });
+
+            } catch (error) {
+                console.error('❌ Connection failed:', error);
+                
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect MetaMask';
+                
+                walletStatus.innerHTML = `
+                    <div class="result error">
+                        <strong>❌ Connection Failed</strong><br>
+                        ${error.message}
+                    </div>
+                `;
+                walletStatus.style.display = 'block';
+            }
+        }
+
+        async function refreshWalletInfo() {
+            if (!generator) return;
+
+            try {
+                const currentAccount = await generator.getCurrentAccount();
+                const chainId = await generator.getChainId();
+                
+                const walletStatus = document.getElementById('walletStatus');
+                walletStatus.innerHTML = `
+                    <div class="wallet-info">
+                        <strong>✅ Connected to MetaMask</strong><br>
+                        Address: <code>${currentAccount}</code><br>
+                        Chain ID: <strong>${chainId}</strong> ${getNetworkName(chainId)}<br>
+                        <small>Updated at ${new Date().toLocaleTimeString()}</small>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('❌ Refresh failed:', error);
+            }
+        }
+
+        function toggleTokenIdField() {
+            const tokenType = document.getElementById('tokenType').value;
+            const tokenIdGroup = document.getElementById('tokenIdGroup');
+            const slotIndex = document.getElementById('slotIndex');
+            
+            if (tokenType === 'ERC721') {
+                tokenIdGroup.style.display = 'block';
+                slotIndex.value = '2';
+            } else {
+                tokenIdGroup.style.display = 'none';
+                // Check if it's USDC on Arbitrum and suggest slot 9
+                const contractAddress = document.getElementById('contractAddress').value.toLowerCase();
+                if (contractAddress === '0xaf88d065e77c8cc2239327c5edb3a432268e5831') {
+                    slotIndex.value = '9'; // USDC on Arbitrum
+                } else {
+                    slotIndex.value = '0'; // Standard ERC20
+                }
+            }
+        }
+
+        function getNetworkName(chainId) {
+            const networks = {
+                1: '(Ethereum Mainnet)',
+                5: '(Goerli Testnet)',
+                11155111: '(Sepolia Testnet)',
+                42161: '(Arbitrum One)',
+                10: '(Optimism)',
+                137: '(Polygon)',
+                8453: '(Base)',
+                56: '(BSC)'
+            };
+            return networks[chainId] || '(Unknown Network)';
+        }
+
+        function setContractAndSlot(contractAddress, slotIndex) {
+            document.getElementById('contractAddress').value = contractAddress;
+            document.getElementById('slotIndex').value = slotIndex;
+            console.log(`✅ Set contract ${contractAddress} with slot ${slotIndex}`);
+        }
+
+        async function findCorrectSlot() {
+            if (!generator || !isConnected) {
+                alert('Please connect your MetaMask wallet first.');
+                return;
+            }
+
+            const contractAddress = document.getElementById('contractAddress').value;
+            const resultDiv = document.getElementById('result');
+
+            if (!contractAddress || !contractAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+                alert('Please enter a valid contract address first.');
+                return;
+            }
+
+            try {
+                resultDiv.innerHTML = `
+                    <div class="result loading">
+                        <strong>🔍 Finding Correct Storage Slot...</strong><br>
+                        Testing storage slots 0-10 to find where your balance is stored...<br>
+                        <small>This will compare storage values with the actual balanceOf() result.</small>
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+
+                const result = await generator.findCorrectStorageSlot(contractAddress, userAddress);
+
+                if (result.found) {
+                    document.getElementById('slotIndex').value = result.slot;
+                    resultDiv.innerHTML = `
+                        <div class="result success">
+                            <h3>✅ Found Correct Storage Slot!</h3>
+                            <p><strong>Correct Slot:</strong> <code>${result.slot}</code></p>
+                            <p><strong>Actual Balance (balanceOf):</strong> <code>${result.actualBalance}</code></p>
+                            <p><strong>Storage Balance (slot ${result.slot}):</strong> <code>${result.storageBalance}</code></p>
+                            <p>The slot index has been automatically updated. Now generate your proof!</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h3>❌ Could Not Find Correct Storage Slot</h3>
+                            <p><strong>Actual Balance (balanceOf):</strong> <code>${result.actualBalance}</code></p>
+                            ${result.actualBalance === '0' ? 
+                                '<p>Your balance is actually 0, so no storage slot will contain a non-zero value.</p>' : 
+                                '<p>Your balance is non-zero but we could not find it in storage slots 0-10. This token may use a custom storage layout. Try slots 1, 2, 3 manually.</p>'
+                            }
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('❌ Slot finding failed:', error);
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <strong>❌ Error Finding Storage Slot</strong><br>
+                        ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function compareBalances() {
+            if (!generator || !isConnected) {
+                alert('Please connect your MetaMask wallet first.');
+                return;
+            }
+
+            const contractAddress = document.getElementById('contractAddress').value;
+            const slotIndex = parseInt(document.getElementById('slotIndex').value);
+            const resultDiv = document.getElementById('result');
+
+            if (!contractAddress || !contractAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+                alert('Please enter a valid contract address.');
+                return;
+            }
+
+            try {
+                resultDiv.innerHTML = `
+                    <div class="result loading">
+                        <strong>🔍 Comparing Balance Methods...</strong><br>
+                        Getting balance via balanceOf() call vs storage proof...<br>
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+
+                // Get balance via standard call
+                const actualBalance = await generator.getERC20BalanceViaCall(contractAddress, userAddress);
+                
+                // Get balance via storage proof
+                const storageKey = generator.getERC20BalanceStorageKey(userAddress, slotIndex);
+                const proof = await generator.provider.send("eth_getProof", [
+                    contractAddress,
+                    [storageKey],
+                    "latest"
+                ]);
+                const storageValue = proof.storageProof[0]?.value || '0x0';
+                const storageBalance = ethers.getBigInt(storageValue).toString();
+
+                const match = actualBalance === storageBalance;
+
+                resultDiv.innerHTML = `
+                    <div class="result ${match ? 'success' : 'error'}">
+                        <h3>${match ? '✅' : '❌'} Balance Comparison</h3>
+                        <div class="proof-section">
+                            <h4>Method Comparison</h4>
+                            <p><strong>balanceOf() Call:</strong> <code>${actualBalance}</code></p>
+                            <p><strong>Storage Slot ${slotIndex}:</strong> <code>${storageBalance}</code></p>
+                            <p><strong>Storage Key:</strong> <code>${storageKey}</code></p>
+                            <p><strong>Raw Storage Value:</strong> <code>${storageValue}</code></p>
+                            <p><strong>Match:</strong> ${match ? '✅ YES' : '❌ NO - try a different slot!'}</p>
+                        </div>
+                        ${!match && actualBalance !== '0' ? 
+                            '<p style="background: #fff3cd; padding: 10px; border-radius: 5px;"><strong>💡 Tip:</strong> Use the "Auto-Find Correct Slot" button to automatically find the right storage slot!</p>' : ''
+                        }
+                    </div>
+                `;
+            } catch (error) {
+                console.error('❌ Balance comparison failed:', error);
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <strong>❌ Balance Comparison Failed</strong><br>
+                        ${error.message}
+                    </div>
+                `;
+            }
+        }
+           
+
+        async function generateProof() {
+            if (!generator || !isConnected) {
+                alert('Please connect your MetaMask wallet first.');
+                return;
+            }
+
+            const resultDiv = document.getElementById('result');
+            const tokenType = document.getElementById('tokenType').value;
+            const contractAddress = document.getElementById('contractAddress').value;
+            const tokenId = document.getElementById('tokenId').value;
+            const blockTag = document.getElementById('blockTag').value || 'latest';
+            const slotIndex = parseInt(document.getElementById('slotIndex').value);
+
+            if (!contractAddress || !contractAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+                alert('Please enter a valid contract address (0x followed by 40 hex characters).');
+                return;
+            }
+
+            if (tokenType === 'ERC721' && (!tokenId || tokenId === '')) {
+                alert('Please enter a token ID for ERC721 ownership proof.');
+                return;
+            }
+
+            try {
+                resultDiv.innerHTML = `
+                    <div class="result loading">
+                        <strong>🔄 Generating Real Proof...</strong><br>
+                        Calling MetaMask eth_getProof with real blockchain data...<br>
+                        <small>This may take a few seconds as we're fetching actual proof data from the blockchain.</small>
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+
+                console.log('🔄 Generating proof with real MetaMask integration...');
+
+                let proof;
+                if (tokenType === 'ERC20') {
+                    proof = await generator.generateERC20BalanceProof({
+                        contractAddress,
+                        blockTag,
+                        slotIndex
+                    });
+                } else {
+                    proof = await generator.generateERC721OwnershipProof({
+                        contractAddress,
+                        tokenId: parseInt(tokenId),
+                        blockTag,
+                        slotIndex
+                    });
+                }
+
+                console.log('✅ Real proof generated:', proof);
+
+                // Display the real proof results
+                resultDiv.innerHTML = `
+                    <div class="result success">
+                        <h3>✅ Real Proof Generated Successfully!</h3>
+                        
+                        <div class="proof-section">
+                            <h4>📊 Balance Information & Verification</h4>
+                            <p><strong>User Address:</strong> <code>${proof.userAddress}</code></p>
+                            <p><strong>Token Contract:</strong> <code>${contractAddress}</code></p>
+                            <p><strong>Actual Balance (balanceOf):</strong> <code>${proof.actualBalance || 'N/A'}</code></p>
+                            <p><strong>Storage Balance (slot ${proof.slotIndex}):</strong> <code>${proof.balance}</code></p>
+                            ${proof.actualBalance ? (proof.actualBalance === proof.balance ? 
+                                '<p style="color: #28a745;"><strong>✅ Balance Match:</strong> Storage proof matches actual balance!</p>' : 
+                                '<p style="color: #dc3545;"><strong>❌ Balance Mismatch:</strong> Storage slot may be incorrect. Try "Auto-Find Correct Slot".</p>'
+                            ) : ''}
+                            ${proof.balance === '0' && tokenType === 'ERC20' ? 
+                                '<p style="color: #856404; background: #fff3cd; padding: 8px; border-radius: 4px;"><strong>ℹ️ Zero Balance:</strong> This means you don\'t own any of this specific ERC20 token. This is NOT your ETH balance - it\'s the balance of the token contract you queried. Use "Compare Balances" to verify this is correct.</p>' : ''}
+                            <p><strong>Block Number:</strong> <code>${proof.blockNumber}</code></p>
+                            <p><strong>Block Hash:</strong> <code>${proof.blockHash}</code></p>
+                            <p><strong>Chain ID:</strong> <code>${proof.chainId}</code></p>
+                            ${tokenType === 'ERC721' ? `<p><strong>Token ID:</strong> <code>${tokenId}</code></p>` : ''}
+                        </div>
+
+                        <div class="proof-section">
+                            <h4>🔐 Storage Information</h4>
+                            <p><strong>Storage Key:</strong> <code>${proof.storageKey}</code></p>
+                            <p><strong>Storage Value:</strong> <code>${proof.storageValue}</code></p>
+                            <small>The storage key is calculated as keccak256(userAddress + slot). The storage value is the raw blockchain data at that location.</small>
+                        </div>
+
+                        <div class="proof-section">
+                            <h4>🔍 Cryptographic Proofs</h4>
+                            <p><strong>Account Proof:</strong> ${proof.accountProof.length} proof elements</p>
+                            <small style="margin-bottom: 10px; display: block;">Proves the contract account exists in the blockchain state tree</small>
+                            <details>
+                                <summary>View Account Proof (click to expand)</summary>
+                                <textarea readonly rows="4">${JSON.stringify(proof.accountProof, null, 2)}</textarea>
+                            </details>
+                            
+                            <p style="margin-top: 15px;"><strong>Storage Proof:</strong> ${proof.storageProof.length} proof elements</p>
+                            <small style="margin-bottom: 10px; display: block;">Proves the specific storage slot value within the contract's storage</small>
+                            <details>
+                                <summary>View Storage Proof (click to expand)</summary>
+                                <textarea readonly rows="4">${JSON.stringify(proof.storageProof, null, 2)}</textarea>
+                            </details>
+                        </div>
+
+                        <div class="proof-section">
+                            <h4>RLP Encoded Proof</h4>
+                            <textarea readonly rows="3">${proof.rlpEncodedProof}</textarea>
+                            <small>This encoded proof can be transmitted and verified on other systems.</small>
+                        </div>
+
+                        <div class="proof-section">
+                            <h4>Complete Witness Data</h4>
+                            <details>
+                                <summary>View Complete Proof Object (click to expand)</summary>
+                                <textarea readonly rows="15">${JSON.stringify(proof, null, 2)}</textarea>
+                            </details>
+                        </div>
+
+                        <p><small><strong>🎉 This is REAL blockchain data!</strong> No more mock/fake data - this proof was generated using actual MetaMask eth_getProof calls and can be verified on-chain.</small></p>
+                    </div>
+                `;
+
+            } catch (error) {
+                console.error('❌ Proof generation failed:', error);
+                
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <strong>❌ Proof Generation Failed</strong><br>
+                        ${error.message}<br>
+                        <small>Make sure MetaMask is connected and the contract address is valid. Note: this error means we tried to fetch REAL data and something went wrong - no more fake data!</small>
+                    </div>
+                `;
+            }
+        }
+
+        // Listen for MetaMask account/chain changes
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', (accounts) => {
+                if (accounts.length === 0) {
+                    // User disconnected
+                    location.reload();
+                } else {
+                    refreshWalletInfo();
+                }
+            });
+
+            window.ethereum.on('chainChanged', (chainId) => {
+                refreshWalletInfo();
+            });
+        }
+
+        // Check if MetaMask is available on page load
+        window.addEventListener('load', () => {
+            if (!window.ethereum) {
+                const walletStatus = document.getElementById('walletStatus');
+                walletStatus.innerHTML = `
+                    <div class="result error">
+                        <strong>❌ MetaMask Not Found</strong><br>
+                        Please install the MetaMask browser extension to use this tool.<br>
+                        <a href="https://metamask.io/download/" target="_blank">Download MetaMask</a>
+                    </div>
+                `;
+                walletStatus.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

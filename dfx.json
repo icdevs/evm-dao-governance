@@ -1,0 +1,20 @@
+{
+  "canisters": {
+    "main": {
+      "main": "./src/main.mo",
+      "type": "motoko"
+    },
+     "evm_rpc": {
+      "id": "7hfb6-caaaa-aaaar-qadga-cai",
+      "type": "pull"
+    }
+
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": "mops sources"
+    }
+  },
+  "version": 1
+}

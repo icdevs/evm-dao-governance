@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaMask Balance Proof Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007cba;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #005a87;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .connected {
+            background-color: #28a745;
+        }
+        .connected:hover {
+            background-color: #218838;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            word-break: break-all;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .loading {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .proof-section {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .proof-section h4 {
+            margin-top: 0;
+        }
+        code {
+            background-color: #f1f1f1;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        small {
+            color: #666;
+            font-size: 12px;
+            display: block;
+            margin-top: 5px;
+        }
+        .wallet-info {
+            background-color: #e8f5e8;
+            border: 1px solid #4caf50;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .wallet-info strong {
+            color: #2e7d32;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🦊 MetaMask Balance Proof Generator</h1>
+        <p>Generate cryptographic proofs of ERC20 token balances or ERC721 token ownership using your MetaMask wallet. No RPC endpoints required!</p>
+        
+        <div id="walletStatus" class="result" style="display: none;"></div>
+        
+        <form id="proofForm">
+            <div class="form-group">
+                <label for="contractAddress">Contract Address:</label>
+                <input type="text" id="contractAddress" placeholder="0xA0b86a33E6441f8F20e2DC5dCb5E32C8A6b8e68a" required>
+            </div>
+
+            <div class="form-group">
+                <label for="tokenType">Token Type:</label>
+                <select id="tokenType" required>
+                    <option value="ERC20">ERC20 (Fungible Token)</option>
+                    <option value="ERC721">ERC721 (NFT)</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="tokenIdGroup" style="display: none;">
+                <label for="tokenId">Token ID (for ERC721):</label>
+                <input type="text" id="tokenId" placeholder="1234">
+            </div>
+
+            <div class="form-group">
+                <label for="blockTag">Block Tag:</label>
+                <select id="blockTag" required>
+                    <option value="latest">Latest Block</option>
+                    <option value="finalized">Finalized Block</option>
+                    <option value="safe">Safe Block</option>
+                    <option value="custom">Custom Block Number</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="customBlockGroup" style="display: none;">
+                <label for="customBlock">Block Number:</label>
+                <input type="number" id="customBlock" placeholder="18500000">
+            </div>
+
+            <div class="form-group">
+                <label for="slotIndex">Storage Slot Index (Advanced):</label>
+                <input type="number" id="slotIndex" placeholder="0 for ERC20, 2 for ERC721" min="0">
+                <small>Most ERC20 contracts use slot 0 for balances, ERC721 contracts use slot 2 for ownership</small>
+            </div>
+
+            <button type="button" id="connectBtn">Connect MetaMask</button>
+            <button type="submit" id="generateBtn" disabled>Generate Proof</button>
+        </form>
+
+        <div id="result" style="display: none;"></div>
+    </div>
+
+    <script type="module">
+        // This would import from your built TypeScript module
+        // import { MetaMaskBalanceProofGenerator } from './metamask-balance-proof.js';
+        
+        // For demo purposes, we'll simulate the MetaMask functionality
+        class MockMetaMaskBalanceProofGenerator {
+            constructor() {
+                this.isConnected = false;
+                this.userAddress = null;
+                this.chainId = null;
+            }
+
+            static isMetaMaskAvailable() {
+                return typeof window.ethereum !== 'undefined';
+            }
+
+            async connectWallet() {
+                if (!MockMetaMaskBalanceProofGenerator.isMetaMaskAvailable()) {
+                    throw new Error('MetaMask not found. Please install MetaMask to use this feature.');
+                }
+                
+                // Simulate wallet connection
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                this.isConnected = true;
+                this.userAddress = '0x742d35Cc6634C0532925a3b8D4Ad53f38E5bC2E4';
+                this.chainId = 1;
+                
+                return this.userAddress;
+            }
+
+            async getChainId() {
+                return this.chainId || 1;
+            }
+
+            async getCurrentAccount() {
+                return this.isConnected ? this.userAddress : null;
+            }
+
+            async generateERC20BalanceProof(request) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                return this.createMockResult('ERC20', request);
+            }
+
+            async generateERC721OwnershipProof(request) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                return this.createMockResult('ERC721', request);
+            }
+
+            createMockResult(tokenType, request) {
+                const blockNumber = typeof request.blockTag === 'number' ? request.blockTag : 18500000;
+                
+                return {
+                    userAddress: this.userAddress,
+                    balance: tokenType === 'ERC20' ? '1000000000000000000' : '1',
+                    blockHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+                    blockNumber: blockNumber,
+                    accountProof: ['0xproof1', '0xproof2', '0xproof3'],
+                    storageProof: ['0xstorageproof1', '0xstorageproof2'],
+                    storageKey: '0xstoragekey123',
+                    storageValue: tokenType === 'ERC20' ? '0x0de0b6b3a7640000' : '0x' + this.userAddress.slice(2).padStart(64, '0'),
+                    rlpEncodedProof: '0xf90211a0' + '1234'.repeat(100),
+                    chainId: this.chainId,
+                    witness: {
+                        blockHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+                        blockNumber: blockNumber,
+                        userAddress: this.userAddress,
+                        contractAddress: request.contractAddress,
+                        storageKey: '0xstoragekey123',
+                        storageValue: tokenType === 'ERC20' ? '0x0de0b6b3a7640000' : '0x' + this.userAddress.slice(2).padStart(64, '0'),
+                        accountProof: ['0xproof1', '0xproof2', '0xproof3'],
+                        storageProof: ['0xstorageproof1', '0xstorageproof2'],
+                        chainId: this.chainId,
+                        tokenType: tokenType,
+                        tokenId: request.tokenId
+                    }
+                };
+            }
+        }
+
+        // DOM elements
+        const form = document.getElementById('proofForm');
+        const tokenTypeSelect = document.getElementById('tokenType');
+        const tokenIdGroup = document.getElementById('tokenIdGroup');
+        const blockTagSelect = document.getElementById('blockTag');
+        const customBlockGroup = document.getElementById('customBlockGroup');
+        const resultDiv = document.getElementById('result');
+        const walletStatusDiv = document.getElementById('walletStatus');
+        const connectBtn = document.getElementById('connectBtn');
+        const generateBtn = document.getElementById('generateBtn');
+
+        // Initialize the proof generator
+        const generator = new MockMetaMaskBalanceProofGenerator();
+
+        // Check MetaMask availability on load
+        if (!MockMetaMaskBalanceProofGenerator.isMetaMaskAvailable()) {
+            walletStatusDiv.style.display = 'block';
+            walletStatusDiv.className = 'result error';
+            walletStatusDiv.innerHTML = `
+                <h3>❌ MetaMask Not Found</h3>
+                <p>Please install MetaMask to use this application.</p>
+                <p><a href="https://metamask.io/download/" target="_blank">Download MetaMask</a></p>
+            `;
+            connectBtn.disabled = true;
+        }
+
+        // Show/hide token ID field based on token type
+        tokenTypeSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'ERC721') {
+                tokenIdGroup.style.display = 'block';
+                document.getElementById('tokenId').required = true;
+            } else {
+                tokenIdGroup.style.display = 'none';
+                document.getElementById('tokenId').required = false;
+            }
+            
+            // Update slot index placeholder
+            const slotInput = document.getElementById('slotIndex');
+            slotInput.placeholder = e.target.value === 'ERC20' ? '0' : '2';
+            if (!slotInput.value) {
+                slotInput.value = e.target.value === 'ERC20' ? '0' : '2';
+            }
+        });
+
+        // Show/hide custom block input based on block tag
+        blockTagSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'custom') {
+                customBlockGroup.style.display = 'block';
+                document.getElementById('customBlock').required = true;
+            } else {
+                customBlockGroup.style.display = 'none';
+                document.getElementById('customBlock').required = false;
+            }
+        });
+
+        // Connect wallet button
+        connectBtn.addEventListener('click', async () => {
+            connectBtn.disabled = true;
+            connectBtn.textContent = 'Connecting...';
+            
+            try {
+                const userAddress = await generator.connectWallet();
+                const chainId = await generator.getChainId();
+                
+                // Update UI
+                connectBtn.textContent = '✅ Connected';
+                connectBtn.classList.add('connected');
+                generateBtn.disabled = false;
+                
+                // Show wallet status
+                walletStatusDiv.style.display = 'block';
+                walletStatusDiv.className = 'result wallet-info';
+                walletStatusDiv.innerHTML = `
+                    <strong>Wallet Connected:</strong> ${userAddress}<br>
+                    <strong>Chain ID:</strong> ${chainId}
+                `;
+                
+            } catch (error) {
+                walletStatusDiv.style.display = 'block';
+                walletStatusDiv.className = 'result error';
+                walletStatusDiv.innerHTML = `
+                    <h3>❌ Connection Failed</h3>
+                    <p>${error.message}</p>
+                `;
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect MetaMask';
+            }
+        });
+
+        // Handle form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const contractAddress = document.getElementById('contractAddress').value;
+            const tokenType = document.getElementById('tokenType').value;
+            const tokenId = document.getElementById('tokenId').value;
+            const blockTag = document.getElementById('blockTag').value;
+            const customBlock = document.getElementById('customBlock').value;
+            const slotIndex = parseInt(document.getElementById('slotIndex').value) || (tokenType === 'ERC20' ? 0 : 2);
+
+            // Determine final block tag
+            const finalBlockTag = blockTag === 'custom' ? parseInt(customBlock) : blockTag;
+
+            // Disable form and show loading
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating Proof...';
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.innerHTML = '<p>🔄 Generating proof using MetaMask... This may take a few seconds.</p>';
+
+            try {
+                let result;
+                const request = {
+                    contractAddress,
+                    blockTag: finalBlockTag,
+                    slotIndex
+                };
+
+                if (tokenType === 'ERC721') {
+                    if (!tokenId) {
+                        throw new Error('Token ID is required for ERC721');
+                    }
+                    request.tokenId = tokenId;
+                    result = await generator.generateERC721OwnershipProof(request);
+                } else {
+                    result = await generator.generateERC20BalanceProof(request);
+                }
+
+                const balanceDisplay = tokenType === 'ERC20' 
+                    ? `${(parseInt(result.balance) / 1e18).toFixed(4)} tokens`
+                    : result.balance === '1' ? 'Owns token' : 'Does not own token';
+
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `
+                    <h3>✅ Proof Generated Successfully!</h3>
+                    <p><strong>Wallet Address:</strong> <code>${result.userAddress}</code></p>
+                    <p><strong>Balance/Ownership:</strong> ${balanceDisplay}</p>
+                    <p><strong>Block Number:</strong> ${result.blockNumber}</p>
+                    <p><strong>Block Hash:</strong> <code>${result.blockHash}</code></p>
+                    <p><strong>Chain ID:</strong> ${result.chainId}</p>
+                    
+                    <div class="proof-section">
+                        <h4>🔐 RLP Encoded Proof</h4>
+                        <p>This is the compact, cryptographically verifiable proof:</p>
+                        <textarea readonly rows="4">${result.rlpEncodedProof}</textarea>
+                    </div>
+                    
+                    <div class="proof-section">
+                        <h4>🔑 Storage Information</h4>
+                        <p><strong>Storage Key:</strong> <code>${result.storageKey}</code></p>
+                        <p><strong>Storage Value:</strong> <code>${result.storageValue}</code></p>
+                        <p><strong>Slot Index:</strong> ${slotIndex}</p>
+                    </div>
+                    
+                    <div class="proof-section">
+                        <h4>📋 Witness Data</h4>
+                        <pre>${JSON.stringify(result.witness, null, 2)}</pre>
+                    </div>
+                    
+                    <div class="proof-section">
+                        <h4>🛠 How to Use This Proof</h4>
+                        <ul>
+                            <li>The RLP encoded proof can be submitted to smart contracts for verification</li>
+                            <li>The witness data contains all the cryptographic proofs needed</li>
+                            <li>Block hash ensures the proof is tied to a specific blockchain state</li>
+                            <li>Storage proofs verify the exact balance/ownership at that block</li>
+                            <li>No RPC endpoints needed - all data comes directly from MetaMask!</li>
+                        </ul>
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Error Generating Proof</h3>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p>Please check your inputs and try again. Common issues:</p>
+                    <ul>
+                        <li>MetaMask is not connected or locked</li>
+                        <li>Invalid contract address format</li>
+                        <li>Contract doesn't exist on the current network</li>
+                        <li>Block number is too recent or doesn't exist</li>
+                        <li>Storage slot index might be incorrect for this contract</li>
+                    </ul>
+                `;
+            } finally {
+                // Re-enable form
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Generate Proof';
+            }
+        });
+
+        // Pre-fill with example values
+        document.getElementById('contractAddress').value = '0xA0b86a33E6441f8F20e2DC5dCb5E32C8A6b8e68a';
+        document.getElementById('slotIndex').value = '0';
+
+        // Check if already connected on page load
+        window.addEventListener('load', async () => {
+            try {
+                const currentAccount = await generator.getCurrentAccount();
+                if (currentAccount) {
+                    // Auto-connect if already authorized
+                    connectBtn.click();
+                }
+            } catch (error) {
+                // Ignore errors on initial load
+            }
+        });
+    </script>
+</body>
+</html>
