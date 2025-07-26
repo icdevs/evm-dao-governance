@@ -1,2 +1,4 @@
 src/declarations/
 package-lock.json
+.mops/
+.dfx/
