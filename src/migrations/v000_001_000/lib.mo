@@ -54,6 +54,7 @@ module {
           };
 
           let adminTree = BTree.init<Principal, Bool>(null);
+          
           for (admin in admin_principals.vals()) {
             ignore BTree.insert(adminTree, Principal.compare, admin, true);
           };
@@ -76,6 +77,8 @@ module {
           let executionTree = BTree.init<Text, v0_1_0.ExecutionContractConfig>(null);
           let icpMethodsTree = BTree.init<Text, v0_1_0.ICPMethodConfig>(null);
           let adminTree = BTree.init<Principal, Bool>(null);
+          D.print("Adding admin principal: " # Principal.toText(_caller));
+          ignore BTree.insert(adminTree, Principal.compare, _caller, true);
           
           // Add a default snapshot contract for backward compatibility
           let defaultSnapshotContract : v0_1_0.SnapshotContractConfig = {

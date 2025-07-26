@@ -174,6 +174,12 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
         evmdaobridge.icrc149_verify_witness(witness, proposal_id);
     };
 
+    // Test helper function to add snapshots for testing with chain_id
+    public shared(msg) func icrc149_add_test_snapshot(proposal_id: Nat, block_number: Nat, state_root: Blob, contract_address: Text, chain_id: Nat, network_name: Text) : async () {
+        D.print("Adding test snapshot for validation testing with chain_id: " # Nat.toText(chain_id));
+        evmdaobridge.icrc149_add_test_snapshot_with_chain(proposal_id, block_number, state_root, contract_address, chain_id, network_name);
+    };
+
     // Proposal Management
     public shared(msg) func icrc149_create_proposal(proposal_args: {action: {#Motion: Text; #EthTransaction: Service.EthTx}; metadata: ?Text; members: [{id: Principal; votingPower: Nat}]; snapshot_contract: ?Text}) : async {#Ok: Nat; #Err: Text} {
         D.print("Creating proposal");
@@ -242,6 +248,12 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
     public shared func test_add_snapshot(contract_address: Text, block_number: Nat, root_hash: Text) : async {#Ok: (); #Err: Text} {
         D.print("Test helper: Adding snapshot for " # contract_address # " at block " # Nat.toText(block_number));
         evmdaobridge.test_add_snapshot(contract_address, block_number, root_hash);
+    };
+
+    // Test helper function to calculate storage key using the same logic as witness validation
+    public query func icrc149_calculate_test_storage_key(userAddress: Blob, slot: Nat) : async Blob {
+        D.print("Test helper: Calculating storage key for slot " # Nat.toText(slot));
+        evmdaobridge.icrc149_calculate_test_storage_key(userAddress, slot);
     };
 
     // Helper function for testing - get snapshot info

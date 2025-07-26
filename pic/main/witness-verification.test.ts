@@ -3,8 +3,8 @@ import { ethers, JsonRpcProvider } from "ethers";
 import { PocketIc, createIdentity } from "@dfinity/pic";
 import { Principal } from "@dfinity/principal";
 import { IDL } from "@dfinity/candid";
-import { idlFactory } from "../src/declarations/main/main.did.js";
-import type { EvmDaoBridgeCanister, Witness__1, WitnessResult } from "../src/declarations/main/main.did.d.ts";
+import { idlFactory } from "../../src/declarations/main/main.did.js";
+import type { EvmDaoBridgeCanister, Witness__1, WitnessResult } from "../../src/declarations/main/main.did.js";
 
 const admin = createIdentity("admin");
 

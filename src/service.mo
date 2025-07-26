@@ -256,6 +256,9 @@ module {
     icrc149_set_controller: (Principal) -> async Result<(), Text>;
     icrc149_health_check: query () -> async Text;
 
+    // Test helpers
+    icrc149_calculate_test_storage_key: query (Blob, Nat) -> async Blob;
+
     // Standard Compliance
     icrc10_supported_standards: query () -> async [{ name: Text; url: Text }];
   };

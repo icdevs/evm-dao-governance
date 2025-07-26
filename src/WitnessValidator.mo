@@ -408,6 +408,12 @@ module {
       storageProof = Buffer.toArray(storageProofBlobs);
     })
   };
+
+  // Public helper function for tests to calculate storage key using the same logic
+  public func calculateStorageKeyHelper(userAddress: Blob, slot: Nat) : Blob {
+    calculateStorageKey(userAddress, slot);
+  };
+
 }
     
     

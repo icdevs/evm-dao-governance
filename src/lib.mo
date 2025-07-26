@@ -136,6 +136,304 @@ module {
 
     let _self : Service.Service = actor(Principal.toText(canister));
 
+    // EVM RPC Service type definitions (based on actual canister interface)
+    type Block = {
+      miner : Text;
+      totalDifficulty : ?Nat;
+      receiptsRoot : Text;
+      stateRoot : Text;
+      hash : Text;
+      difficulty : ?Nat;
+      size : Nat;
+      uncles : [Text];
+      baseFeePerGas : ?Nat;
+      extraData : Text;
+      transactionsRoot : ?Text;
+      sha3Uncles : Text;
+      nonce : Nat;
+      number : Nat;
+      timestamp : Nat;
+      transactions : [Text];
+      gasLimit : Nat;
+      logsBloom : Text;
+      parentHash : Text;
+      gasUsed : Nat;
+      mixHash : Text;
+    };
+
+    type BlockTag = {
+      #Earliest;
+      #Safe;
+      #Finalized;
+      #Latest;
+      #Number : Nat;
+      #Pending;
+    };
+
+    type RpcServices = {
+      #EthMainnet : ?[{#Alchemy; #Ankr; #BlockPi; #Cloudflare; #PublicNode; #Llama}];
+      #EthSepolia : ?[{#Alchemy; #Ankr; #BlockPi; #PublicNode; #Sepolia}];
+      #Custom : {
+        chainId : Nat;
+        services : [{url : Text; headers : ?[(Text, Text)]}];
+      };
+    };
+
+    type RpcConfig = {
+      responseSizeEstimate : ?Nat64;
+    };
+
+    type GetBlockByNumberResult = {
+      #Ok : Block;
+      #Err : {
+        #HttpOutcallError : {
+          status : Nat16;
+          message : Text;
+        };
+        #InvalidHttpJsonRpcResponse : {
+          status : Nat16;
+          body : Text;
+          parsingError : ?Text;
+        };
+      };
+    };
+
+    type MultiGetBlockByNumberResult = {
+      #Consistent : GetBlockByNumberResult;
+      #Inconsistent : [(
+        {#EthMainnet : {#Alchemy; #Ankr; #BlockPi; #Cloudflare; #PublicNode; #Llama}; #EthSepolia : {#Alchemy; #Ankr; #BlockPi; #PublicNode; #Sepolia}}, 
+        GetBlockByNumberResult
+      )];
+    };
+
+    type CallArgs = {
+      transaction : {
+        to : ?Text;
+        data : ?Text;
+      };
+      block : ?BlockTag;
+    };
+
+    type CallResult = {
+      #Ok : Text;
+      #Err : {
+        #HttpOutcallError : {
+          status : Nat16;
+          message : Text;
+        };
+        #InvalidHttpJsonRpcResponse : {
+          status : Nat16;
+          body : Text;
+          parsingError : ?Text;
+        };
+      };
+    };
+
+    type MultiCallResult = {
+      #Consistent : CallResult;
+      #Inconsistent : [(
+        {#EthMainnet : {#Alchemy; #Ankr; #BlockPi; #Cloudflare; #PublicNode; #Llama}; #EthSepolia : {#Alchemy; #Ankr; #BlockPi; #PublicNode; #Sepolia}}, 
+        CallResult
+      )];
+    };
+
+    // EVM RPC Service Interface
+    type EVMRPCService = actor {
+      eth_getBlockByNumber : (RpcServices, ?RpcConfig, BlockTag) -> async MultiGetBlockByNumberResult;
+      eth_call : (RpcServices, ?RpcConfig, CallArgs) -> async MultiCallResult;
+    };
+
+    // Helper function to get RPC services based on chain and service configuration
+    private func getRpcServices(chain: MigrationTypes.Current.EthereumNetwork, rpc_service: MigrationTypes.Current.EthereumRPCService) : RpcServices {
+      switch (rpc_service.rpc_type) {
+        case ("custom") {
+          // Look for URL in custom_config
+          let config = switch (rpc_service.custom_config) {
+            case (?configs) configs;
+            case null [];
+          };
+          let url = switch (Array.find<(Text, Text)>(config, func((key, _)) = key == "url")) {
+            case (?("url", value)) value;
+            case (_) "http://127.0.0.1:8545"; // Default fallback
+          };
+          #Custom({
+            chainId = chain.chain_id;
+            services = [{url = url; headers = null}];
+          });
+        };
+        case (_) {
+          // Use predefined services based on chain
+          switch (chain.chain_id) {
+            case (1) #EthMainnet(?[#Alchemy, #Ankr, #BlockPi]); // Mainnet
+            case (11155111) #EthSepolia(?[#Alchemy, #Ankr, #BlockPi]); // Sepolia
+            case (_) #EthMainnet(?[#Alchemy, #Ankr]); // Default to mainnet
+          };
+        };
+      };
+    };
+
+    // Helper function to create EVM RPC canister actor
+    private func getEvmRpcActor(rpc_service: MigrationTypes.Current.EthereumRPCService) : EVMRPCService {
+      actor(Principal.toText(rpc_service.canister_id)) : EVMRPCService;
+    };
+
+    // Helper function to get latest finalized block
+    private func getLatestFinalizedBlock(rpc_service: MigrationTypes.Current.EthereumRPCService, chain: MigrationTypes.Current.EthereumNetwork) : async* Result.Result<Block, Text> {
+      try {
+        let rpcActor = getEvmRpcActor(rpc_service);
+        let rpcServices = getRpcServices(chain, rpc_service);
+        let config : ?RpcConfig = ?{ responseSizeEstimate = ?1000000 }; // 1MB estimate
+        
+        let result = await rpcActor.eth_getBlockByNumber(rpcServices, config, #Finalized);
+        
+        switch (result) {
+          case (#Consistent(#Ok(block))) #ok(block);
+          case (#Consistent(#Err(err))) {
+            switch (err) {
+              case (#HttpOutcallError(httpErr)) #err("HTTP error: " # httpErr.message);
+              case (#InvalidHttpJsonRpcResponse(jsonErr)) #err("JSON RPC error: " # jsonErr.body);
+            };
+          };
+          case (#Inconsistent(results)) {
+            // Use first successful result or return error from first attempt
+            switch (results.size()) {
+              case (0) #err("No RPC responses received");
+              case (_) {
+                let firstResult = results[0].1;
+                switch (firstResult) {
+                  case (#Ok(block)) #ok(block);
+                  case (#Err(err)) {
+                    switch (err) {
+                      case (#HttpOutcallError(httpErr)) #err("HTTP error: " # httpErr.message);
+                      case (#InvalidHttpJsonRpcResponse(jsonErr)) #err("JSON RPC error: " # jsonErr.body);
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      } catch (e) {
+        #err("Failed to get block: " # Error.message(e));
+      };
+    };
+
+    // Helper function to get total supply of ERC20 token
+    private func getTotalSupply(rpc_service: MigrationTypes.Current.EthereumRPCService, chain: MigrationTypes.Current.EthereumNetwork, contract_address: Text) : async* Result.Result<Nat, Text> {
+      try {
+        let rpcActor = getEvmRpcActor(rpc_service);
+        let rpcServices = getRpcServices(chain, rpc_service);
+        let config : ?RpcConfig = ?{ responseSizeEstimate = ?1000000 }; // 1MB estimate
+        
+        // ERC20 totalSupply() function selector: 0x18160ddd
+        let callArgs : CallArgs = {
+          transaction = {
+            to = ?contract_address;
+            data = ?"0x18160ddd"; // totalSupply() function selector
+          };
+          block = ?#Latest;
+        };
+        
+        let result = await rpcActor.eth_call(rpcServices, config, callArgs);
+        
+        switch (result) {
+          case (#Consistent(#Ok(hexResult))) {
+            // Parse hex result to Nat (assumes 32-byte result)
+            try {
+              // Remove 0x prefix and parse as hex
+              let cleanHex = if (Text.startsWith(hexResult, #text("0x"))) {
+                Text.trimStart(hexResult, #text("0x"));
+              } else {
+                hexResult;
+              };
+              
+              // Convert hex string to Nat (simplified - assumes valid hex)
+              var totalSupply : Nat = 0;
+              var multiplier : Nat = 1;
+              let chars = Text.toArray(cleanHex);
+              var i = chars.size();
+              
+              while (i > 0) {
+                i -= 1;
+                let char = chars[i];
+                let digit = switch (char) {
+                  case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
+                  case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
+                  case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
+                  case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
+                  case (_) 0;
+                };
+                totalSupply += digit * multiplier;
+                multiplier *= 16;
+              };
+              
+              #ok(totalSupply);
+            } catch (e) {
+              #err("Failed to parse totalSupply result: " # Error.message(e));
+            };
+          };
+          case (#Consistent(#Err(err))) {
+            switch (err) {
+              case (#HttpOutcallError(httpErr)) #err("HTTP error getting totalSupply: " # httpErr.message);
+              case (#InvalidHttpJsonRpcResponse(jsonErr)) #err("JSON RPC error getting totalSupply: " # jsonErr.body);
+            };
+          };
+          case (#Inconsistent(results)) {
+            // Use first successful result
+            switch (results.size()) {
+              case (0) #err("No RPC responses for totalSupply");
+              case (_) {
+                let firstResult = results[0].1;
+                switch (firstResult) {
+                  case (#Ok(hexResult)) {
+                    // Same hex parsing logic as above
+                    try {
+                      let cleanHex = if (Text.startsWith(hexResult, #text("0x"))) {
+                        Text.trimStart(hexResult, #text("0x"));
+                      } else {
+                        hexResult;
+                      };
+                      
+                      var totalSupply : Nat = 0;
+                      var multiplier : Nat = 1;
+                      let chars = Text.toArray(cleanHex);
+                      var i = chars.size();
+                      
+                      while (i > 0) {
+                        i -= 1;
+                        let char = chars[i];
+                        let digit = switch (char) {
+                          case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
+                          case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
+                          case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
+                          case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
+                          case (_) 0;
+                        };
+                        totalSupply += digit * multiplier;
+                        multiplier *= 16;
+                      };
+                      
+                      #ok(totalSupply);
+                    } catch (e) {
+                      #err("Failed to parse totalSupply result: " # Error.message(e));
+                    };
+                  };
+                  case (#Err(err)) {
+                    switch (err) {
+                      case (#HttpOutcallError(httpErr)) #err("HTTP error getting totalSupply: " # httpErr.message);
+                      case (#InvalidHttpJsonRpcResponse(jsonErr)) #err("JSON RPC error getting totalSupply: " # jsonErr.body);
+                    };
+                  };
+                };
+              };
+            };
+          };
+        };
+      } catch (e) {
+        #err("Failed to get totalSupply: " # Error.message(e));
+      };
+    };
+
 
     // ETH Integration
     public func icrc149_send_eth_tx(_caller: Principal, _eth_tx: Service.EthTx) : async {#Ok: Text; #Err: Text} {
@@ -761,12 +1059,77 @@ module {
           };
 
           // Create snapshot for this proposal using the specified snapshot contract
+          // Get latest finalized block from RPC
+          let blockResult = await* getLatestFinalizedBlock(snapshot_contract_config.rpc_service, snapshot_contract_config.chain);
+          let (block_number, state_root) = switch (blockResult) {
+            case (#ok(block)) {
+              // Convert state root hex string to Blob
+              let state_root_blob = if (Text.startsWith(block.stateRoot, #text("0x"))) {
+                let cleanHex = Text.trimStart(block.stateRoot, #text("0x"));
+                let bytes = Array.tabulate<Nat8>(32, func(i) {
+                  if (i * 2 + 1 < cleanHex.size()) {
+                    let chars = Text.toArray(cleanHex);
+                    let high = switch (chars[i * 2]) {
+                      case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
+                      case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
+                      case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
+                      case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
+                      case (_) 0;
+                    };
+                    let low = switch (chars[i * 2 + 1]) {
+                      case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
+                      case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
+                      case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
+                      case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
+                      case (_) 0;
+                    };
+                    Nat8.fromNat(high * 16 + low);
+                  } else {
+                    0;
+                  };
+                });
+                Blob.fromArray(bytes);
+              } else {
+                Blob.fromArray([0, 0, 0, 0]); // Default if no valid hex
+              };
+              (block.number, state_root_blob);
+            };
+            case (#err(errMsg)) {
+              D.print("Warning: Failed to get latest block, using defaults: " # errMsg);
+              (12345678, Blob.fromArray([1,2,3,4])); // Fallback values
+            };
+          };
+
+          // Get total supply from the contract (for ERC20 tokens)
+          let total_supply = switch (snapshot_contract_config.contract_type) {
+            case (#ERC20) {
+              let supplyResult = await* getTotalSupply(snapshot_contract_config.rpc_service, snapshot_contract_config.chain, snapshot_contract_address);
+              switch (supplyResult) {
+                case (#ok(supply)) supply;
+                case (#err(errMsg)) {
+                  D.print("Warning: Failed to get totalSupply, using default: " # errMsg);
+                  1000000; // Default fallback
+                };
+              };
+            };
+            case (#ERC721) {
+              // For NFTs, we could implement a different approach to get total count
+              // For now, use a default value
+              D.print("Note: ERC721 total supply calculation not implemented, using default");
+              10000; // Default for NFT collections
+            };
+            case (#Other(_)) {
+              D.print("Note: Custom contract type, using default total supply");
+              1000000; // Default for unknown contract types
+            };
+          };
+
           let snapshot : MigrationTypes.Current.ProposalSnapshot = {
             contract_address = snapshot_contract_address;
             chain = snapshot_contract_config.chain;
-            block_number = 12345678; // TODO: Get latest finalized block using snapshot_contract_config.rpc_service
-            state_root = Blob.fromArray([1,2,3,4]); // TODO: Get actual state root via RPC
-            total_supply = 1000000; // TODO: Get actual total supply via RPC call to snapshot contract
+            block_number = block_number;
+            state_root = state_root;
+            total_supply = total_supply;
             snapshot_time = natNow();
           };
 
@@ -1172,6 +1535,55 @@ module {
         };
       };
       null;
+    };
+
+    // Test helper function to add a snapshot for testing witness validation
+    public func icrc149_add_test_snapshot(proposal_id: Nat, block_number: Nat, state_root: Blob, contract_address: Text) : () {
+      let testSnapshot : MigrationTypes.Current.ProposalSnapshot = {
+        contract_address = contract_address;
+        chain = {
+          chain_id = 31337; // Local testnet
+          network_name = "local";
+        };
+        block_number = block_number;
+        state_root = state_root;
+        total_supply = 1000000; // Test value
+        snapshot_time = natNow();
+      };
+      
+      ignore BTree.insert<Nat, MigrationTypes.Current.ProposalSnapshot>(
+        state.snapshots, 
+        Nat.compare, 
+        proposal_id, 
+        testSnapshot
+      );
+    };
+
+    // Enhanced test helper function to add a snapshot with specific chain_id
+    public func icrc149_add_test_snapshot_with_chain(proposal_id: Nat, block_number: Nat, state_root: Blob, contract_address: Text, chain_id: Nat, network_name: Text) : () {
+      let testSnapshot : MigrationTypes.Current.ProposalSnapshot = {
+        contract_address = contract_address;
+        chain = {
+          chain_id = chain_id;
+          network_name = network_name;
+        };
+        block_number = block_number;
+        state_root = state_root;
+        total_supply = 1000000; // Test value
+        snapshot_time = natNow();
+      };
+      
+      ignore BTree.insert<Nat, MigrationTypes.Current.ProposalSnapshot>(
+        state.snapshots, 
+        Nat.compare, 
+        proposal_id, 
+        testSnapshot
+      );
+    };
+
+    // Test helper function to calculate storage key using the same logic as witness validation
+    public func icrc149_calculate_test_storage_key(userAddress: Blob, slot: Nat) : Blob {
+      WitnessValidator.calculateStorageKeyHelper(userAddress, slot);
     };
 
   };

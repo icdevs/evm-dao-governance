@@ -14,7 +14,9 @@
     "deploy:anvil": "npx hardhat run scripts/deploy.ts --network anvil",
     "test:anvil": "npx hardhat run test-eth-proof.ts --network anvil",
     "test:witness": "jest pic/witness-verification.test.ts",
-    "test:witness:anvil": "concurrently \"npm run anvil\" \"sleep 5 && npm run test:witness\" --kill-others --success first"
+    "test:witness:anvil": "concurrently \"npm run anvil\" \"sleep 5 && npm run test:witness\" --kill-others --success first",
+    "test:snapshot": "jest pic/main/basic-snapshot.test.ts",
+    "test:snapshot:anvil": "concurrently \"npm run anvil\" \"sleep 5 && npm run test:snapshot\" --kill-others --success first"
   },
   "type": "module",
   "keywords": [],
