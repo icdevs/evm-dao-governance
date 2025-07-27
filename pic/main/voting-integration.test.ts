@@ -422,18 +422,20 @@ Issued At: ${new Date().toISOString()}`;
       [erc721Config]
     );
 
-    // Verify both were added correctly
+    // Verify both were added correctly (plus default contract)
     const contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
     console.log("Configured contracts with storage slots:", contracts);
 
-    expect(contracts).toHaveLength(2);
+    expect(contracts).toHaveLength(3); // Includes the default 0x000... contract
     
-    // Find and verify each contract config
+    // Find and verify each contract config (excluding the default contract)
     const erc20Found = contracts.find(([addr, _]) => addr === "0x1111111111111111111111111111111111111111");
     const erc721Found = contracts.find(([addr, _]) => addr === "0x2222222222222222222222222222222222222222");
+    const defaultFound = contracts.find(([addr, _]) => addr === "0x0000000000000000000000000000000000000000");
 
     expect(erc20Found).toBeDefined();
     expect(erc721Found).toBeDefined();
+    expect(defaultFound).toBeDefined();
 
     if (erc20Found && erc721Found) {
       expect(erc20Found[1].balance_storage_slot).toBe(0n);
@@ -441,6 +443,13 @@ Issued At: ${new Date().toISOString()}`;
       
       expect('ERC20' in erc20Found[1].contract_type).toBe(true);
       expect('ERC721' in erc721Found[1].contract_type).toBe(true);
+    }
+
+    // Verify the default contract exists with expected configuration
+    if (defaultFound) {
+      expect(defaultFound[1].balance_storage_slot).toBe(1n);
+      expect('ERC20' in defaultFound[1].contract_type).toBe(true);
+      expect(defaultFound[1].chain.chain_id).toBe(1n); // mainnet
     }
 
     console.log("✅ Storage slot configuration working correctly");

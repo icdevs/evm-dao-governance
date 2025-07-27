@@ -1,0 +1,261 @@
+import MigrationTypes "./migrations/types";
+import Result "mo:base/Result";
+import Text "mo:base/Text";
+import Blob "mo:base/Blob";
+import Array "mo:base/Array";
+import Nat8 "mo:base/Nat8";
+import Nat "mo:base/Nat";
+import Char "mo:base/Char";
+import Iter "mo:base/Iter";
+import SHA256 "mo:sha2/Sha256";
+import Time "mo:base/Time";
+import Int "mo:base/Int";
+
+module {
+
+  // Re-export types for convenience
+  public type SIWEProof = MigrationTypes.Current.SIWEProof;
+  public type SIWEResult = MigrationTypes.Current.SIWEResult;
+
+  // Helper function to get current time in nanoseconds
+  public func natNow() : Nat {
+    Int.abs(Time.now());
+  };
+
+  // SIWE Authentication with proper anti-replay protection
+  public func verifySiwe(siwe: SIWEProof) : SIWEResult {
+    if (siwe.message == "" or siwe.signature.size() == 0) {
+      return #Err("Invalid SIWE proof: empty message or signature");
+    };
+    
+    // Parse SIWE message according to EIP-4361 format
+    let lines = Text.split(siwe.message, #char('\n'));
+    let lineArray = Iter.toArray(lines);
+    
+    if (lineArray.size() < 8) {
+      return #Err("Invalid SIWE message format: insufficient lines");
+    };
+    
+    // Parse required fields
+    let domain = switch (Text.split(lineArray[0], #text(" wants you to sign in")).next()) {
+      case (?d) d;
+      case (null) return #Err("Invalid SIWE message: missing domain");
+    };
+    
+    let address = lineArray[1];
+    
+    // Parse the statement line: "Vote {choice} on proposal {proposal_id} for contract {contract_address}"
+    let statement = lineArray[3];
+    
+    // Extract vote choice, proposal ID, and contract address from statement
+    let (vote_choice, proposal_id_nat, contract_address) = switch (parseVotingStatement(statement)) {
+      case (#Ok(result)) result;
+      case (#Err(err)) return #Err("Failed to parse voting statement: " # err);
+    };
+    
+    // Parse URI, Version, Chain ID, Nonce, Issued At, Expiration Time
+    var chain_id_nat: Nat = 0;
+    var nonce_text: Text = "";
+    var issued_at_nat: Nat = 0;
+    var issued_at_iso: Text = "";
+    var expiration_time_nat: Nat = 0;
+    var expiration_time_iso: Text = "";
+    
+    for (line in lineArray.vals()) {
+      if (Text.startsWith(line, #text("Chain ID: "))) {
+        let chainIdText = Text.trimStart(line, #text("Chain ID: "));
+        chain_id_nat := switch (Nat.fromText(chainIdText)) {
+          case (?id) id;
+          case (null) 0;
+        };
+      } else if (Text.startsWith(line, #text("Nonce: "))) {
+        nonce_text := Text.trimStart(line, #text("Nonce: "));
+      } else if (Text.startsWith(line, #text("Issued At: "))) {
+        issued_at_iso := Text.trimStart(line, #text("Issued At: "));
+        issued_at_nat := parseTimestamp(issued_at_iso);
+      } else if (Text.startsWith(line, #text("Expiration Time: "))) {
+        expiration_time_iso := Text.trimStart(line, #text("Expiration Time: "));
+        expiration_time_nat := parseTimestamp(expiration_time_iso);
+      };
+    };
+    
+    // Validate time window (must be within 10 minutes = 600 seconds = 600_000_000_000 nanoseconds)
+    let currentTime = natNow();
+    let maxWindowNanos = 600_000_000_000; // 10 minutes in nanoseconds
+    
+    if (expiration_time_nat < currentTime) {
+      return #Err("SIWE message has expired");
+    };
+    
+    if (expiration_time_nat > (currentTime + maxWindowNanos)) {
+      return #Err("SIWE message expiration time is too far in the future");
+    };
+    
+    if (expiration_time_nat > issued_at_nat and (expiration_time_nat - issued_at_nat) > maxWindowNanos) {
+      return #Err("SIWE message validity window is too long");
+    };
+    
+    // CRITICAL: Verify SIWE signature against address - NO BYPASSING ALLOWED
+    switch (verifySiweSignature(siwe.message, siwe.signature, address)) {
+      case (#Ok(_)) {
+        #Ok({
+          address = address;
+          nonce = nonce_text;
+          domain = domain;
+          chain_id = chain_id_nat;
+          vote_choice = vote_choice;
+          proposal_id = proposal_id_nat;
+          contract_address = contract_address;
+        });
+      };
+      case (#Err(err)) #Err("SIWE signature verification failed: " # err);
+    };
+  };
+
+  // Helper function to parse voting statement
+  public func parseVotingStatement(statement: Text) : {#Ok: (Text, Nat, Text); #Err: Text} {
+    // Expected format: "Vote {choice} on proposal {proposal_id} for contract {contract_address}"
+    let parts = Text.split(statement, #char(' '));
+    let partsArray = Iter.toArray(parts);
+    
+    if (partsArray.size() < 8) {
+      return #Err("Invalid voting statement format: insufficient parts");
+    };
+    
+    if (partsArray[0] != "Vote" or partsArray[2] != "on" or partsArray[3] != "proposal" or partsArray[5] != "for" or partsArray[6] != "contract") {
+      return #Err("Invalid voting statement format: unexpected keywords");
+    };
+    
+    let vote_choice = partsArray[1];
+    let proposal_id_text = partsArray[4];
+    let contract_address = partsArray[7];
+    
+    // Validate vote choice
+    if (vote_choice != "Yes" and vote_choice != "No" and vote_choice != "Abstain") {
+      return #Err("Invalid vote choice: must be Yes, No, or Abstain");
+    };
+    
+    // Parse proposal ID
+    let proposal_id = switch (Nat.fromText(proposal_id_text)) {
+      case (?id) id;
+      case (null) return #Err("Invalid proposal ID: not a valid number");
+    };
+    
+    #Ok((vote_choice, proposal_id, contract_address));
+  };
+
+  // Helper function to parse ISO 8601 timestamp to nanoseconds
+  public func parseTimestamp(timestamp: Text) : Nat {
+    // For now, return current time as a placeholder
+    // TODO: Implement proper ISO 8601 parsing
+    natNow()
+  };
+
+  // CRITICAL: Real SIWE signature verification - NO MOCKING ALLOWED
+  public func verifySiweSignature(message: Text, signature: Blob, expectedAddress: Text) : {#Ok: (); #Err: Text} {
+    // This function MUST implement real ECDSA signature verification
+    // If not implemented, the test MUST fail
+    
+    if (signature.size() != 65) {
+      return #Err("Invalid signature length: expected 65 bytes, got " # Nat.toText(signature.size()));
+    };
+    
+    // Extract r, s, v from signature
+    let sigBytes = Blob.toArray(signature);
+    if (sigBytes.size() != 65) {
+      return #Err("Invalid signature byte array length");
+    };
+    
+    let r = Blob.fromArray(Array.subArray(sigBytes, 0, 32));
+    let s = Blob.fromArray(Array.subArray(sigBytes, 32, 32));
+    let v = sigBytes[64];
+    
+    // Hash the message according to EIP-191 standard
+    let messageHash = hashSiweMessage(message);
+    
+    // Recover the public key from the signature
+    switch (recoverEcdsaPublicKey(messageHash, r, s, v)) {
+      case (#Ok(publicKey)) {
+        // Derive Ethereum address from recovered public key
+        let recoveredAddress = deriveEthereumAddressFromPublicKey(publicKey);
+        let normalizedExpected = normalizeEthereumAddress(expectedAddress);
+        let normalizedRecovered = normalizeEthereumAddress(recoveredAddress);
+        
+        if (normalizedExpected == normalizedRecovered) {
+          #Ok(());
+        } else {
+          #Err("Signature verification failed: recovered address does not match expected address");
+        };
+      };
+      case (#Err(err)) #Err("Failed to recover public key: " # err);
+    };
+  };
+
+  // Helper function to hash SIWE message according to EIP-191
+  public func hashSiweMessage(message: Text) : Blob {
+    // EIP-191 prefix: \x19Ethereum Signed Message:\n
+    let prefixBytes = Blob.fromArray([0x19 : Nat8]);
+    let ethMsgBytes = Text.encodeUtf8("Ethereum Signed Message:\n");
+    let messageBytes = Text.encodeUtf8(message);
+    let lengthStr = Nat.toText(messageBytes.size());
+    let lengthBytes = Text.encodeUtf8(lengthStr);
+    
+    // Concatenate: \x19 + "Ethereum Signed Message:\n" + length + message
+    let combinedBytes = Array.append(
+      Array.append(
+        Array.append(Blob.toArray(prefixBytes), Blob.toArray(ethMsgBytes)),
+        Blob.toArray(lengthBytes)
+      ),
+      Blob.toArray(messageBytes)
+    );
+    
+    SHA256.fromBlob(#sha256, Blob.fromArray(combinedBytes));
+  };
+
+  // Helper function to recover ECDSA public key from signature
+  public func recoverEcdsaPublicKey(messageHash: Blob, r: Blob, s: Blob, v: Nat8) : {#Ok: Blob; #Err: Text} {
+    // CRITICAL: This MUST implement real ECDSA recovery
+    // Using secp256k1 curve recovery
+    
+    if (v < 27 or v > 30) {
+      return #Err("Invalid recovery ID: v must be between 27 and 30");
+    };
+    
+    let recoveryId = if (v >= 27) { v - 27 } else { v };
+    
+    // For now, this is a placeholder that will cause tests to fail
+    // Real implementation would use secp256k1 point recovery
+    #Err("ECDSA signature recovery not yet implemented - test should FAIL");
+  };
+
+  // Helper function to derive Ethereum address from public key
+  public func deriveEthereumAddressFromPublicKey(publicKey: Blob) : Text {
+    // CRITICAL: This MUST implement real address derivation
+    // Real implementation would take last 20 bytes of keccak256(publicKey)
+    
+    // For now, return an obviously wrong address to make tests fail
+    "0x0000000000000000000000000000000000000000";
+  };
+
+  // Helper function to normalize Ethereum addresses for comparison
+  public func normalizeEthereumAddress(address: Text) : Text {
+    // Convert to lowercase and ensure 0x prefix
+    let cleanAddr = if (Text.startsWith(address, #text("0x"))) {
+      Text.trimStart(address, #text("0x"));
+    } else {
+      address;
+    };
+    "0x" # Text.map(cleanAddr, func(c: Char) : Char {
+      switch (c) {
+        case ('A') 'a';
+        case ('B') 'b';
+        case ('C') 'c';
+        case ('D') 'd';
+        case ('E') 'e';
+        case ('F') 'f';
+        case (_) c;
+      };
+    });
+  };
+
+}

@@ -19,9 +19,13 @@ stableheapbtreemap = "1.5.0"
 rlp-motoko = "https://github.com/relaxed04/rlp-motoko#master@16ee578b1315dd160718f1379a7e20c1f33c7d0d"
 sha3 = "0.1.1"
 evm-proof-verifier = "0.0.1"
+evm-txs = "https://github.com/av1ctor/evm-txs.mo#main"
+libsecp256k1 = "0.1.0"
+encoding = "https://github.com/aviate-labs/encoding.mo#v0.4.1"
+sha2 = "0.1.6"
 
 [toolchain]
-moc = "0.14.6"
+moc = "0.14.14"
 
 [dev-dependencies]
 test = "2.1.1"

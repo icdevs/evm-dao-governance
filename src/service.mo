@@ -101,9 +101,15 @@ module {
       address: Text;
       domain: Text;
       statement: ?Text;
-      issued_at: Nat;
-      proposal_id: ?Nat;
-      nonce: ?Text;
+      issued_at: Nat;           // Nanoseconds timestamp
+      issued_at_iso: Text;      // ISO 8601 format for human readability  
+      expiration_time: Nat;     // Nanoseconds timestamp, must be within 10 minutes of issued_at
+      expiration_time_iso: Text; // ISO 8601 format for human readability
+      proposal_id: Nat;         // Extracted from message
+      vote_choice: Text;        // Extracted from message ("Yes", "No", "Abstain")
+      contract_address: Text;   // Extracted from message
+      chain_id: Nat;           // Extracted from message
+      nonce: Text;             // Should match expiration_time nanoseconds
     };
     #Err: Text;
   };
@@ -125,7 +131,12 @@ module {
     value: Nat;
     data: Blob;
     chain: EthereumNetwork;
+    subaccount: ?Blob; // Subaccount for derivation path in ECDSA signing
+    maxPriorityFeePerGas: Nat; // Gas parameters for EIP-1559 transactions
+    maxFeePerGas: Nat;
+    gasLimit: Nat;
     signature: ?Blob; // signature for the transaction after execution
+    nonce: ?Nat; // Transaction nonce, set during execution
   };
 
   public type ICPCall = {
@@ -133,8 +144,8 @@ module {
     method: Text; // Method to call
     args: Blob; // Arguments for the method
     cycles: Nat; // Cycles to pay for the call
-    result: ?Blob; // Result of the call, if any
-    error: ?Text; // Error message if the call fails
+    best_effort_timeout: ?Nat32; // Best effort timeout for the call in nanoseconds
+    result: ?{#Ok: Blob; #Err: Text}; // Result of the call once executed
   };
 
   // DAO proposal content specific to EVM bridge
@@ -236,6 +247,9 @@ module {
     // Get proposals with pagination and filtering
     icrc149_get_proposals: query (?Nat, ?Nat, [ProposalInfoFilter]) -> async [Proposal];
 
+    // Get proposal snapshot for a specific proposal
+    icrc149_proposal_snapshot: query (Nat) -> async ProposalSnapshot;
+
     // SIWE Authentication
     icrc149_verify_siwe: (SIWEProof) -> async SIWEResult;
 
@@ -249,15 +263,15 @@ module {
     icrc149_execute_proposal: (Nat) -> async Result<Text, Text>;
 
     // ETH Integration
-    icrc149_send_eth_tx: (EthTx) -> async Result<Text, Text>;
     icrc149_get_eth_tx_status: query (Text) -> async Text;
+
+    // ECDSA Address Management
+    icrc149_get_ethereum_address: query (?Blob) -> async Text;
 
     // Admin
     icrc149_set_controller: (Principal) -> async Result<(), Text>;
+    icrc149_set_default_snapshot_contract: (?Text) -> async Result<(), Text>;
     icrc149_health_check: query () -> async Text;
-
-    // Test helpers
-    icrc149_calculate_test_storage_key: query (Blob, Nat) -> async Blob;
 
     // Standard Compliance
     icrc10_supported_standards: query () -> async [{ name: Text; url: Text }];

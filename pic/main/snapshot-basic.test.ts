@@ -97,11 +97,14 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     const contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
     console.log("Configured snapshot contracts:", contracts);
     
-    expect(contracts).toHaveLength(1);
-    expect(contracts[0][0]).toBe(MOCK_ERC20_CONTRACT);
-    expect(contracts[0][1].contract_address).toBe(MOCK_ERC20_CONTRACT);
-    expect(contracts[0][1].enabled).toBe(true);
-    expect(contracts[0][1].chain.chain_id).toBe(MOCK_CHAIN_ID);
+    expect(contracts).toHaveLength(2); // Includes default contract
+    
+    // Find our contract in the list (may not be first due to default contract)
+    const ourContract = contracts.find(([addr, _]) => addr === MOCK_ERC20_CONTRACT);
+    expect(ourContract).toBeDefined();
+    expect(ourContract![1].contract_address).toBe(MOCK_ERC20_CONTRACT);
+    expect(ourContract![1].enabled).toBe(true);
+    expect(ourContract![1].chain.chain_id).toBe(MOCK_CHAIN_ID);
 
     console.log("✅ Snapshot contract configuration successful");
   });
@@ -212,7 +215,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     const contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
     console.log("All configured contracts:", contracts);
     
-    expect(contracts).toHaveLength(2);
+    expect(contracts).toHaveLength(3); // Includes default contract plus our 2
     
     // Test creating proposals with different snapshot contracts
     const proposal1Request = {
@@ -275,7 +278,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     // Verify no contracts were added
     main_fixture.actor.setIdentity(admin);
     const contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
-    expect(contracts).toHaveLength(0);
+    expect(contracts).toHaveLength(1); // Only the default contract should remain
 
     console.log("✅ Authorization working correctly");
   });
@@ -365,14 +368,14 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
 
     // Verify it was added
     let contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
-    expect(contracts).toHaveLength(1);
+    expect(contracts).toHaveLength(2); // Default contract + our contract
 
     // Remove the contract by passing empty array (null config)
     await main_fixture.actor.icrc149_update_snapshot_contract_config(contractAddress, []);
 
     // Verify it was removed
     contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
-    expect(contracts).toHaveLength(0);
+    expect(contracts).toHaveLength(1); // Only default contract remains
 
     // Try to create proposal with removed contract
     const proposalRequest = {
@@ -393,11 +396,11 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
 
     main_fixture.actor.setIdentity(admin);
 
-    // Initially should be empty
+    // Initially should have only the default contract
     const initialConfig = await main_fixture.actor.icrc149_governance_config();
     console.log("Initial governance config:", initialConfig);
     
-    expect(initialConfig.snapshot_contracts).toHaveLength(0);
+    expect(initialConfig.snapshot_contracts).toHaveLength(1); // Default contract
     expect(initialConfig.execution_contracts).toHaveLength(0);
     expect(initialConfig.approved_icp_methods).toHaveLength(0);
 
@@ -421,8 +424,12 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     const updatedConfig = await main_fixture.actor.icrc149_governance_config();
     console.log("Updated governance config:", updatedConfig);
     
-    expect(updatedConfig.snapshot_contracts).toHaveLength(1);
-    expect(updatedConfig.snapshot_contracts[0][0]).toBe(MOCK_ERC20_CONTRACT);
+    expect(updatedConfig.snapshot_contracts).toHaveLength(2); // Default + our contract
+    
+    // Find our contract in the list
+    const ourContract = updatedConfig.snapshot_contracts.find(([addr, _]) => addr === MOCK_ERC20_CONTRACT);
+    expect(ourContract).toBeDefined();
+    expect(ourContract![0]).toBe(MOCK_ERC20_CONTRACT);
 
     console.log("✅ Governance configuration retrieval working correctly");
   });

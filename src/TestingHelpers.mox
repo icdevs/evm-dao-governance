@@ -1,0 +1,140 @@
+import MigrationTypes "./migrations/types";
+import Result "mo:base/Result";
+import Text "mo:base/Text";
+import Blob "mo:base/Blob";
+import Array "mo:base/Array";
+import Nat8 "mo:base/Nat8";
+import Nat "mo:base/Nat";
+import BTree "mo:stableheapbtreemap/BTree";
+import Hex "mo:encoding/Hex";
+import SHA256 "mo:sha2/Sha256";
+import Time "mo:base/Time";
+import Int "mo:base/Int";
+import WitnessValidator "./WitnessValidator";
+import D "mo:base/Debug";
+
+module {
+
+  // Re-export types for convenience
+  public type ProposalSnapshot = MigrationTypes.Current.ProposalSnapshot;
+  public type State = MigrationTypes.Current.State;
+
+  // Helper function to get current time in nanoseconds
+  public func natNow() : Nat {
+    Int.abs(Time.now());
+  };
+
+  // Helper function for testing - allows manually adding snapshots
+  public func testAddSnapshot(contract_address: Text, block_number: Nat, root_hash: Text, state: State) : {#Ok: (); #Err: Text} {
+    D.print("Adding test snapshot for contract: " # contract_address # " at block: " # Nat.toText(block_number));
+    
+    // Add snapshot to the snapshots map using block number as key
+    let newSnapshot : ProposalSnapshot = {
+      block_number = block_number;
+      contract_address = contract_address;
+      state_root = Text.encodeUtf8(root_hash);
+      snapshot_time = natNow();
+      total_supply = 1000000; // Default for testing
+      chain = { chain_id = 1; network_name = "ethereum" };
+    };
+    ignore BTree.insert<Nat, ProposalSnapshot>(state.snapshots, Nat.compare, block_number, newSnapshot);
+    #Ok();
+  };
+
+  // Helper function for testing - get snapshot info
+  public func testGetSnapshotInfo(contract_address: Text, state: State) : ?{block_number: Nat; root_hash: Text} {
+    D.print("Getting snapshot info for contract: " # contract_address);
+    let snapshots = BTree.toArray<Nat, ProposalSnapshot>(state.snapshots);
+    
+    // Find latest snapshot for this contract
+    for ((block_num, snapshot) in snapshots.vals()) {
+      if (snapshot.contract_address == contract_address) {
+        let root_hash = switch (Text.decodeUtf8(snapshot.state_root)) {
+          case (?text) { text };
+          case null { "0x" };
+        };
+        return ?{block_number = snapshot.block_number; root_hash = root_hash};
+      };
+    };
+    null;
+  };
+
+  // Test helper function to add a snapshot for testing witness validation
+  public func addTestSnapshot(proposal_id: Nat, block_number: Nat, state_root: Blob, contract_address: Text, state: State) : () {
+    let testSnapshot : ProposalSnapshot = {
+      contract_address = contract_address;
+      chain = {
+        chain_id = 31337; // Local testnet
+        network_name = "local";
+      };
+      block_number = block_number;
+      state_root = state_root;
+      total_supply = 1000000; // Test value
+      snapshot_time = natNow();
+    };
+    
+    ignore BTree.insert<Nat, ProposalSnapshot>(
+      state.snapshots, 
+      Nat.compare, 
+      proposal_id, 
+      testSnapshot
+    );
+  };
+
+  // Enhanced test helper function to add a snapshot with specific chain_id
+  public func addTestSnapshotWithChain(proposal_id: Nat, block_number: Nat, state_root: Blob, contract_address: Text, chain_id: Nat, network_name: Text, state: State) : () {
+    let testSnapshot : ProposalSnapshot = {
+      contract_address = contract_address;
+      chain = {
+        chain_id = chain_id;
+        network_name = network_name;
+      };
+      block_number = block_number;
+      state_root = state_root;
+      total_supply = 1000000; // Test value
+      snapshot_time = natNow();
+    };
+    
+    ignore BTree.insert<Nat, ProposalSnapshot>(
+      state.snapshots, 
+      Nat.compare, 
+      proposal_id, 
+      testSnapshot
+    );
+  };
+
+  // Test helper function to calculate storage key using the same logic as witness validation
+  public func calculateTestStorageKey(userAddress: Blob, slot: Nat) : Blob {
+    WitnessValidator.calculateStorageKeyHelper(userAddress, slot);
+  };
+
+  // Get Ethereum address for the DAO using tECDSA
+  public func getEthereumAddress(subaccount: ?Blob) : Text {
+    // For now, return a deterministic address based on a static seed
+    // In production, this would derive the address from tECDSA public key
+    let addressSeed = switch(subaccount) {
+      case null { 
+        // Use a consistent 32-byte zero subaccount for the main address
+        let zeroSubaccount = Blob.fromArray(Array.tabulate<Nat8>(32, func(_) = 0));
+        "DAO_Bridge_Main_" # Hex.encode(Blob.toArray(zeroSubaccount)); 
+      };
+      case (?sub) { "DAO_Bridge_Sub_" # Hex.encode(Blob.toArray(sub)) };
+    };
+    
+    // Generate a deterministic Ethereum address (for testing)
+    // In production, this would use the actual tECDSA derived address
+    let hash = SHA256.fromBlob(#sha256, Text.encodeUtf8(addressSeed));
+    let hashArray = Blob.toArray(hash);
+    let addressBytes = Array.subArray<Nat8>(hashArray, 12, 20); // Take last 20 bytes for address
+    
+    // Convert to hex string with 0x prefix and ensure proper checksum
+    let hexAddress = Hex.encode(addressBytes);
+    "0x" # hexAddress;
+  };
+
+  // Test function that always returns a test value
+  public func test() : Nat {
+    1;
+  };
+
+}

@@ -1,0 +1,318 @@
+import MigrationTypes "./migrations/types";
+import ExtendedProposalEngine "../../../../../../../../ICDevs/projects/motoko_proposal_engine/src/ExtendedProposalEngine";
+import BTree "mo:stableheapbtreemap/BTree";
+import Text "mo:base/Text";
+import Nat "mo:base/Nat";
+import Array "mo:base/Array";
+import Iter "mo:base/Iter";
+import Principal "mo:base/Principal";
+import Int "mo:base/Int";
+import Time "mo:base/Time";
+import Service "service";
+
+module {
+
+  // Re-export types for convenience
+  public type ProposalContent = MigrationTypes.Current.ProposalContent;
+  public type VoteChoice = MigrationTypes.Current.VoteChoice;
+  public type State = MigrationTypes.Current.State;
+
+  // Helper function to get the status of a proposal as a string
+  public func getProposalStatus(proposal: ExtendedProposalEngine.Proposal<ProposalContent, VoteChoice>) : Text {
+    switch(proposal.status) {
+      case(#open) "open";
+      case(#executing(_)) "executing";
+      case(#executed(_)) "executed";
+      case(#failedToExecute(_)) "failed";
+    };
+  };
+
+  // Helper function to get the action type as a string
+  public func getActionType(content: ProposalContent) : Text {
+    switch(content.action) {
+      case(#EthTransaction(_)) "eth_transaction";
+      case(#Motion(_)) "motion";
+      case(#ICPCall(_)) "icp_call";
+    };
+  };
+
+  // Add proposal to all relevant indexes
+  public func addProposalToIndexes(
+    proposalId: Nat, 
+    proposal: ExtendedProposalEngine.Proposal<ProposalContent, VoteChoice>, 
+    content: ProposalContent,
+    state: State
+  ) {
+    // Add to proposer index
+      switch(BTree.get(state.proposalsByProposer, Principal.compare, proposal.proposerId)) {
+        case (?proposerSet) {
+          ignore BTree.insert(proposerSet, Nat.compare, proposalId, true);
+        };
+        case (null) {
+          let newSet = BTree.init<Nat, Bool>(?16);
+          ignore BTree.insert(newSet, Nat.compare, proposalId, true);
+          ignore BTree.insert(state.proposalsByProposer, Principal.compare, proposal.proposerId, newSet);
+        };
+      };
+
+      // Add to status index
+      let status = getProposalStatus(proposal);
+      switch(BTree.get(state.proposalsByStatus, Text.compare, status)) {
+        case (?statusSet) {
+          ignore BTree.insert(statusSet, Nat.compare, proposalId, true);
+        };
+        case (null) {
+          let newSet = BTree.init<Nat, Bool>(?16);
+          ignore BTree.insert(newSet, Nat.compare, proposalId, true);
+          ignore BTree.insert(state.proposalsByStatus, Text.compare, status, newSet);
+        };
+      };
+
+      // Add to action type index
+      let actionType = getActionType(content);
+      switch(BTree.get(state.proposalsByActionType, Text.compare, actionType)) {
+        case (?actionSet) {
+          ignore BTree.insert(actionSet, Nat.compare, proposalId, true);
+        };
+        case (null) {
+          let newSet = BTree.init<Nat, Bool>(?16);
+          ignore BTree.insert(newSet, Nat.compare, proposalId, true);
+          ignore BTree.insert(state.proposalsByActionType, Text.compare, actionType, newSet);
+        };
+      };
+
+      // Add to chronological index (using created time)
+      ignore BTree.insert(state.proposalsChronological, Nat.compare, Int.abs(proposal.timeStart), proposalId);
+  };
+
+  // Update proposal in indexes when status changes
+  public func updateProposalIndexes(
+    proposalId: Nat, 
+    oldProposal: ?ExtendedProposalEngine.Proposal<ProposalContent, VoteChoice>, 
+    newProposal: ExtendedProposalEngine.Proposal<ProposalContent, VoteChoice>, 
+    _content: ProposalContent,
+    state: State
+  ) {
+    switch(oldProposal) {
+        case (?old) {
+          // Remove from old status index
+          let oldStatus = getProposalStatus(old);
+          switch(BTree.get(state.proposalsByStatus, Text.compare, oldStatus)) {
+            case (?statusSet) {
+              ignore BTree.delete(statusSet, Nat.compare, proposalId);
+            };
+            case (null) {};
+          };
+        };
+        case (null) {};
+      };
+
+      // Add to new status index
+      let newStatus = getProposalStatus(newProposal);
+      switch(BTree.get(state.proposalsByStatus, Text.compare, newStatus)) {
+        case (?statusSet) {
+          ignore BTree.insert(statusSet, Nat.compare, proposalId, true);
+        };
+        case (null) {
+          let newSet = BTree.init<Nat, Bool>(?16);
+          ignore BTree.insert(newSet, Nat.compare, proposalId, true);
+          ignore BTree.insert(state.proposalsByStatus, Text.compare, newStatus, newSet);
+        };
+      };
+  };
+
+  // Sync all proposal indexes - useful for ensuring indexes are up to date
+  public func syncProposalIndexes(
+    proposalEngine: ExtendedProposalEngine.ProposalEngine<ProposalContent, VoteChoice>,
+    state: State
+  ) {
+    // Get all proposals and ensure their current status is properly indexed
+      let allProposals = proposalEngine.getProposals(10000, 0); // Get a large batch
+      for (proposal in allProposals.data.vals()) {
+        // Check if proposal exists in status index
+        let currentStatus = getProposalStatus(proposal);
+        switch(BTree.get(state.proposalsByStatus, Text.compare, currentStatus)) {
+          case (?statusSet) {
+            // Ensure this proposal is in the correct status set
+            ignore BTree.insert(statusSet, Nat.compare, proposal.id, true);
+          };
+          case (null) {
+            // Status index doesn't exist, create it and add this proposal
+            let newSet = BTree.init<Nat, Bool>(?16);
+            ignore BTree.insert(newSet, Nat.compare, proposal.id, true);
+            ignore BTree.insert(state.proposalsByStatus, Text.compare, currentStatus, newSet);
+          };
+        };
+      };
+  };
+
+  // Helper function to intersect multiple proposal sets
+  public func intersectProposalSets(sets: [BTree.BTree<Nat, Bool>]) : [Nat] {
+    if (sets.size() == 0) return [];
+    if (sets.size() == 1) {
+      let entries = BTree.entries(sets[0]);
+      return Array.map<(Nat, Bool), Nat>(Iter.toArray(entries), func((id, _)) = id);
+    };
+    
+    // Start with first set
+    var result: [Nat] = [];
+    let firstEntries = BTree.entries(sets[0]);
+    
+    for ((id, _) in firstEntries) {
+      // Check if this ID exists in all other sets
+      var existsInAll = true;
+      label checkAllSetsLoop for (i in Iter.range(1, sets.size() - 1)) {
+        switch(BTree.get(sets[i], Nat.compare, id)) {
+          case (?_) {}; // exists
+          case (null) {
+            existsInAll := false;
+            break checkAllSetsLoop;
+          };
+        };
+      };
+      
+      if (existsInAll) {
+        result := Array.append(result, [id]);
+      };
+    };
+    
+    result
+  };
+
+  // Apply filters and get filtered proposal IDs
+  public func icrc149_get_proposals_service(state: State, proposalEngine : ExtendedProposalEngine.ProposalEngine<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>, prev: ?Nat, take: ?Nat, filters: [Service.ProposalInfoFilter]) : [Service.Proposal] {
+
+
+
+      let limit = switch(take) { case (?t) t; case (null) 10; };
+      
+      // Get candidate proposal IDs based on filters
+      var candidateIds: [Nat] = [];
+      
+      if (filters.size() == 0) {
+        // No filters - get all proposals chronologically
+        let chronEntries = BTree.entries(state.proposalsChronological);
+        candidateIds := Array.map<(Nat, Nat), Nat>(Iter.toArray(chronEntries), func((timestamp, id)) = id);
+      } else {
+        // Apply filters and get intersection of results
+        var filteredSets: [BTree.BTree<Nat, Bool>] = [];
+        
+        label statusFilterLoop for (filter in filters.vals()) {
+          switch(filter) {
+            case (#by_id(id)) {
+              // For by_id filter, create a single-item set
+              let singleSet = BTree.init<Nat, Bool>(?8);
+              ignore BTree.insert(singleSet, Nat.compare, id, true);
+              filteredSets := Array.append(filteredSets, [singleSet]);
+            };
+            case (#by_proposer(proposer)) {
+              switch(BTree.get(state.proposalsByProposer, Principal.compare, proposer)) {
+                case (?proposerSet) filteredSets := Array.append(filteredSets, [proposerSet]);
+                case (null) {
+                  // No proposals from this proposer - return empty
+                  return [];
+                };
+              };
+            };
+            case (#by_status(statusFilter)) {
+              let statusString = switch(statusFilter) {
+                case (#pending) "pending";
+                case (#active) "active";
+                case (#executed) "executed";
+                case (#rejected) "rejected";
+                case (#expired) "expired";
+                case (#any) {
+                  // Skip this filter for #any
+                  continue statusFilterLoop;
+                };
+              };
+              switch(BTree.get(state.proposalsByStatus, Text.compare, statusString)) {
+                case (?statusSet) filteredSets := Array.append(filteredSets, [statusSet]);
+                case (null) {
+                  // No proposals with this status - return empty
+                  return [];
+                };
+              };
+            };
+            case (#by_action_type(actionFilter)) {
+              let actionString = switch(actionFilter) {
+                case (#motion) "motion";
+                case (#eth_transaction) "eth_transaction";
+                case (#any) {
+                  // Skip this filter for #any
+                  continue statusFilterLoop;
+                };
+              };
+              switch(BTree.get(state.proposalsByActionType, Text.compare, actionString)) {
+                case (?actionSet) filteredSets := Array.append(filteredSets, [actionSet]);
+                case (null) {
+                  // No proposals with this action type - return empty
+                  return [];
+                };
+              };
+            };
+          };
+        };
+        
+        // Get intersection of all filtered sets
+        if (filteredSets.size() > 0) {
+          candidateIds := intersectProposalSets(filteredSets);
+        };
+      };
+      
+      // Apply pagination
+      let startIndex = switch(prev) {
+        case (?prevId) {
+          // Find the index of the previous ID and start after it
+          var index = 0;
+          label findPrev for (id in candidateIds.vals()) {
+            if (id == prevId) {
+              index += 1;
+              break findPrev;
+            };
+            index += 1;
+          };
+          index;
+        };
+        case (null) 0;
+      };
+      
+      let endIndex = Nat.min(startIndex + limit, candidateIds.size());
+      let paginatedIds = Array.tabulate<Nat>(endIndex - startIndex, func(i) = candidateIds[startIndex + i]);
+      
+      // Convert proposal IDs to Service.Proposal objects
+      let proposals = Array.mapFilter<Nat, Service.Proposal>(paginatedIds, func(id) {
+        switch(proposalEngine.getProposal(id)) {
+          case (?proposal) ?translateProposalToService(proposal);
+          case (null) null;
+        };
+      });
+      
+      proposals;
+  };
+
+  // Apply pagination to a list of proposal IDs
+  public func applyPagination(candidateIds: [Nat], prev: ?Nat, take: ?Nat) : [Nat] {
+    let limit = switch(take) { case (?t) t; case (null) 10; };
+    
+    let startIndex = switch(prev) {
+      case (?prevId) {
+        // Find the index of the previous ID and start after it
+        var index = 0;
+        label findPrev for (id in candidateIds.vals()) {
+          if (id == prevId) {
+            index += 1;
+            break findPrev;
+          };
+          index += 1;
+        };
+        index;
+      };
+      case (null) 0;
+    };
+    
+    let endIndex = Nat.min(startIndex + limit, candidateIds.size());
+    Array.tabulate<Nat>(endIndex - startIndex, func(i) = candidateIds[startIndex + i]);
+  };
+
+}

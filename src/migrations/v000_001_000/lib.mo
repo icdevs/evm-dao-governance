@@ -125,6 +125,9 @@ module {
       proposalsByActionType = BTree.init<Text, BTree.BTree<Nat, Bool>>(?32);
       proposalsChronological = BTree.init<Nat, Nat>(?32);
       
+      // Initialize Ethereum nonce tracking
+      ethereumNonces = BTree.init<Text, Nat>(?32);
+      
       icrc85 = {
         var nextCycleActionId: ?Nat = null; // Initialize to null or a specific value if needed
         var lastActionReported: ?Nat = null; // Initialize to null or a specific value if needed

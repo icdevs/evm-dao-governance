@@ -1,0 +1,148 @@
+import MigrationTypes "./migrations/types";
+import Service "./service";
+import WitnessValidator "./WitnessValidator";
+import Result "mo:base/Result";
+import Text "mo:base/Text";
+import Blob "mo:base/Blob";
+import Array "mo:base/Array";
+import Nat8 "mo:base/Nat8";
+import Nat "mo:base/Nat";
+import BTree "mo:stableheapbtreemap/BTree";
+
+module {
+
+  // Re-export types for convenience
+  public type Witness = MigrationTypes.Current.Witness;
+  public type WitnessResult = MigrationTypes.Current.WitnessResult;
+  public type ProposalSnapshot = MigrationTypes.Current.ProposalSnapshot;
+  public type SnapshotContractConfig = MigrationTypes.Current.SnapshotContractConfig;
+  public type State = MigrationTypes.Current.State;
+
+  // Witness Validation for ICRC-149 Storage Proofs using stored canister state
+  public func verifyWitness(witness: Witness, proposal_id: ?Nat, state: State) : WitnessResult {
+    // Convert witness to format expected by WitnessValidator
+    let serviceWitness: Service.Witness = {
+      userAddress = witness.userAddress;
+      contractAddress = witness.contractAddress;
+      storageKey = witness.storageKey;
+      storageValue = witness.storageValue;
+      accountProof = witness.accountProof;
+      storageProof = witness.storageProof;
+    };
+
+    // Get trusted state from stored canister configuration
+    verifyWitnessWithStoredState(serviceWitness, proposal_id, state);
+  };
+
+  // Internal function that validates witness against stored canister state
+  public func verifyWitnessWithStoredState(witness: Service.Witness, proposal_id: ?Nat, state: State) : WitnessResult {
+    // 1. Verify contract is approved by looking up stored configuration
+      let contractAddress = blobToHex(witness.contractAddress);
+      switch (BTree.get<Text, MigrationTypes.Current.SnapshotContractConfig>(state.config.snapshot_contracts, Text.compare, contractAddress)) {
+        case (null) {
+          return #Err("Contract address " # contractAddress # " is not approved for snapshots");
+        };
+        case (?contractConfig) {
+          if (not contractConfig.enabled) {
+            return #Err("Contract " # contractAddress # " is disabled");
+          };
+          
+          // 2. Get trusted state root from stored proposal snapshot
+          let stateRoot = switch (proposal_id) {
+            case (?pid) {
+              // Look up state root from specific proposal snapshot
+              switch (BTree.get<Nat, MigrationTypes.Current.ProposalSnapshot>(state.snapshots, Nat.compare, pid)) {
+                case (null) {
+                  return #Err("No snapshot found for proposal " # Nat.toText(pid));
+                };
+                case (?snapshot) { snapshot.state_root };
+              };
+            };
+            case (null) {
+              // Look up state root by block number from any stored snapshot
+              let snapshots = BTree.toArray<Nat, MigrationTypes.Current.ProposalSnapshot>(state.snapshots);
+              let matchingSnapshot = Array.find<(Nat, MigrationTypes.Current.ProposalSnapshot)>(snapshots, func((pid, snapshot)) {
+                snapshot.block_number == witness.blockNumber
+              });
+              switch (matchingSnapshot) {
+                case (null) {
+                  return #Err("No stored snapshot found for block number " # Nat.toText(witness.blockNumber));
+                };
+                case (?(pid, snapshot)) { snapshot.state_root };
+              };
+            };
+          };
+
+          // 3. Build validation configuration using stored trusted data
+          let config: WitnessValidator.ProofValidationConfig = {
+            expectedStateRoot = stateRoot; // Use stored trusted state root
+            expectedContractAddress = witness.contractAddress; // Contract address can be from witness (verified above)
+            expectedUserAddress = witness.userAddress; // User address is what we're validating
+            expectedStorageSlot = contractConfig.balance_storage_slot; // Use configured storage slot
+            chainId = contractConfig.chain.chain_id; // Use configured chain ID
+          };
+
+          // 4. Validate the witness using WitnessValidator
+          switch (WitnessValidator.validateWitness(witness, config)) {
+            case (#Valid(result)) {
+              #Ok({
+                valid = true;
+                user_address = blobToHex(result.userAddress);
+                contract_address = blobToHex(result.contractAddress);
+                balance = result.storageValue;
+                block_number = result.blockNumber;
+                state_root_verified = true;
+              });
+            };
+            case (#Invalid(error)) {
+              #Err("Witness validation failed: " # error);
+            };
+          };
+        };
+      };
+  };
+
+  // Helper function to convert Blob to hex string
+  public func blobToHex(blob: Blob) : Text {
+    let bytes = Blob.toArray(blob);
+    var hex = "0x";
+    for (byte in bytes.vals()) {
+      hex := hex # natToHex(Nat8.toNat(byte), 2);
+    };
+    hex
+  };
+
+  // Helper function to convert Nat to hex string with padding
+  public func natToHex(n: Nat, minDigits: Nat) : Text {
+    let chars = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
+    if (n == 0) {
+      var result = "0";
+      var i = 1;
+      while (i < minDigits) {
+        result := "0" # result;
+        i += 1;
+      };
+      return result;
+    };
+    
+    var num = n;
+    var result = "";
+    while (num > 0) {
+      let digit = num % 16;
+      result := Text.fromChar(chars[digit]) # result;
+      num := num / 16;
+    };
+    
+    // Pad with zeros if needed
+    while (result.size() < minDigits) {
+      result := "0" # result;
+    };
+    result
+  };
+
+  // Test helper function to calculate storage key using the same logic as witness validation
+  public func calculateTestStorageKey(userAddress: Blob, slot: Nat) : Blob {
+    WitnessValidator.calculateStorageKeyHelper(userAddress, slot);
+  };
+
+}

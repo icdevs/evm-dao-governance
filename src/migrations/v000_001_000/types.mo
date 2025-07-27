@@ -5,6 +5,8 @@ import Array "mo:base/Array";
 import OVSFixed "mo:ovs-fixed";
 import TimerToolLib "mo:timer-tool";
 import LogLib "mo:stable-local-log";
+
+
 import BTree "mo:stableheapbtreemap/BTree";
 import ProposalEngine "../../../../../../../../../../ICDevs/projects/motoko_proposal_engine/src/ExtendedProposalEngine";
 
@@ -135,8 +137,8 @@ module {
     method: Text; // Method to call
     args: Blob; // Arguments for the method
     cycles: Nat;
-    var result: ?Blob; // Result of the call, if any
-    var error: ?Text; // Error message if the call fails
+     best_effort_timeout: ?Nat32; 
+    var result: ?{#Ok: Blob; #Err: Text};
   };
 
   public type ICPCallShared = {
@@ -144,15 +146,14 @@ module {
     method: Text; // Method to call
     args: Blob; // Arguments for the method
     cycles: Nat;
-    result: ?Blob; // Result of the call, if any
-    error: ?Text; // Error message if the call fails
+    best_effort_timeout: ?Nat32; 
+    result: ?{#Ok: Blob; #Err: Text};
   };
 
   public func shareICPCall(call: ICPCall) : ICPCallShared {
     {
       call with
       result = call.result;
-      error = call.error;
     }
   };
 
@@ -210,20 +211,38 @@ module {
     value: Nat;
     data: Blob;
     chain: EthereumNetwork;
+    subaccount: ?Blob; // Subaccount for derivation path in ECDSA signing
+    maxPriorityFeePerGas: Nat; // Gas parameters for EIP-1559 transactions
+    maxFeePerGas: Nat;
+    gasLimit: Nat;
     var signature: ?Blob; // Optional signature for the transaction
+    var nonce: ?Nat; // Transaction nonce, set during execution
   };
   public type EthTxShared = {
     to: Text;
     value: Nat;
     data: Blob;
     chain: EthereumNetwork;
+    subaccount: ?Blob; // Subaccount for derivation path in ECDSA signing
+    maxPriorityFeePerGas: Nat; // Gas parameters for EIP-1559 transactions
+    maxFeePerGas: Nat;
+    gasLimit: Nat;
     signature: ?Blob; // Optional signature for the transaction
+    nonce: ?Nat; // Transaction nonce, set during execution
   };
 
   public func shareEthTx(tx: EthTx) : EthTxShared {
     {
-      tx with
+      to = tx.to;
+      value = tx.value;
+      data = tx.data;
+      chain = tx.chain;
+      subaccount = tx.subaccount;
+      maxPriorityFeePerGas = tx.maxPriorityFeePerGas;
+      maxFeePerGas = tx.maxFeePerGas;
+      gasLimit = tx.gasLimit;
       signature = tx.signature;
+      nonce = tx.nonce;
     }
   };
 
@@ -245,14 +264,21 @@ module {
   };
   public type SIWEProofShared = SIWEProof;
 
-  public type SIWEResult = {
+  
+public type SIWEResult = {
     #Ok: {
       address: Text;
       domain: Text;
       statement: ?Text;
-      issued_at: Nat;
-      proposal_id: ?Nat;
-      nonce: ?Text;
+      issued_at: Nat;           // Nanoseconds timestamp
+      issued_at_iso: Text;      // ISO 8601 format for human readability  
+      expiration_time: Nat;     // Nanoseconds timestamp, must be within 10 minutes of issued_at
+      expiration_time_iso: Text; // ISO 8601 format for human readability
+      proposal_id: Nat;         // Extracted from message
+      vote_choice: Text;        // Extracted from message ("Yes", "No", "Abstain")
+      contract_address: Text;   // Extracted from message
+      chain_id: Nat;           // Extracted from message
+      nonce: Text;             // Should match expiration_time nanoseconds
     };
     #Err: Text;
   };
@@ -302,6 +328,9 @@ module {
     proposalsByStatus: BTree.BTree<Text, BTree.BTree<Nat, Bool>>; // Status -> Set of proposal IDs  
     proposalsByActionType: BTree.BTree<Text, BTree.BTree<Nat, Bool>>; // ActionType -> Set of proposal IDs
     proposalsChronological: BTree.BTree<Nat, Nat>; // created_at timestamp -> proposal ID for time-based ordering
+    
+    // Ethereum account nonce tracking (chain_id:address -> nonce)
+    ethereumNonces: BTree.BTree<Text, Nat>;
     
     icrc85: {
       var nextCycleActionId: ?Nat;

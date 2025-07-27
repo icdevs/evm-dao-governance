@@ -141,21 +141,56 @@ type Witness = record {
 
 
 ### SIWE Verification
-Input and result for EIP-4361 Sign-In With Ethereum used to prevent signature replay and to tie a vote to a concrete proposal. SIWE message must encode proposal id and a unique, time-limited nonce.
+Input and result for EIP-4361 Sign-In With Ethereum used to prevent signature replay and to tie a vote to a concrete proposal. The SIWE message MUST contain specific fields to prevent replay attacks without requiring per-user nonce tracking.
+
+**Required SIWE Message Format for Voting:**
+```
+{domain} wants you to sign in with your Ethereum account:
+{address}
+
+Vote {choice} on proposal {proposal_id} for contract {contract_address}
+
+URI: {uri}
+Version: 1
+Chain ID: {chain_id}
+Nonce: {timestamp_plus_10_minutes_nanoseconds}
+Issued At: {current_timestamp_iso}
+Issued At Nanos: {current_timestamp_nanoseconds}
+Expiration Time: {timestamp_plus_10_minutes_iso}
+Expiration Nanos: {timestamp_plus_10_minutes_nanoseconds}
+```
+
+**Anti-Replay Protection Strategy:**
+- **Proposal Binding**: Message includes specific `proposal_id` 
+- **Vote Binding**: Message includes specific vote `choice` (Yes/No/Abstain)
+- **Contract Binding**: Message includes `contract_address` for the governance token
+- **Chain Binding**: Message includes `chain_id` to prevent cross-chain replay
+- **Time Window**: `Nonce` and `Expiration Nanos` set to current time + 10 minutes in nanoseconds
+- **Dual Timestamps**: Both ISO 8601 text format and nanosecond timestamps for easier parsing
+- **Uniqueness**: Each vote requires a fresh signature within the time window
+
+This approach eliminates the need for per-user nonce storage while ensuring signatures cannot be replayed across different proposals, votes, contracts, chains, or time periods.
 
 ```candid
 type SIWEProof = record {
   message: Text;
   signature: Blob;
 };
+
 type SIWEResult = variant {
    Ok: record {
       address: Text;
       domain: Text;
       statement: opt Text;
-      issued_at: Nat;
-      proposal_id: opt Nat;   // Proposal explicitly referenced
-      nonce: opt Text;        // Nonce used for anti-replay
+      issued_at: Nat;           // Nanoseconds timestamp
+      issued_at_iso: Text;      // ISO 8601 format for human readability  
+      expiration_time: Nat;     // Nanoseconds timestamp, must be within 10 minutes of issued_at
+      expiration_time_iso: Text; // ISO 8601 format for human readability
+      proposal_id: Nat;         // Extracted from message
+      vote_choice: Text;        // Extracted from message ("Yes", "No", "Abstain")
+      contract_address: Text;   // Extracted from message
+      chain_id: Nat;           // Extracted from message
+      nonce: Text;             // Should match expiration_time nanoseconds
    };
    Err: Text;
 };
@@ -210,10 +245,10 @@ type ActionTypeFilter = variant {
 
 type VoteArgs = record {
    proposal_id: Nat;
-   voter: Text;           // ETH address
+   voter: Text;           // ETH address  
    choice: variant { Yes; No; Abstain };
-   siwe: SIWEProof;
-   witness: Witness;
+   siwe: SIWEProof;       // Must include proposal_id, choice, contract_address, chain_id in message
+   witness: Witness;      // Cryptographic proof of token balance
 };
 ```
 
@@ -436,7 +471,7 @@ All ICRC-149 functions are prefixed with `icrc149_`:
 ## Additional Guidance, Tips, and Security
 
 - **Proof verification:** For EVM contracts, implement RLP/MPT/Binary Merkle proof logic as needed. Simpler off-chain balance snapshot and Merkle tree is recommended for efficiency.
-- **Replay protection:** SIWE proof must encode the proposal_id or unique nonce, and `issued_at` must be checked for expiry.
+- **Replay protection:** SIWE proof must encode the proposal_id, vote choice, contract_address, and chain_id in the message, with `Nonce` and `Expiration Nanos` set to current time + 10 minutes in nanoseconds to create a time-bounded voting window. Both ISO 8601 text timestamps and nanosecond timestamps are included for easier parsing and validation. This eliminates the need for per-user nonce storage while preventing all replay attack vectors.
 - **Gas and cycles:** No Ethereum gas is ever spent. However, complex proof verification may consume IC cycles and incur fees.
 - **Audit and privacy:** Tallies and vote proofs MAY be published for auditability, but revealing all voting addresses is optional.
 - **Resilience:** Canister must be upgradeable. Orchestrator/backup for governance migration is RECOMMENDED.

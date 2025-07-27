@@ -262,6 +262,17 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
         evmdaobridge.test_get_snapshot_info(contract_address);
     };
 
+    // Get Ethereum address for the DAO using tECDSA
+    public query func icrc149_get_ethereum_address(subaccount: ?Blob) : async Text {
+        D.print("Getting Ethereum address for DAO");
+        evmdaobridge.icrc149_get_ethereum_address(subaccount);
+    };
+
+    // Admin function to set default snapshot contract
+    public shared(msg) func icrc149_set_default_snapshot_contract(contract_address: ?Text) : async {#Ok: (); #Err: Text} {
+        evmdaobridge.icrc149_set_default_snapshot_contract(msg.caller, contract_address);
+    };
+
     //------------------- SAMPLE FUNCTION -------------------//
 
     public shared func hello(): async Text {

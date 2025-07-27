@@ -93,7 +93,7 @@ describe("EVMDAOBridge Hardhat Integration Tests", () => {
       sender: admin.getPrincipal(),
       idlFactory: mainIDLFactory,
       wasm: sub_WASM_PATH,
-      arg: IDL.encode(mainInit({IDL}), []),
+      arg: IDL.encode(mainInit({IDL}), [[]]),
     });
 
     await pic.tick(5);
