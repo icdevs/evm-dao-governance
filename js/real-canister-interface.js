@@ -13,6 +13,13 @@ let userAddress = null;
 let currentChainId = null;
 let storageSlot = null;
 
+// Pagination state
+let currentPage = 1;
+let proposalsPerPage = 10;
+let totalProposals = 0;
+let allProposals = [];
+let currentUserVotingData = null;
+
 // Known chain configurations
 const CHAIN_CONFIGS = {
     1: { name: 'Ethereum Mainnet', symbol: 'ETH', rpc: 'https://eth.llamarpc.com' },
@@ -43,6 +50,8 @@ window.discoverStorageSlot = discoverStorageSlot;
 window.castVote = castVote;
 window.endVote = endVote;
 window.loadVoteTally = loadVoteTally;
+window.changePage = changePage;
+window.changeProposalsPerPage = changeProposalsPerPage;
 
 async function initializeApp() {
     try {
@@ -243,8 +252,14 @@ async function loadProposals() {
         // Get user's voting power and existing votes
         const userVotingData = await getUserVotingData(chainId, contractAddress, userAddress, proposals);
         
-        // Render proposals
-        renderProposals(proposals, userVotingData);
+        // Store user voting data for pagination
+        currentUserVotingData = userVotingData;
+        
+        // Reset to first page
+        currentPage = 1;
+        
+        // Render proposals with pagination
+        renderProposalsWithPagination();
         
     } catch (error) {
         console.error('Load proposals error:', error);
@@ -280,7 +295,8 @@ async function getContractConfig(chainId, contractAddress) {
 async function loadProposalsFromCanister(chainId, contractAddress) {
     try {
         showStatus('📡 Loading proposals from canister...', 'info');
-        const result = await canisterActor.icrc149_get_proposals([], [BigInt(10)], []);
+        // Load all proposals first to get total count
+        const result = await canisterActor.icrc149_get_proposals([], [], []);
         
         const proposals = result.map(proposal => ({
             ...proposal,
@@ -288,6 +304,12 @@ async function loadProposalsFromCanister(chainId, contractAddress) {
             deadline: Number(proposal.deadline),
             created_at: Number(proposal.created_at)
         }));
+        
+        // Sort by creation date (newest first)
+        proposals.sort((a, b) => b.created_at - a.created_at);
+        
+        allProposals = proposals;
+        totalProposals = proposals.length;
         
         showStatus(`✅ Loaded ${proposals.length} proposals`, 'success');
         return proposals;
@@ -503,7 +525,137 @@ function renderProposals(proposals, userVotingData) {
         `;
     }).join('');
     
-    container.innerHTML = proposalsHtml;
+    return proposalsHtml;
+}
+
+function renderProposalsWithPagination() {
+    const container = document.getElementById('proposalsContainer');
+    
+    if (allProposals.length === 0) {
+        container.innerHTML = '<div class="status info">No proposals found for this contract.</div>';
+        return;
+    }
+    
+    // Calculate pagination
+    const totalPages = Math.ceil(totalProposals / proposalsPerPage);
+    const startIndex = (currentPage - 1) * proposalsPerPage;
+    const endIndex = startIndex + proposalsPerPage;
+    const currentProposals = allProposals.slice(startIndex, endIndex);
+    
+    // Generate proposals HTML
+    const proposalsHtml = renderProposals(currentProposals, currentUserVotingData);
+    
+    // Generate pagination controls
+    const paginationHtml = generatePaginationControls(totalPages);
+    
+    // Update container with proposals and pagination
+    container.innerHTML = `
+        <div class="pagination-header">
+            <div class="pagination-info">
+                <span>Showing ${startIndex + 1}-${Math.min(endIndex, totalProposals)} of ${totalProposals} proposals</span>
+                <div class="per-page-selector">
+                    <label for="proposalsPerPageSelect">Per page:</label>
+                    <select id="proposalsPerPageSelect" onchange="changeProposalsPerPage(this.value)">
+                        <option value="5" ${proposalsPerPage === 5 ? 'selected' : ''}>5</option>
+                        <option value="10" ${proposalsPerPage === 10 ? 'selected' : ''}>10</option>
+                        <option value="20" ${proposalsPerPage === 20 ? 'selected' : ''}>20</option>
+                        <option value="50" ${proposalsPerPage === 50 ? 'selected' : ''}>50</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="proposals-list">
+            ${proposalsHtml}
+        </div>
+        
+        ${totalPages > 1 ? `<div class="pagination-controls">${paginationHtml}</div>` : ''}
+    `;
+}
+
+function generatePaginationControls(totalPages) {
+    let paginationHtml = '';
+    
+    // Previous button
+    paginationHtml += `
+        <button class="pagination-btn ${currentPage === 1 ? 'disabled' : ''}" 
+                onclick="changePage(${currentPage - 1})" 
+                ${currentPage === 1 ? 'disabled' : ''}>
+            ← Previous
+        </button>
+    `;
+    
+    // Page numbers
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+    
+    // Adjust start page if we're near the end
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    
+    // First page and ellipsis
+    if (startPage > 1) {
+        paginationHtml += `
+            <button class="pagination-btn page-btn" onclick="changePage(1)">1</button>
+        `;
+        if (startPage > 2) {
+            paginationHtml += `<span class="pagination-ellipsis">...</span>`;
+        }
+    }
+    
+    // Page numbers
+    for (let i = startPage; i <= endPage; i++) {
+        paginationHtml += `
+            <button class="pagination-btn page-btn ${i === currentPage ? 'active' : ''}" 
+                    onclick="changePage(${i})">
+                ${i}
+            </button>
+        `;
+    }
+    
+    // Last page and ellipsis
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            paginationHtml += `<span class="pagination-ellipsis">...</span>`;
+        }
+        paginationHtml += `
+            <button class="pagination-btn page-btn" onclick="changePage(${totalPages})">${totalPages}</button>
+        `;
+    }
+    
+    // Next button
+    paginationHtml += `
+        <button class="pagination-btn ${currentPage === totalPages ? 'disabled' : ''}" 
+                onclick="changePage(${currentPage + 1})" 
+                ${currentPage === totalPages ? 'disabled' : ''}>
+            Next →
+        </button>
+    `;
+    
+    return paginationHtml;
+}
+
+function changePage(page) {
+    if (page < 1 || page > Math.ceil(totalProposals / proposalsPerPage) || page === currentPage) {
+        return;
+    }
+    
+    currentPage = page;
+    renderProposalsWithPagination();
+    
+    // Scroll to top of proposals section
+    document.getElementById('proposalsContainer').scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start' 
+    });
+}
+
+function changeProposalsPerPage(newPerPage) {
+    proposalsPerPage = parseInt(newPerPage);
+    currentPage = 1; // Reset to first page
+    renderProposalsWithPagination();
 }
 
 async function loadVoteTally(proposalId, tallyData = null) {
