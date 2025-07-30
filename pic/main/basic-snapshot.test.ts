@@ -12,7 +12,7 @@ import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declar
 // Type-only import: import types from the candid interface without the extension
 import type { _SERVICE as mainService } from "../../src/declarations/main/main.did.js";
 
-export const WASM_PATH = ".dfx/local/canisters/main/main.wasm";
+export const WASM_PATH = ".dfx/local/canisters/main/main.wasm.gz";
 
 const twoSecondsInMs = 2000;
 

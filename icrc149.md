@@ -452,8 +452,17 @@ All ICRC-149 functions are prefixed with `icrc149_`:
 ### Proposal Management
 - `icrc149_create_proposal(proposal_args)` - Create a new proposal with specified snapshot contract
 - `icrc149_vote_proposal(vote_args)` - Vote on a proposal with cryptographic proof
-- `icrc149_tally_votes(proposal_id)` - Get current vote tally for a proposal
+- `icrc149_tally_votes(proposal_id)` - Get current vote tally for a proposal (shows "Pending" for active proposals, "Passed"/"Failed" for completed ones)
 - `icrc149_execute_proposal(proposal_id)` - Execute a passed proposal
+
+### User Vote Queries
+- `icrc149_get_user_votes(requests)` - Bulk lookup of user votes across multiple proposals
+  - Takes an array of `{proposal_id: Nat; user_address: Text}` requests
+  - Returns an array of `{proposal_id: Nat; user_address: Text; vote: ?VoteChoice}` results
+  - Efficient for checking vote status across multiple proposals at once
+- `icrc149_get_user_vote(proposal_id, user_address)` - Check if a user has voted on a specific proposal and return their vote choice
+- `icrc149_has_user_voted(proposal_id, user_address)` - Simple boolean check if user has voted
+- `icrc149_get_proposal_with_user_vote(proposal_id, user_address?)` - Get proposal details with user vote information
 
 ### Authentication & Verification
 - `icrc149_verify_siwe(siwe_proof)` - Verify Sign-In With Ethereum proof

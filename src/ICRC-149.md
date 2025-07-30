@@ -202,6 +202,22 @@ type Proposal = record {
     metadata: opt Text;
 };
 
+// Enhanced proposal type that includes tally information
+type ProposalWithTally = record {
+    id: Nat;
+    proposer: Principal;
+    action: variant {
+      Motion: Text;
+      EthTransaction: EthTx;
+      ICPCall: ICPCall;
+    };
+    created_at: Nat;
+    snapshot: opt ProposalSnapshot;
+    deadline: Nat;
+    metadata: opt Text;
+    tally: TallyResult;  // Includes current vote tally
+};
+
 
 type VoteArgs = record {
    proposal_id: Nat;
@@ -364,9 +380,9 @@ Verifies a witness proof against stored canister state, optionally for a specifi
 
 #### icrc149_get_proposals
 ```candid
-icrc149_get_proposals: query (opt Nat, opt Nat, vec ProposalInfoFilter) -> vec Proposal;
+icrc149_get_proposals: query (opt Nat, opt Nat, vec ProposalInfoFilter) -> vec ProposalWithTally;
 ```
-Get proposals with pagination and filtering. Parameters: prev (for pagination), take (limit), filters (status, proposer, action type, etc).
+Get proposals with pagination and filtering. Parameters: prev (for pagination), take (limit), filters (status, proposer, action type, etc). Returns proposals with integrated tally data, eliminating the need for separate tally calls.
 
 #### icrc149_create_proposal
 ```candid
@@ -386,11 +402,29 @@ Caller submits:
   - Merkle (or EVM trie) proof showing balance at referenced block.
 Canister verifies both proofs and updates per-proposal tallies, refusing double-voting.
 
-#### icrc149_tally_votes
+#### icrc149_get_user_votes
+```candid
+icrc149_get_user_votes: query (vec record { proposal_id: Nat; user_address: Text }) -> vec record { proposal_id: Nat; user_address: Text; vote: opt variant { Yes; No; Abstain } };
+```
+Bulk query to check user voting status across multiple proposals. Takes an array of proposal_id and user_address pairs, returns the same array with vote information included. Returns null vote if the user hasn't voted on that proposal. This is more efficient than individual vote queries when checking multiple proposals.
+
+#### icrc149_get_user_vote
+```candid
+icrc149_get_user_vote: query (Nat, Text) -> opt variant { Yes; No; Abstain };
+```
+Returns the vote choice for a specific user on a specific proposal. Returns null if the user hasn't voted on that proposal.
+
+#### icrc149_has_user_voted
+```candid
+icrc149_has_user_voted: query (Nat, Text) -> Bool;
+```
+Simple boolean check to determine if a user has voted on a specific proposal. More efficient than `icrc149_get_user_vote` when you only need to know if they voted, not what they voted.
+
+#### icrc149_tally_votes (DEPRECATED)
 ```candid
 icrc149_tally_votes: (Nat) -> async TallyResult;
 ```
-Returns the current per-proposal tally, computed from checked proofs.
+**DEPRECATED**: Returns the current per-proposal tally, computed from checked proofs. This function is deprecated as tally data is now included directly in `icrc149_get_proposals` responses for better efficiency. Use `icrc149_get_proposals` instead.
 
 #### icrc149_execute_proposal
 ```candid

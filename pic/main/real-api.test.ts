@@ -13,7 +13,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
   let canisterId: Principal;
 
   beforeAll(async () => {
-    pic = await PocketIc.create(process.env.PIC_URL || 'http://localhost:4943');
+    pic = await PocketIc.create(process.env.PIC_URL || 'http://localhost:8080');
     
     // Create the main canister
     const fixture = await pic.setupCanister<_SERVICE>({

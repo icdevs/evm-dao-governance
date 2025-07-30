@@ -10,6 +10,8 @@
     "dev": "tsc --watch --noEmit",
     "serve": "python3 -m http.server 8082 --directory js",
     "serve:node": "npx http-server js -p 8082 -o",
+    "serve:voting": "python3 -m http.server 8083 --directory js",
+    "demo": "python3 -m http.server 8080 --directory js && echo 'Open http://localhost:8080/dao-voting-interface.html'",
     "anvil": "anvil --host 127.0.0.1 --port 8545",
     "deploy:anvil": "npx hardhat run scripts/deploy.ts --network anvil",
     "test:anvil": "npx hardhat run test-eth-proof.ts --network anvil",

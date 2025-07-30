@@ -156,6 +156,12 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
         evmdaobridge.icrc149_update_admin_principal(msg.caller, principal, is_admin);
     };
 
+    // Admin function to update EVM RPC canister ID
+    public shared(msg) func icrc149_update_evm_rpc_canister(canister_id: Principal) : async {#Ok: (); #Err: Text} {
+        D.print("Updating EVM RPC canister ID to: " # Principal.toText(canister_id));
+        evmdaobridge.icrc149_update_evm_rpc_canister(msg.caller, canister_id);
+    };
+
     // Return snapshot config for a proposal
     public query func icrc149_proposal_snapshot(proposal_id: Nat) : async EvmDaoBridge.ProposalSnapshot {
         D.print("Getting proposal snapshot for ID: " # Nat.toText(proposal_id));
@@ -181,7 +187,7 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
     };
 
     // Proposal Management
-    public shared(msg) func icrc149_create_proposal(proposal_args: {action: {#Motion: Text; #EthTransaction: Service.EthTx}; metadata: ?Text; members: [{id: Principal; votingPower: Nat}]; snapshot_contract: ?Text}) : async {#Ok: Nat; #Err: Text} {
+    public shared(msg) func icrc149_create_proposal(proposal_args: Service.CreateProposalRequest) : async {#Ok: Nat; #Err: Text} {
         D.print("Creating proposal");
         await* evmdaobridge.icrc149_create_proposal(msg.caller, proposal_args);
     };
@@ -191,10 +197,13 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
         await* evmdaobridge.icrc149_vote_proposal(msg.caller, vote_args);
     };
 
+    // Deprecated: Tally data is now included in icrc149_get_proposals
+    /*
     public query func icrc149_tally_votes(proposal_id: Nat) : async EvmDaoBridge.TallyResult {
         D.print("Tallying votes for proposal ID: " # Nat.toText(proposal_id));
         evmdaobridge.icrc149_tally_votes(proposal_id);
     };
+    */
 
     public shared(msg) func icrc149_execute_proposal(proposal_id: Nat) : async {#Ok: Text; #Err: Text} {
         D.print("Executing proposal ID: " # Nat.toText(proposal_id));
@@ -209,9 +218,34 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
       evmdaobridge.icrc149_get_proposal_service(id);
     };
 
-    public func icrc149_get_proposals(prev : ?Nat, take : ?Nat, filters : [Service.ProposalInfoFilter]) : async [Service.Proposal] {
-      D.print("Getting proposals with filters: " );
-      evmdaobridge.icrc149_get_proposals_service(prev, take, filters);
+    public query func icrc149_get_proposals(prev : ?Nat, take : ?Nat, filters : [Service.ProposalInfoFilter]) : async [Service.ProposalWithTally] {
+      // Use the new function that includes tally data
+      evmdaobridge.icrc149_get_proposals(prev, take, filters);
+    };
+
+    // User Vote Queries
+    public query func icrc149_get_user_votes(requests: [{proposal_id: Nat; user_address: Text}]) : async [{proposal_id: Nat; user_address: Text; vote: ?{ #Yes; #No; #Abstain }}] {
+      D.print("Getting user votes for " # Nat.toText(requests.size()) # " requests");
+      evmdaobridge.icrc149_get_user_votes(requests);
+    };
+
+    public query func icrc149_get_user_vote(proposal_id: Nat, user_address: Text) : async ?{ #Yes; #No; #Abstain } {
+      D.print("Getting user vote for address " # user_address # " on proposal " # Nat.toText(proposal_id));
+      evmdaobridge.icrc149_get_user_vote(proposal_id, user_address);
+    };
+
+    public query func icrc149_has_user_voted(proposal_id: Nat, user_address: Text) : async Bool {
+      D.print("Checking if user " # user_address # " has voted on proposal " # Nat.toText(proposal_id));
+      evmdaobridge.icrc149_has_user_voted(proposal_id, user_address);
+    };
+
+    public query func icrc149_get_proposal_with_user_vote(proposal_id: Nat, user_address: ?Text) : async ?{
+      proposal: Service.Proposal;
+      user_vote: ?{ #Yes; #No; #Abstain };
+      user_has_voted: Bool;
+    } {
+      D.print("Getting proposal " # Nat.toText(proposal_id) # " with user vote info");
+      evmdaobridge.icrc149_get_proposal_with_user_vote(proposal_id, user_address);
     };
 
     // ETH Integration
@@ -263,14 +297,20 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
     };
 
     // Get Ethereum address for the DAO using tECDSA
-    public query func icrc149_get_ethereum_address(subaccount: ?Blob) : async Text {
+    public shared func icrc149_get_ethereum_address(subaccount: ?Blob) : async Text {
         D.print("Getting Ethereum address for DAO");
-        evmdaobridge.icrc149_get_ethereum_address(subaccount);
+        await evmdaobridge.icrc149_get_ethereum_address(subaccount);
     };
 
     // Admin function to set default snapshot contract
     public shared(msg) func icrc149_set_default_snapshot_contract(contract_address: ?Text) : async {#Ok: (); #Err: Text} {
         evmdaobridge.icrc149_set_default_snapshot_contract(msg.caller, contract_address);
+    };
+
+    // Test function for parallel RPC calls
+    public shared(msg) func test_parallel_rpc_calls(rpc_canister_id: Principal) : async {#Ok: (Nat, Nat, Nat); #Err: Text} {
+        D.print("Test: Starting parallel RPC calls test");
+        await evmdaobridge.test_parallel_rpc_calls(msg.caller, rpc_canister_id);
     };
 
     //------------------- SAMPLE FUNCTION -------------------//

@@ -1,13 +1,15 @@
 // do not remove comments from this file
 import MigrationTypes "../types";
-import Time "mo:base/Time";
+import _Time "mo:base/Time";
 import Principal "mo:base/Principal";
-import Iter "mo:base/Iter";
+import _Iter "mo:base/Iter";
 import v0_1_0 "types";
 import D "mo:base/Debug";
 import BTree "mo:stableheapbtreemap/BTree";
 import Nat "mo:base/Nat";
 import Text "mo:base/Text";
+
+
 
 module {
 
@@ -64,12 +66,22 @@ module {
             var execution_contracts = executionTree;
             var approved_icp_methods = icpMethodsTree;
             var admin_principals = adminTree;
+            var proposal_duration_days = switch (args) {
+              case (?initArgs) {
+                switch (initArgs.proposal_duration_days) {
+                  case (?duration) duration;
+                  case (null) 4; // Default to 4 days if not provided
+                };
+              };
+              case (null) 4; // Default to 4 days if no args provided
+            };
             var default_snapshot_contract = if (BTree.size(snapshotTree) > 0) { 
               switch (BTree.entries(snapshotTree) |> _.next()) {
                 case (?(key, _)) { ?key };
                 case (null) { null };
               }
             } else { null };
+            var evm_rpc_canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // Default to mainnet EVM RPC canister
           };
         };
         case(null) {
@@ -103,7 +115,9 @@ module {
             var execution_contracts = executionTree;
             var approved_icp_methods = icpMethodsTree;
             var admin_principals = adminTree;
+            var proposal_duration_days = 4; // Default 4 day voting period
             var default_snapshot_contract = ?defaultSnapshotContract.contract_address;
+            var evm_rpc_canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // Default to mainnet EVM RPC canister
           };
         };
       };
@@ -111,7 +125,7 @@ module {
       snapshots = BTree.init<Nat, v0_1_0.ProposalSnapshot>(?32);
       var proposalEngine = {
         proposals = [];
-        proposalDuration = ?#days(7); // 7 day voting period
+        proposalDuration = ?#days(4); // Will be overridden by dynamic config
         votingThreshold = #percent({
           percent = 50; // 50% threshold
           quorum = ?25; // 25% quorum

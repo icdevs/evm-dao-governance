@@ -4,7 +4,7 @@ module.exports = {
   globalSetup: '<rootDir>/pic/global-setup.ts',
   globalTeardown: '<rootDir>/pic/global-teardown.ts',
   testEnvironment: 'node',
-  testTimeout: 120000, // 2 minutes for tests that start Anvil and PocketIC
+  testTimeout: 600000, // 10 minutes for full end-to-end tests
   transform: {
     '^.+\\.ts?$': ['ts-jest', { useESM: true }],
   },

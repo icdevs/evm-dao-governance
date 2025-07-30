@@ -6,7 +6,7 @@ async function testFixedWitnessValidation() {
   console.log("🔧 Testing fixed witness validation with state-based validation...");
   
   // Connect to local canister
-  const agent = new HttpAgent({ host: 'http://127.0.0.1:4943' });
+  const agent = new HttpAgent({ host: 'http://127.0.0.1:8080' });
   await agent.fetchRootKey(); // Only for local development
   
   const canister = Actor.createActor(evmDaoBridgeIdl, {

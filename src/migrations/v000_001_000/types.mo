@@ -1,5 +1,5 @@
 // do not remove comments from this file
-import Time "mo:base/Time";
+import _Time "mo:base/Time";
 import Principal "mo:base/Principal";
 import Array "mo:base/Array";
 import OVSFixed "mo:ovs-fixed";
@@ -31,6 +31,7 @@ module {
     execution_contracts: [ExecutionContractConfig];
     approved_icp_methods: [ICPMethodConfig];
     admin_principals: [Principal];
+    proposal_duration_days: ?Nat;
   };
 
   // Configuration for approved snapshot contracts (ERC-20/721 tokens for voter eligibility)
@@ -96,6 +97,8 @@ module {
     var approved_icp_methods: BTree.BTree<Text, ICPMethodConfig>; // "canister_id:method" -> config
     var admin_principals: BTree.BTree<Principal, Bool>; // admin principals set
     var default_snapshot_contract: ?Text; // default snapshot contract address
+    var proposal_duration_days: Nat; // Default proposal duration in days (default: 4)
+    var evm_rpc_canister_id: Principal; // Configurable EVM RPC canister ID (defaults to mainnet)
   };
   
   public type GovernanceConfigShared = {
@@ -104,6 +107,8 @@ module {
     approved_icp_methods: [(Text, ICPMethodConfig)];
     admin_principals: [Principal];
     default_snapshot_contract: ?Text;
+    proposal_duration_days: Nat;
+    evm_rpc_canister_id: Principal;
   };
 
   public func shareGovernanceConfig(config: GovernanceConfig) : GovernanceConfigShared {
@@ -113,6 +118,8 @@ module {
       approved_icp_methods = BTree.toArray(config.approved_icp_methods);
       admin_principals = BTree.toArray(config.admin_principals) |> Array.map(_, func((item :(Principal,Bool))) : Principal { item.0 });
       default_snapshot_contract = config.default_snapshot_contract;
+      proposal_duration_days = config.proposal_duration_days;
+      evm_rpc_canister_id = config.evm_rpc_canister_id;
     }
   };
 

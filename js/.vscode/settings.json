@@ -1,0 +1,22 @@
+{
+  "typescript.preferences.includePackageJsonAutoImports": "auto",
+  "typescript.suggest.autoImports": true,
+  "files.exclude": {
+    "**/pic/**": true,
+    "**/test/**": true,
+    "**/*.test.ts": true,
+    "**/*.test.js": true
+  },
+  "search.exclude": {
+    "**/pic/**": true,
+    "**/test/**": true,
+    "**/*.test.ts": true,
+    "**/*.test.js": true
+  },
+  "typescript.preferences.exclude": [
+    "**/pic/**",
+    "**/test/**",
+    "**/*.test.ts",
+    "**/*.test.js"
+  ]
+}

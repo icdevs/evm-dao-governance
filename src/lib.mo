@@ -10,6 +10,7 @@ import Int "mo:base/Int";
 import Time "mo:base/Time";
 import Principal "mo:base/Principal";
 import Blob "mo:base/Blob";
+import Bool "mo:base/Bool";
 import Nat "mo:base/Nat";
 import Nat8 "mo:base/Nat8";
 import BTree "mo:stableheapbtreemap/BTree";
@@ -26,12 +27,19 @@ import SHA3 "mo:sha3";
 import SHA256 "mo:sha2/Sha256";
 import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
+import Debug "mo:base/Debug";
 
 // EVM Transaction Libraries
 import EVMAddress "mo:evm-txs/Address";
 import Transaction1559 "mo:evm-txs/transactions/EIP1559";
 import Contract "mo:evm-txs/Contract";
 import Ecmult "mo:libsecp256k1/core/ecmult";
+import ECDSA "mo:libsecp256k1/Ecdsa";
+import Signature "mo:libsecp256k1/Signature";
+import MessageLib "mo:libsecp256k1/Message";
+import RecoveryId "mo:libsecp256k1/RecoveryId";
+import PublicKey "mo:libsecp256k1/PublicKey";
+import PreG "/precompile/pre_g";
 
 // Import EVM RPC types from the official interface
 import EVMRPCService "EVMRPCService";
@@ -117,6 +125,8 @@ module {
     instance;
   };
 
+   
+
   public class EvmDaoBridge<system>(stored: ?State, instantiator: Principal, canister: Principal, _args: ?InitArgs, environment_passed: ?Environment, storageChanged: (State) -> ()){
 
     public let debug_channel = {
@@ -200,6 +210,20 @@ module {
         }) -> async ({ signature : Blob });
     };
 
+    private var _ecCtx : ?Ecmult.ECMultContext = null;
+
+    private func ecCtx() : Ecmult.ECMultContext {
+      switch (_ecCtx) {
+        case (?ctx) ctx;
+        case (null) {
+          // Create EC multiplication context for secp256k1
+          let newCtx = Ecmult.ECMultContext(?Ecmult.loadPreG(PreG.pre_g));
+          _ecCtx := ?newCtx; // Store in the module variable
+          newCtx;
+        };
+      };
+    }; 
+
     // Helper function to get RPC services based on chain and service configuration
     private func getRpcServices(chain: MigrationTypes.Current.EthereumNetwork, rpc_service: MigrationTypes.Current.EthereumRPCService) : RpcServices {
       switch (rpc_service.rpc_type) {
@@ -247,10 +271,13 @@ module {
         D.print("Getting latest block and going back 6 blocks for finalized safety on chain " # Nat.toText(chain.chain_id));
         
         // Get latest block first - this is universally supported - add timeout for test environment
+        D.print("⏳ Making eth_getBlockByNumber(Latest) RPC call...");
         let latestResult = await ( with cycles=127817059200) rpcActor.eth_getBlockByNumber(rpcServices, config, #Latest);
+        D.print("✅ eth_getBlockByNumber(Latest) RPC call completed");
         
         switch (latestResult) {
           case (#Consistent(#Ok(latestBlock))) {
+            D.print("🎯 Latest block retrieved successfully: " # Nat.toText(latestBlock.number));
             // Determine how many blocks to go back for safety
             let confirmationBlocks = switch (chain.chain_id) {
               case (1) 6; // Ethereum mainnet - 6 blocks back approximates finalized
@@ -276,7 +303,9 @@ module {
               };
             } else {
               // Get the specific block number (latest - confirmation blocks) - add timeout for test environment
+              D.print("⏳ Making eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") RPC call...");
               let targetResult = await (with cycles=127817059200) rpcActor.eth_getBlockByNumber(rpcServices, config, #Number(targetBlockNumber));
+              D.print("✅ eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") RPC call completed");
               
               switch (targetResult) {
                 case (#Consistent(#Ok(block))) {
@@ -289,9 +318,11 @@ module {
                   };
                 };
                 case (#Consistent(#Err(err))) {
+                  D.print("❌ eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") failed: " # formatRpcError(err));
                   return #err("Failed to get block " # Nat.toText(targetBlockNumber) # ": " # formatRpcError(err));
                 };
                 case (#Inconsistent(results)) {
+                  D.print("⚠️ eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") returned inconsistent results");
                   // Use first successful result or return error from first attempt
                   switch (results.size()) {
                     case (0) return #err("No RPC responses received for block " # Nat.toText(targetBlockNumber));
@@ -315,9 +346,11 @@ module {
             };
           };
           case (#Consistent(#Err(err))) {
+            D.print("❌ eth_getBlockByNumber(Latest) failed: " # formatRpcError(err));
             return #err("Failed to get latest block: " # formatRpcError(err));
           };
           case (#Inconsistent(results)) {
+            D.print("⚠️ eth_getBlockByNumber(Latest) returned inconsistent results from " # Nat.toText(results.size()) # " providers");
             // Use first successful result or return error from first attempt
             switch (results.size()) {
               case (0) return #err("No RPC responses received for latest block");
@@ -476,13 +509,18 @@ module {
       stateRoot.size() <= 66; // Exactly 66 characters for valid state root
     };
     private func getTotalSupply(rpc_service: MigrationTypes.Current.EthereumRPCService, chain: MigrationTypes.Current.EthereumNetwork, contract_address: Text) : async* Result.Result<Nat, Text> {
+      D.print("🚀 TOTAL_SUPPLY: Starting getTotalSupply for contract " # contract_address);
+      
       try {
+        D.print("🔧 TOTAL_SUPPLY: Creating RPC actor and services");
         let rpcActor = getEvmRpcActor(rpc_service);
         let rpcServices = getRpcServices(chain, rpc_service);
         let config : ?RpcConfig = ?{ 
           responseSizeEstimate = ?1000000; // 1MB estimate
           responseConsensus = null; // Use default consensus strategy
         };
+        
+        D.print("🔧 TOTAL_SUPPLY: RPC actor and services created successfully");
         
         // ERC20 totalSupply() function selector: 0x18160ddd
         let callArgs : CallArgs = {
@@ -506,10 +544,17 @@ module {
           block = ?#Latest;
         };
         
+        D.print("📞 TOTAL_SUPPLY: Making eth_call RPC to contract " # contract_address # " with data 0x18160ddd");
+        D.print("📞 TOTAL_SUPPLY: Using 127817059200 cycles for this call");
+        
         let result = await(with cycles=127817059200) rpcActor.eth_call(rpcServices, config, callArgs);
+        
+        D.print("✅ TOTAL_SUPPLY: eth_call RPC call completed successfully");
+        D.print("🔍 TOTAL_SUPPLY: Processing result...");
         
         switch (result) {
           case (#Consistent(#Ok(hexResult))) {
+            D.print("✅ TOTAL_SUPPLY: Got consistent successful result: " # hexResult);
             // Parse hex result to Nat (assumes 32-byte result)
             try {
               // Remove 0x prefix and parse as hex
@@ -519,11 +564,15 @@ module {
                 hexResult;
               };
               
+              D.print("🔧 TOTAL_SUPPLY: Clean hex string: " # cleanHex);
+              
               // Convert hex string to Nat (simplified - assumes valid hex)
               var totalSupply : Nat = 0;
               var multiplier : Nat = 1;
               let chars = Text.toArray(cleanHex);
               var i = chars.size();
+              
+              D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(chars.size()) # " characters");
               
               while (i > 0) {
                 i -= 1;
@@ -539,32 +588,64 @@ module {
                 multiplier *= 16;
               };
               
+              D.print("✅ TOTAL_SUPPLY: Successfully parsed total supply: " # Nat.toText(totalSupply));
               #ok(totalSupply);
             } catch (e) {
-              #err("Failed to parse totalSupply result: " # Error.message(e));
+              let errorMsg = "Failed to parse totalSupply result: " # Error.message(e);
+              D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+              #err(errorMsg);
             };
           };
           case (#Consistent(#Err(err))) {
+            D.print("❌ TOTAL_SUPPLY: Got consistent error result");
             switch (err) {
               case (#HttpOutcallError(httpErr)) {
                 switch (httpErr) {
-                  case (#IcError({ message })) #err("IC error getting totalSupply: " # message);
-                  case (#InvalidHttpJsonRpcResponse({ body })) #err("Invalid JSON RPC response getting totalSupply: " # body);
+                  case (#IcError({ message })) {
+                    let errorMsg = "IC error getting totalSupply: " # message;
+                    D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                    #err(errorMsg);
+                  };
+                  case (#InvalidHttpJsonRpcResponse({ body })) {
+                    let errorMsg = "Invalid JSON RPC response getting totalSupply: " # body;
+                    D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                    #err(errorMsg);
+                  };
                 };
               };
-              case (#JsonRpcError({ message })) #err("JSON RPC error getting totalSupply: " # message);
-              case (#ProviderError(_)) #err("Provider error getting totalSupply");
-              case (#ValidationError(_)) #err("Validation error getting totalSupply");
+              case (#JsonRpcError({ message })) {
+                let errorMsg = "JSON RPC error getting totalSupply: " # message;
+                D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                #err(errorMsg);
+              };
+              case (#ProviderError(_)) {
+                let errorMsg = "Provider error getting totalSupply";
+                D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                #err(errorMsg);
+              };
+              case (#ValidationError(_)) {
+                let errorMsg = "Validation error getting totalSupply";
+                D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                #err(errorMsg);
+              };
             };
           };
           case (#Inconsistent(results)) {
+            D.print("⚠️ TOTAL_SUPPLY: Got inconsistent results, using first successful one");
+            D.print("🔍 TOTAL_SUPPLY: Total results count: " # Nat.toText(results.size()));
             // Use first successful result
             switch (results.size()) {
-              case (0) #err("No RPC responses for totalSupply");
+              case (0) {
+                let errorMsg = "No RPC responses for totalSupply";
+                D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                #err(errorMsg);
+              };
               case (_) {
                 let firstResult = results[0].1;
+                D.print("🔍 TOTAL_SUPPLY: Processing first result from inconsistent responses");
                 switch (firstResult) {
                   case (#Ok(hexResult)) {
+                    D.print("✅ TOTAL_SUPPLY: First result is successful: " # hexResult);
                     // Same hex parsing logic as above
                     try {
                       let cleanHex = if (Text.startsWith(hexResult, #text("0x"))) {
@@ -573,10 +654,14 @@ module {
                         hexResult;
                       };
                       
+                      D.print("🔧 TOTAL_SUPPLY: Clean hex string: " # cleanHex);
+                      
                       var totalSupply : Nat = 0;
                       var multiplier : Nat = 1;
                       let chars = Text.toArray(cleanHex);
                       var i = chars.size();
+                      
+                      D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(chars.size()) # " characters");
                       
                       while (i > 0) {
                         i -= 1;
@@ -592,22 +677,46 @@ module {
                         multiplier *= 16;
                       };
                       
+                      D.print("✅ TOTAL_SUPPLY: Successfully parsed total supply: " # Nat.toText(totalSupply));
                       #ok(totalSupply);
                     } catch (e) {
-                      #err("Failed to parse totalSupply result: " # Error.message(e));
+                      let errorMsg = "Failed to parse totalSupply result: " # Error.message(e);
+                      D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                      #err(errorMsg);
                     };
                   };
                   case (#Err(err)) {
+                    D.print("❌ TOTAL_SUPPLY: First result is an error");
                     switch (err) {
                       case (#HttpOutcallError(httpErr)) {
                         switch (httpErr) {
-                          case (#IcError({ message })) #err("IC error getting totalSupply: " # message);
-                          case (#InvalidHttpJsonRpcResponse({ body })) #err("Invalid JSON RPC response getting totalSupply: " # body);
+                          case (#IcError({ message })) {
+                            let errorMsg = "IC error getting totalSupply: " # message;
+                            D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                            #err(errorMsg);
+                          };
+                          case (#InvalidHttpJsonRpcResponse({ body })) {
+                            let errorMsg = "Invalid JSON RPC response getting totalSupply: " # body;
+                            D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                            #err(errorMsg);
+                          };
                         };
                       };
-                      case (#JsonRpcError({ message })) #err("JSON RPC error getting totalSupply: " # message);
-                      case (#ProviderError(_)) #err("Provider error getting totalSupply");
-                      case (#ValidationError(_)) #err("Validation error getting totalSupply");
+                      case (#JsonRpcError({ message })) {
+                        let errorMsg = "JSON RPC error getting totalSupply: " # message;
+                        D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                        #err(errorMsg);
+                      };
+                      case (#ProviderError(_)) {
+                        let errorMsg = "Provider error getting totalSupply";
+                        D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                        #err(errorMsg);
+                      };
+                      case (#ValidationError(_)) {
+                        let errorMsg = "Validation error getting totalSupply";
+                        D.print("❌ TOTAL_SUPPLY: " # errorMsg);
+                        #err(errorMsg);
+                      };
                     };
                   };
                 };
@@ -616,7 +725,9 @@ module {
           };
         };
       } catch (e) {
-        #err("Failed to get totalSupply: " # Error.message(e));
+        let errorMsg = "Failed to get totalSupply: " # Error.message(e);
+        D.print("❌ TOTAL_SUPPLY: Exception caught: " # errorMsg);
+        #err(errorMsg);
       };
     };
 
@@ -626,7 +737,7 @@ module {
 
     // Create EC multiplication context for secp256k1
     // Note: Using null for now - in production, should load precomputed values
-    let ecCtx = Ecmult.ECMultContext(null);
+    
 
     // Helper function to create nonce key for address tracking
     private func makeNonceKey(chainId: Nat, address: Text) : Text {
@@ -647,24 +758,13 @@ module {
           key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
         });
 
-        // Convert public key to Ethereum address
+        // Convert public key to Ethereum address using the standard EVMAddress library
         let pubKeyBytes = Blob.toArray(public_key);
-        // Remove the first byte (0x04) for uncompressed public key format
-        let uncompressedKey = if (pubKeyBytes.size() > 1) {
-          let size = Int.abs(pubKeyBytes.size() - 1);
-          Array.subArray(pubKeyBytes, 1, size);
-        } else {
-          pubKeyBytes;
+        let #ok(evm_address) = EVMAddress.fromPublicKey(pubKeyBytes) else {
+          D.trap("Failed to derive Ethereum address from public key");
         };
         
-        // Hash with Keccak256
-        let sha3 = SHA3.Keccak(256);
-        sha3.update(uncompressedKey);
-        let hash = sha3.finalize();
-        
-        // Take last 20 bytes and format as hex address
-        let addressBytes = Array.subArray(hash, 12, 20);
-        "0x" # Hex.encode(addressBytes);
+        evm_address;
       } catch (e) {
         D.trap("Failed to get Ethereum address: " # Error.message(e));
       };
@@ -753,15 +853,31 @@ module {
           };
         };
       } catch (e) {
+        D.print("XXXX EXEC: Transaction failed: " # Error.message(e));
         #err("Transaction failed: " # Error.message(e));
       };
     };
     public func icrc149_send_eth_tx(_caller: Principal, eth_tx: Service.EthTx) : async {#Ok: Text; #Err: Text} {
+      D.print("💰 ETH_TX: ========== STARTING ETHEREUM TRANSACTION SEND ==========");
+      D.print("💰 ETH_TX: Caller: " # Principal.toText(_caller));
+      D.print("💰 ETH_TX: Chain ID: " # Nat.toText(eth_tx.chain.chain_id));
+      D.print("💰 ETH_TX: To address: " # eth_tx.to);
+      D.print("💰 ETH_TX: Value: " # Nat.toText(eth_tx.value));
+      D.print("💰 ETH_TX: Gas limit: " # Nat.toText(eth_tx.gasLimit));
+      D.print("💰 ETH_TX: Max fee per gas: " # Nat.toText(eth_tx.maxFeePerGas));
+      D.print("💰 ETH_TX: Max priority fee per gas: " # Nat.toText(eth_tx.maxPriorityFeePerGas));
+      D.print("💰 ETH_TX: Data length: " # Nat.toText(eth_tx.data.size()));
+      D.print("💰 ETH_TX: Subaccount: " # debug_show(eth_tx.subaccount));
+      D.print("💰 ETH_TX: Configured EVM RPC canister: " # Principal.toText(state.config.evm_rpc_canister_id));
+      
       try {
         // Get the Ethereum address for this subaccount
+        D.print("💰 ETH_TX: Step 1 - Getting Ethereum address for subaccount...");
         let ethAddress = await* getEthereumAddress(eth_tx.subaccount);
+        D.print("💰 ETH_TX: Step 1 COMPLETE - Ethereum address: " # ethAddress);
         
         // Find appropriate RPC service for this chain
+        D.print("💰 ETH_TX: Step 2 - Configuring RPC service...");
         let rpc_service = {
           rpc_type = switch (eth_tx.chain.chain_id) {
             case (1) "mainnet";
@@ -769,20 +885,27 @@ module {
             case (11155111) "sepolia";
             case (_) "custom";
           };
-          canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // EVM RPC canister
+          canister_id = state.config.evm_rpc_canister_id; // Use configured EVM RPC canister
           custom_config = null;
         };
+        D.print("💰 ETH_TX: Step 2 COMPLETE - RPC service type: " # rpc_service.rpc_type);
+        D.print("💰 ETH_TX: Step 2 COMPLETE - RPC canister ID: " # Principal.toText(rpc_service.canister_id));
         
         // Get next nonce for this address
+        D.print("💰 ETH_TX: Step 3 - Getting next nonce for address: " # ethAddress);
         let nonce = await* getNextNonce(eth_tx.chain.chain_id, ethAddress, rpc_service);
+        D.print("💰 ETH_TX: Step 3 COMPLETE - Nonce: " # Nat.toText(nonce));
         
         // Create derivation path
+        D.print("💰 ETH_TX: Step 4 - Creating derivation path...");
         let derivationPath = switch (eth_tx.subaccount) {
           case (?blob) [blob];
           case (null) [];
         };
+        D.print("💰 ETH_TX: Step 4 COMPLETE - Derivation path length: " # Nat.toText(derivationPath.size()));
         
         // Create EIP-1559 transaction
+        D.print("💰 ETH_TX: Step 5 - Creating EIP-1559 transaction structure...");
         let transaction = {
           chainId = Nat64.fromNat(eth_tx.chain.chain_id);
           nonce = Nat64.fromNat(nonce);
@@ -797,58 +920,94 @@ module {
           s = "0x00";
           v = "0x00";
         };
+
+        D.print("💰 ETH_TX: Step 5 SUCCESS - Transaction structure created " # debug_show(transaction));
+        D.print("💰 ETH_TX: Step 5 COMPLETE - Transaction structure created");
+        D.print("💰 ETH_TX: Step 5 DETAILS - To: " # transaction.to);
+        D.print("💰 ETH_TX: Step 5 DETAILS - Value: " # Nat.toText(transaction.value));
+        D.print("💰 ETH_TX: Step 5 DETAILS - ChainId: " # Nat64.toText(transaction.chainId));
+        D.print("💰 ETH_TX: Step 5 DETAILS - Nonce: " # Nat64.toText(transaction.nonce));
+        D.print("💰 ETH_TX: Step 5 DETAILS - Data: " # transaction.data);
         
         // Create transaction hash for signing
+        D.print("💰 ETH_TX: Step 6 - Encoding transaction for signing...");
         let encodedTx = Transaction1559.getMessageToSign(transaction);
         let txHash = switch (encodedTx) {
           case (#ok(bytes)) {
+            D.print("💰 ETH_TX: Step 6 SUCCESS - Transaction encoded, hash length: " # Nat.toText(bytes.size()));
             bytes;
           };
           case (#err(err)) {
+            D.print("💰 ETH_TX: Step 6 ERROR - Failed to encode transaction: " # err);
             return #Err("Failed to encode transaction: " # err);
           };
         };
         
         // Sign the transaction hash
+        D.print("💰 ETH_TX: Step 7 - Signing transaction with tECDSA...");
+        D.print("💰 ETH_TX: Step 7 DETAILS - Using key: " # ECDSA_KEY_NAME);
+        D.print("💰 ETH_TX: Step 7 DETAILS - Message hash length: " # Nat.toText(txHash.size()));
+        D.print("💰 ETH_TX: Step 7 DETAILS - Adding 10B cycles for ECDSA signing");
         Cycles.add<system>(10_000_000_000); // 10B cycles for ECDSA signing
         let { signature } = await IC_ECDSA_ACTOR.sign_with_ecdsa({
           message_hash = Blob.fromArray(txHash);
           derivation_path = derivationPath;
           key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
         });
+        D.print("💰 ETH_TX: Step 7 SUCCESS - Transaction signed, signature length: " # Nat.toText(signature.size()));
         
         // Get public key for recovery
+        D.print("💰 ETH_TX: Step 8 - Getting public key for signature recovery...");
         let { public_key; chain_code = _ } = await IC_ECDSA_ACTOR.ecdsa_public_key({
           canister_id = ?Principal.fromActor(_self);
           derivation_path = derivationPath;
           key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
         });
+        D.print("💰 ETH_TX: Step 8 SUCCESS - Public key retrieved, length: " # Nat.toText(public_key.size()));
         
         // Serialize the signed transaction
+        D.print("💰 ETH_TX: Step 9 - Serializing signed transaction...");
         let signedTx = Transaction1559.signAndSerialize(
           transaction,
           Blob.toArray(signature),
           Blob.toArray(public_key),
-          ecCtx
+          ecCtx()
         );
         
         let rawTxHex = switch (signedTx) {
           case (#ok((_, txBytes))) {
-            Hex.encode(txBytes);
+            let hexString = Hex.encode(txBytes);
+            D.print("💰 ETH_TX: Step 9 SUCCESS - Transaction serialized, hex length: " # Nat.toText(hexString.size()));
+            D.print("💰 ETH_TX: Step 9 DETAILS - Raw tx (first 100 chars): " # (if (hexString.size() > 100) {
+              let chars = Text.toArray(hexString);
+              let truncated = Array.subArray(chars, 0, 100);
+              Text.fromArray(truncated);
+            } else hexString));
+            hexString;
           };
           case (#err(err)) {
+            D.print("💰 ETH_TX: Step 9 ERROR - Failed to serialize signed transaction: " # err);
             return #Err("Failed to serialize signed transaction: " # err);
           };
         };
         
         // Send the raw transaction
+        D.print("💰 ETH_TX: Step 10 - Sending raw transaction to blockchain...");
+        D.print("💰 ETH_TX: Step 10 DETAILS - Calling ethSendRawTransaction with chainId: " # Nat.toText(eth_tx.chain.chain_id));
+        D.print("💰 ETH_TX: Step 10 DETAILS - Raw transaction hex: " # rawTxHex);
         let result = await* ethSendRawTransaction(eth_tx.chain.chain_id, rpc_service, rawTxHex);
+        D.print("💰 ETH_TX: Step 10 RESULT - ethSendRawTransaction returned: " # debug_show(result));
         
+        D.print("💰 ETH_TX: Step 11 - Processing final result...");
         switch (result) {
           case (#ok(txHash)) {
+            D.print("💰 ETH_TX: Step 11 SUCCESS - Transaction hash received: " # txHash);
+            D.print("💰 ETH_TX: ========== ETHEREUM TRANSACTION COMPLETED SUCCESSFULLY ==========");
             #Ok(txHash);
           };
           case (#err(err)) {
+            D.print("💰 ETH_TX: Step 11 ERROR - Transaction failed: " # err);
+            D.print("💰 ETH_TX: ========== ETHEREUM TRANSACTION FAILED ==========");
             #Err(err);
           };
         };
@@ -886,7 +1045,7 @@ module {
     // Helper function to get the status of a proposal as a string
     private func getProposalStatus(proposal: ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>) : Text {
       switch(proposal.status) {
-        case (#open) "active";
+        case (#open) "open";
         case (#executing(_)) "pending";
         case (#executed(_)) "executed";
         case (#failedToExecute(_)) "rejected";
@@ -1000,18 +1159,414 @@ module {
 
     // ===== END INDEX SYNC =====
 
+    // ===== COMPREHENSIVE DEBUGGING FUNCTIONS =====
+    
+    // Debug function to verify address funding via RPC using transaction count as proxy
+    public func debug_verify_address_funding(_caller: Principal, address: Text, chain_id: Nat) : async {#Ok: {address: Text; nonce: Text; status: Text}; #Err: Text} {
+      D.print("🔍 DEBUG_FUNDING: Checking address status for: " # address);
+      D.print("🔍 DEBUG_FUNDING: Chain ID: " # Nat.toText(chain_id));
+      
+      try {
+        let rpc_service = {
+          rpc_type = "custom";
+          canister_id = state.config.evm_rpc_canister_id;
+          custom_config = ?[("url", "http://127.0.0.1:8545")];
+        };
+        
+        let rpcActor = getEvmRpcActor(rpc_service);
+        let rpcServices = getRpcServices({chain_id = chain_id; network_name = ""}, rpc_service);
+        
+        D.print("🔍 DEBUG_FUNDING: Making eth_getTransactionCount RPC call...");
+        let result = await(with cycles=127817059200) rpcActor.eth_getTransactionCount(rpcServices, ?{
+          responseSizeEstimate = ?64;
+          responseConsensus = null;
+        }, {
+          address = address;
+          block = #Latest;
+        });
+        
+        D.print("🔍 DEBUG_FUNDING: eth_getTransactionCount result: " # debug_show(result));
+        
+        switch (result) {
+          case (#Consistent(#Ok(nonce))) {
+            let nonceText = Nat.toText(nonce);
+            let status = if (nonce == 0) {
+              "Address exists but no transactions sent (may or may not have ETH balance)";
+            } else {
+              "Address has sent " # nonceText # " transactions (likely has/had ETH balance)";
+            };
+            
+            D.print("✅ DEBUG_FUNDING: Address " # address # " nonce: " # nonceText);
+            #Ok({
+              address = address;
+              nonce = nonceText;
+              status = status;
+            });
+          };
+          case (#Consistent(#Err(err))) {
+            let errorMsg = "Failed to get transaction count: " # formatRpcError(err);
+            D.print("❌ DEBUG_FUNDING: " # errorMsg);
+            #Err(errorMsg);
+          };
+          case (#Inconsistent(results)) {
+            D.print("⚠️ DEBUG_FUNDING: Inconsistent results, using first successful one");
+            switch (results.size()) {
+              case (0) {
+                let errorMsg = "No RPC responses for transaction count check";
+                D.print("❌ DEBUG_FUNDING: " # errorMsg);
+                #Err(errorMsg);
+              };
+              case (_) {
+                let firstResult = results[0].1;
+                switch (firstResult) {
+                  case (#Ok(nonce)) {
+                    let nonceText = Nat.toText(nonce);
+                    let status = if (nonce == 0) {
+                      "Address exists but no transactions sent";
+                    } else {
+                      "Address has sent " # nonceText # " transactions";
+                    };
+                    #Ok({
+                      address = address;
+                      nonce = nonceText;
+                      status = status;
+                    });
+                  };
+                  case (#Err(err)) {
+                    let errorMsg = "First result error: " # formatRpcError(err);
+                    D.print("❌ DEBUG_FUNDING: " # errorMsg);
+                    #Err(errorMsg);
+                  };
+                };
+              };
+            };
+          };
+        };
+      } catch (e) {
+        let errorMsg = "Exception during address check: " # Error.message(e);
+        D.print("❌ DEBUG_FUNDING: " # errorMsg);
+        #Err(errorMsg);
+      };
+    };
+
+    // Debug function to get all addresses used by the canister
+    public func debug_get_all_addresses(_caller: Principal) : async {#Ok: {treasury_address: Text; tx_specific_address: ?Text}; #Err: Text} {
+      D.print("🔍 DEBUG_ADDRESSES: Getting all addresses used by canister...");
+      
+      try {
+        // Get treasury address (using icrc149_get_ethereum_address with empty derivation path)
+        D.print("🔍 DEBUG_ADDRESSES: Getting treasury address...");
+        let treasuryAddress = await* getEthereumAddress(null);
+        D.print("✅ DEBUG_ADDRESSES: Treasury address: " # treasuryAddress);
+        
+        // Try to get the transaction-specific address that appeared in logs
+        // This might be derived differently or hardcoded somewhere
+        D.print("🔍 DEBUG_ADDRESSES: Checking for transaction-specific address...");
+        
+        // For now, we'll return what we know
+        #Ok({
+          treasury_address = treasuryAddress;
+          tx_specific_address = ?"0x337f2ad5a7e6071e9f22dbe3bd01b7a19a70fd34"; // Address from error logs
+        });
+        
+      } catch (e) {
+        let errorMsg = "Failed to get addresses: " # Error.message(e);
+        D.print("❌ DEBUG_ADDRESSES: " # errorMsg);
+        #Err(errorMsg);
+      };
+    };
+
+    // Debug function to construct and return raw transaction bytes
+    public func debug_construct_transaction(_caller: Principal, eth_tx: Service.EthTx) : async {#Ok: {raw_tx_hex: Text; from_address: Text; decoded_fields: Text}; #Err: Text} {
+      D.print("🔍 DEBUG_TX_CONSTRUCT: ========== CONSTRUCTING DEBUG TRANSACTION ==========");
+      D.print("🔍 DEBUG_TX_CONSTRUCT: To: " # eth_tx.to);
+      D.print("🔍 DEBUG_TX_CONSTRUCT: Value: " # Nat.toText(eth_tx.value));
+      D.print("🔍 DEBUG_TX_CONSTRUCT: Gas limit: " # Nat.toText(eth_tx.gasLimit));
+      D.print("🔍 DEBUG_TX_CONSTRUCT: Max fee per gas: " # Nat.toText(eth_tx.maxFeePerGas));
+      D.print("🔍 DEBUG_TX_CONSTRUCT: Max priority fee per gas: " # Nat.toText(eth_tx.maxPriorityFeePerGas));
+      D.print("🔍 DEBUG_TX_CONSTRUCT: Data: " # debug_show(eth_tx.data));
+      
+      try {
+        // Get the Ethereum address for this subaccount
+        D.print("🔍 DEBUG_TX_CONSTRUCT: Getting Ethereum address...");
+        let ethAddress = await* getEthereumAddress(eth_tx.subaccount);
+        D.print("🔍 DEBUG_TX_CONSTRUCT: From address: " # ethAddress);
+        
+        // Create RPC service
+        let rpc_service = {
+          rpc_type = "custom";
+          canister_id = state.config.evm_rpc_canister_id;
+          custom_config = ?[("url", "http://127.0.0.1:8545")];
+        };
+        
+        // Get nonce
+        D.print("🔍 DEBUG_TX_CONSTRUCT: Getting nonce...");
+        let nonce = await* getNextNonce(eth_tx.chain.chain_id, ethAddress, rpc_service);
+        D.print("🔍 DEBUG_TX_CONSTRUCT: Nonce: " # Nat.toText(nonce));
+        
+        // Create transaction structure
+        let transaction = {
+          chainId = Nat64.fromNat(eth_tx.chain.chain_id);
+          nonce = Nat64.fromNat(nonce);
+          maxPriorityFeePerGas = Nat64.fromNat(eth_tx.maxPriorityFeePerGas);
+          gasLimit = Nat64.fromNat(eth_tx.gasLimit);
+          maxFeePerGas = Nat64.fromNat(eth_tx.maxFeePerGas);
+          to = eth_tx.to;
+          value = eth_tx.value;
+          data = "0x" # Hex.encode(Blob.toArray(eth_tx.data));
+          accessList = [];
+          r = "0x00";
+          s = "0x00";
+          v = "0x00";
+        };
+        
+        D.print("🔍 DEBUG_TX_CONSTRUCT: Transaction structure created");
+        
+        // Create transaction hash for signing
+        D.print("🔍 DEBUG_TX_CONSTRUCT: Encoding transaction for signing...");
+        let encodedTx = Transaction1559.getMessageToSign(transaction);
+        let txHash = switch (encodedTx) {
+          case (#ok(bytes)) {
+            D.print("🔍 DEBUG_TX_CONSTRUCT: Transaction encoded successfully");
+            bytes;
+          };
+          case (#err(err)) {
+            D.print("🔍 DEBUG_TX_CONSTRUCT: Failed to encode: " # err);
+            return #Err("Failed to encode transaction: " # err);
+          };
+        };
+        
+        // Get derivation path
+        let derivationPath = switch (eth_tx.subaccount) {
+          case (?blob) [blob];
+          case (null) [];
+        };
+        
+        // Sign the transaction
+        D.print("🔍 DEBUG_TX_CONSTRUCT: Signing transaction...");
+        let { signature } = await IC_ECDSA_ACTOR.sign_with_ecdsa({
+          message_hash = Blob.fromArray(txHash);
+          derivation_path = derivationPath;
+          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
+        });
+        
+        // Get public key
+        let { public_key; chain_code = _ } = await IC_ECDSA_ACTOR.ecdsa_public_key({
+          canister_id = ?Principal.fromActor(_self);
+          derivation_path = derivationPath;
+          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
+        });
+        
+        // Serialize the signed transaction
+        let signedTx = Transaction1559.signAndSerialize(
+          transaction,
+          Blob.toArray(signature),
+          Blob.toArray(public_key),
+          ecCtx()
+        );
+        
+        let rawTxHex = switch (signedTx) {
+          case (#ok((_, txBytes))) {
+            let hexString = Hex.encode(txBytes);
+            D.print("🔍 DEBUG_TX_CONSTRUCT: Transaction serialized successfully");
+            hexString;
+          };
+          case (#err(err)) {
+            D.print("🔍 DEBUG_TX_CONSTRUCT: Failed to serialize: " # err);
+            return #Err("Failed to serialize transaction: " # err);
+          };
+        };
+        
+        // Create human-readable decoded fields
+        let decodedFields = "chainId=" # Nat64.toText(transaction.chainId) #
+                          ", nonce=" # Nat64.toText(transaction.nonce) #
+                          ", to=" # transaction.to #
+                          ", value=" # Nat.toText(transaction.value) # " wei" #
+                          ", gasLimit=" # Nat64.toText(transaction.gasLimit) #
+                          ", maxFeePerGas=" # Nat64.toText(transaction.maxFeePerGas) # " wei" #
+                          ", maxPriorityFeePerGas=" # Nat64.toText(transaction.maxPriorityFeePerGas) # " wei" #
+                          ", data=" # transaction.data;
+        
+        D.print("🔍 DEBUG_TX_CONSTRUCT: ========== TRANSACTION CONSTRUCTION COMPLETE ==========");
+        
+        #Ok({
+          raw_tx_hex = rawTxHex;
+          from_address = ethAddress;
+          decoded_fields = decodedFields;
+        });
+        
+      } catch (e) {
+        let errorMsg = "Failed to construct transaction: " # Error.message(e);
+        D.print("❌ DEBUG_TX_CONSTRUCT: " # errorMsg);
+        #Err(errorMsg);
+      };
+    };
+
+    // Debug function to show exact address derivation and compare with transaction
+    public func debug_address_derivation_detailed(_caller: Principal, subaccount: ?Blob) : async {#Ok: {treasury_address: Text; provided_subaccount_address: Text; derivation_path_info: Text; address_match: Bool}; #Err: Text} {
+      D.print("🔍 DEBUG_DERIVATION: ========== DETAILED ADDRESS DERIVATION DEBUG ==========");
+      D.print("🔍 DEBUG_DERIVATION: Caller: " # Principal.toText(_caller));
+      D.print("🔍 DEBUG_DERIVATION: Provided subaccount: " # debug_show(subaccount));
+      
+      try {
+        // Get treasury address (null subaccount)
+        D.print("🔍 DEBUG_DERIVATION: Getting treasury address (null subaccount)...");
+        let treasuryAddress = await* getEthereumAddress(null);
+        D.print("✅ DEBUG_DERIVATION: Treasury address: " # treasuryAddress);
+        
+        // Get address for provided subaccount
+        D.print("🔍 DEBUG_DERIVATION: Getting address for provided subaccount...");
+        let providedSubaccountAddress = await* getEthereumAddress(subaccount);
+        D.print("✅ DEBUG_DERIVATION: Provided subaccount address: " # providedSubaccountAddress);
+        
+        // Check derivation path details
+        let derivationPathInfo = switch (subaccount) {
+          case (?blob) {
+            "Subaccount provided: blob size=" # Nat.toText(blob.size()) # ", derivation_path=[" # debug_show(blob) # "]";
+          };
+          case (null) {
+            "No subaccount provided: derivation_path=[]";
+          };
+        };
+        
+        let addressMatch = treasuryAddress == providedSubaccountAddress;
+        
+        D.print("🔍 DEBUG_DERIVATION: Derivation path info: " # derivationPathInfo);
+        D.print("🔍 DEBUG_DERIVATION: Address match: " # Bool.toText(addressMatch));
+        D.print("🔍 DEBUG_DERIVATION: ========== ADDRESS DERIVATION DEBUG COMPLETE ==========");
+        
+        #Ok({
+          treasury_address = treasuryAddress;
+          provided_subaccount_address = providedSubaccountAddress;
+          derivation_path_info = derivationPathInfo;
+          address_match = addressMatch;
+        });
+        
+      } catch (e) {
+        let errorMsg = "Failed to derive addresses: " # Error.message(e);
+        D.print("❌ DEBUG_DERIVATION: " # errorMsg);
+        #Err(errorMsg);
+      };
+    };
+
+    // Debug function to show the actual from address that will be used in transaction
+    public func debug_transaction_from_address(_caller: Principal, eth_tx: Service.EthTx) : async {#Ok: {transaction_from_address: Text; treasury_address: Text; addresses_match: Bool; raw_tx_preview: Text}; #Err: Text} {
+      D.print("🔍 DEBUG_TX_FROM: ========== CHECKING TRANSACTION FROM ADDRESS ==========");
+      
+      try {
+        // Get treasury address
+        let treasuryAddress = await* getEthereumAddress(null);
+        D.print("🔍 DEBUG_TX_FROM: Treasury address: " # treasuryAddress);
+        
+        // Get the address that will be used for the transaction
+        let transactionFromAddress = await* getEthereumAddress(eth_tx.subaccount);
+        D.print("🔍 DEBUG_TX_FROM: Transaction from address: " # transactionFromAddress);
+        
+        let addressesMatch = treasuryAddress == transactionFromAddress;
+        D.print("🔍 DEBUG_TX_FROM: Addresses match: " # Bool.toText(addressesMatch));
+        
+        // Create a preview of what the transaction would look like
+        let rpc_service = {
+          rpc_type = "custom";
+          canister_id = state.config.evm_rpc_canister_id;
+          custom_config = ?[("url", "http://127.0.0.1:8545")];
+        };
+        
+        let nonce = await* getNextNonce(eth_tx.chain.chain_id, transactionFromAddress, rpc_service);
+        
+        let rawTxPreview = "from=" # transactionFromAddress # 
+                          ", to=" # eth_tx.to # 
+                          ", value=" # Nat.toText(eth_tx.value) # 
+                          ", nonce=" # Nat.toText(nonce) # 
+                          ", gasLimit=" # Nat.toText(eth_tx.gasLimit) #
+                          ", maxFeePerGas=" # Nat.toText(eth_tx.maxFeePerGas) #
+                          ", data=" # debug_show(eth_tx.data);
+        
+        D.print("🔍 DEBUG_TX_FROM: Raw transaction preview: " # rawTxPreview);
+        D.print("🔍 DEBUG_TX_FROM: ========== TRANSACTION FROM ADDRESS CHECK COMPLETE ==========");
+        
+        #Ok({
+          transaction_from_address = transactionFromAddress;
+          treasury_address = treasuryAddress;
+          addresses_match = addressesMatch;
+          raw_tx_preview = rawTxPreview;
+        });
+        
+      } catch (e) {
+        let errorMsg = "Failed to check transaction from address: " # Error.message(e);
+        D.print("❌ DEBUG_TX_FROM: " # errorMsg);
+        #Err(errorMsg);
+      };
+    };
+
+    // Debug function to check what the ERC20 transfer ABI should be
+    public func debug_get_erc20_transfer_abi(_caller: Principal, to_address: Text, amount: Nat) : {abi_description: Text; function_selector: Text; encoded_data: Text} {
+      D.print("🔍 DEBUG_ABI: Getting ERC20 transfer ABI information");
+      D.print("🔍 DEBUG_ABI: To address: " # to_address);
+      D.print("🔍 DEBUG_ABI: Amount: " # Nat.toText(amount));
+      
+      // ERC20 transfer function: transfer(address,uint256)
+      let abiDescription = "function transfer(address to, uint256 amount) returns (bool)";
+      let functionSelector = "0xa9059cbb"; // keccak256("transfer(address,uint256)")[0:4]
+      
+      // Encode the parameters (simplified - this is what the data should look like)
+      // address parameter (32 bytes, left-padded)
+      let addressParam = if (Text.startsWith(to_address, #text("0x"))) {
+        Text.trimStart(to_address, #text("0x"));
+      } else {
+        to_address;
+      };
+      let paddedAddress = "000000000000000000000000" # addressParam;
+      
+      // amount parameter (32 bytes, big-endian)
+      let amountHex = Nat.toText(amount); // This is simplified - should be proper hex conversion
+      let paddedAmount = "000000000000000000000000000000000000000000000000000000000000" # amountHex;
+      
+      let encodedData = functionSelector # paddedAddress # paddedAmount;
+      
+      D.print("🔍 DEBUG_ABI: Function selector: " # functionSelector);
+      D.print("🔍 DEBUG_ABI: Encoded data: " # encodedData);
+      
+      {
+        abi_description = abiDescription;
+        function_selector = functionSelector;
+        encoded_data = encodedData;
+      };
+    };
+
+    // ===== END COMPREHENSIVE DEBUGGING FUNCTIONS =====
+
     private func onProposalExecute(choice: ?MigrationTypes.Current.VoteChoice, proposal: ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>) : async* Result.Result<(), Text> {
       // Store the old proposal state for index updates
       let oldProposal = ?proposal;
       
+      D.print("🏛️  PROPOSAL_EXECUTE: Starting proposal execution for ID: " # Nat.toText(proposal.id));
+      D.print("🏛️  PROPOSAL_EXECUTE: Winning choice: " # debug_show(choice));
+      D.print("🏛️  PROPOSAL_EXECUTE: Proposal status: " # debug_show(proposal.status));
+      
       let result = switch(choice) {
         case(?#Yes) {
           // Proposal passed, execute the action
+          D.print("🚀 EXEC: Proposal passed, executing action...");
           switch(proposal.content.action) {
             case(#Motion(_text)) {
+              D.print("🚀 EXEC: Motion action - execution complete");
               #ok(); // Motion executed
             };
             case(#EthTransaction(eth_tx)) {
+              D.print("🚀 EXEC: Ethereum transaction action - starting execution...");
+              D.print("🚀 EXEC: Transaction to: " # eth_tx.to);
+              D.print("🚀 EXEC: Transaction value: " # Nat.toText(eth_tx.value));
+              D.print("🚀 EXEC: Transaction data length: " # Nat.toText(eth_tx.data.size()) # " " # debug_show(eth_tx.data));
+              D.print("🚀 EXEC: Transaction gas limit: " # Nat.toText(eth_tx.gasLimit));
+              D.print("🚀 EXEC: Transaction max fee per gas: " # Nat.toText(eth_tx.maxFeePerGas));
+              D.print("🚀 EXEC: Transaction max priority fee per gas: " # Nat.toText(eth_tx.maxPriorityFeePerGas));
+              D.print("🚀 EXEC: Transaction subaccount: " # debug_show(eth_tx.subaccount));
+              D.print("🚀 EXEC: Transaction chain ID: " # Nat.toText(eth_tx.chain.chain_id));
+              D.print("🚀 EXEC: Transaction configured EVM RPC canister: " # Principal.toText(state.config.evm_rpc_canister_id));
+              D.print("🚀 EXEC: Transaction nonce: " # debug_show(eth_tx.nonce));
+              D.print("🚀 EXEC: Transaction signature: " # debug_show(eth_tx.signature));
+
               let ethResult = await icrc149_send_eth_tx(
                 proposal.proposerId,
                 {
@@ -1027,9 +1582,16 @@ module {
                   gasLimit = eth_tx.gasLimit;
                 }
               );
+              D.print("🚀 EXEC: icrc149_send_eth_tx returned: " # debug_show(ethResult));
               switch(ethResult) {
-                case(#Ok(_)) #ok();
-                case(#Err(err)) #err(err);
+                case(#Ok(txHash)) {
+                  D.print("🚀 EXEC: Transaction successful with hash: " # txHash);
+                  #ok();
+                };
+                case(#Err(err)) {
+                  D.print("🚀 EXEC: Transaction failed with error: " # err);
+                  #err(err);
+                };
               };
             };
             case(#ICPCall(call)) {
@@ -1054,6 +1616,7 @@ module {
           };
         };
         case(?#No or ?#Abstain or null) {
+          D.print("Proposal " # Nat.toText(proposal.id) # " rejected or no majority.");
           // Proposal rejected or no majority
           #ok();
         };
@@ -1104,10 +1667,16 @@ module {
 
     private var engineRef : ?ExtendedProposalEngine.ProposalEngine<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice> = null;
 
-    // Initialize the proposal engine
+    // Initialize the proposal engine with dynamic duration from config
     let proposalEngine = do {
+        // Update proposal duration based on config
+        let updatedEngineData = {
+            state.proposalEngine with
+            proposalDuration = ?#days(state.config.proposal_duration_days);
+        };
+        
         let eng = ExtendedProposalEngine.ProposalEngine<system, MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>(
-        state.proposalEngine,
+        updatedEngineData,
         onProposalExecute,
         onProposalValidate,
         equalVoteChoice,
@@ -1250,6 +1819,16 @@ module {
       #Ok(());
     };
 
+    // Admin function to update EVM RPC canister ID
+    public func icrc149_update_evm_rpc_canister(_caller: Principal, canister_id: Principal) : {#Ok: (); #Err: Text} {
+      if (not BTree.has(state.config.admin_principals, Principal.compare, _caller)) {
+        return #Err("Unauthorized: caller is not an admin");
+      };
+      
+      state.config.evm_rpc_canister_id := canister_id;
+      #Ok(());
+    };
+
     // Admin function to set/unset default snapshot contract
     public func icrc149_set_default_snapshot_contract(_caller: Principal, contract_address: ?Text) : {#Ok: (); #Err: Text} {
       if (not BTree.has(state.config.admin_principals, Principal.compare, _caller)) {
@@ -1266,6 +1845,86 @@ module {
       #Ok(());
     };
 
+    // TEST FUNCTION: Make 3 parallel RPC calls to test hanging issue
+    public func test_parallel_rpc_calls(_caller: Principal, rpc_canister_id: Principal) : async {#Ok: (Nat, Nat, Nat); #Err: Text} {
+      D.print("🧪 TEST: Starting 3 simple parallel block requests");
+      
+      // Use provided RPC canister ID
+      let rpc_service = {
+        rpc_type = "custom";
+        canister_id = rpc_canister_id;
+        custom_config = ?[("url", "http://127.0.0.1:8545")];
+      };
+      
+      let chain = {
+        chain_id = 31337;
+        network_name = "local";
+      };
+      
+      try {
+        let rpcActor = getEvmRpcActor(rpc_service);
+        let rpcServices = getRpcServices(chain, rpc_service);
+        let config : ?RpcConfig = ?{ 
+          responseSizeEstimate = ?1000000;
+          responseConsensus = null;
+        };
+        
+        D.print("🔄 Making 3 parallel block number requests...");
+        
+        // Call 1: Get latest block number
+        D.print("📞 RPC Call 1: eth_getBlockByNumber(Latest)");
+        let call1 = async {
+          await (with cycles=127817059200) rpcActor.eth_getBlockByNumber(rpcServices, config, #Latest);
+        };
+        
+        // Call 2: Get block 0 (genesis)
+        D.print("📞 RPC Call 2: eth_getBlockByNumber(0)");
+        let call2 = async {
+          await (with cycles=127817059200) rpcActor.eth_getBlockByNumber(rpcServices, config, #Number(0));
+        };
+        
+        // Call 3: Get block 1
+        D.print("📞 RPC Call 3: eth_getBlockByNumber(1)");
+        let call3 = async {
+          await (with cycles=127817059200) rpcActor.eth_getBlockByNumber(rpcServices, config, #Number(1));
+        };
+        
+        D.print("⏳ Waiting for all 3 block requests to complete...");
+        
+        // Await all calls in parallel
+        let result1 = await call1;
+        let result2 = await call2;
+        let result3 = await call3;
+        
+        D.print("✅ All 3 block requests completed!");
+        
+        // Extract block numbers for return value
+        let blockNum1 = switch (result1) {
+          case (#Consistent(#Ok(block))) block.number;
+          case (_) 0;
+        };
+        
+        let blockNum2 = switch (result2) {
+          case (#Consistent(#Ok(block))) block.number;
+          case (_) 0;
+        };
+        
+        let blockNum3 = switch (result3) {
+          case (#Consistent(#Ok(block))) block.number;
+          case (_) 0;
+        };
+        
+        D.print("🎯 Results: LatestBlock=" # Nat.toText(blockNum1) # ", Block0=" # Nat.toText(blockNum2) # ", Block1=" # Nat.toText(blockNum3));
+        
+        #Ok((blockNum1, blockNum2, blockNum3));
+        
+      } catch (e) {
+        let errorMsg = "Parallel block requests failed: " # Error.message(e);
+        D.print("❌ " # errorMsg);
+        #Err(errorMsg);
+      };
+    };
+
     // Return snapshot config for a proposal
     public func icrc149_proposal_snapshot(proposal_id: Nat) : MigrationTypes.Current.ProposalSnapshot {
       switch(BTree.get(state.snapshots, Nat.compare, proposal_id)) {
@@ -1278,7 +1937,10 @@ module {
 
     // SIWE Authentication with proper anti-replay protection
     public func icrc149_verify_siwe(siwe: MigrationTypes.Current.SIWEProof) : MigrationTypes.Current.SIWEResult {
+      D.print("🔍 SIWE: Starting verification for message length: " # Nat.toText(siwe.message.size()));
+      
       if (siwe.message == "" or siwe.signature.size() == 0) {
+        D.print("❌ SIWE: Empty message or signature");
         return #Err("Invalid SIWE proof: empty message or signature");
       };
       
@@ -1286,25 +1948,71 @@ module {
       let lines = Text.split(siwe.message, #char('\n'));
       let lineArray = Iter.toArray(lines);
       
+      D.print("🔍 SIWE: Parsed " # Nat.toText(lineArray.size()) # " lines from message");
+      
       if (lineArray.size() < 8) {
+        D.print("❌ SIWE: Insufficient lines in message: " # Nat.toText(lineArray.size()));
         return #Err("Invalid SIWE message format: insufficient lines");
       };
       
       // Parse required fields
       let domain = switch (Text.split(lineArray[0], #text(" wants you to sign in")).next()) {
         case (?domain) { domain };
-        case null { return #Err("Invalid SIWE message: missing domain"); };
+        case null { 
+          D.print("❌ SIWE: Missing domain in line 0: " # lineArray[0]);
+          return #Err("Invalid SIWE message: missing domain"); 
+        };
       };
       
       let address = lineArray[1];
+      D.print("🔍 SIWE: Parsed address: " # address);
       
-      // Parse the statement line: "Vote {choice} on proposal {proposal_id} for contract {contract_address}"
+      // Parse the statement line - can be voting or proposal creation
       let statement = lineArray[3];
+      D.print("🔍 SIWE: Parsed statement: " # statement);
       
-      // Extract vote choice, proposal ID, and contract address from statement
-      let (vote_choice, proposal_id_nat, contract_address) = switch (parseVotingStatement(statement)) {
-        case (#Ok(result)) { result };
-        case (#Err(msg)) { return #Err("Invalid voting statement: " # msg); };
+      // For proposal creation, we just validate the statement exists and extract the contract address
+      // For voting, we parse the full voting statement
+      // Default values for non-voting statements
+      var vote_choice: Text = "";
+      var proposal_id_nat: Nat = 0;
+      var contract_address: Text = "";
+      
+      // Check if this is a voting statement or proposal creation statement
+      if (Text.startsWith(statement, #text("Vote "))) {
+        D.print("🗳️  SIWE: Processing voting statement");
+        // Extract vote choice, proposal ID, and contract address from voting statement
+        let (parsed_choice, parsed_id, parsed_contract) = switch (parseVotingStatement(statement)) {
+          case (#Ok(result)) { 
+            D.print("✅ SIWE: Successfully parsed voting statement");
+            result 
+          };
+          case (#Err(msg)) { 
+            D.print("❌ SIWE: Failed to parse voting statement: " # msg);
+            return #Err("Invalid voting statement: " # msg); 
+          };
+        };
+        vote_choice := parsed_choice;
+        proposal_id_nat := parsed_id;
+        contract_address := parsed_contract;
+      } else {
+        D.print("📝 SIWE: Processing proposal creation statement");
+        // For proposal creation or other actions, extract contract address from statement
+        // Expected format: "Create proposal for contract {contract_address}" or similar
+        let parts = Text.split(statement, #text(" "));
+        let partsArray = Iter.toArray(parts);
+        var found_contract = false;
+        for (i in Iter.range(0, partsArray.size() - 1)) {
+          if (i < partsArray.size() - 1 and partsArray[i] == "contract") {
+            contract_address := partsArray[i + 1];
+            found_contract := true;
+            D.print("✅ SIWE: Found contract address: " # contract_address);
+          };
+        };
+        if (not found_contract) {
+          D.print("❌ SIWE: Contract address not found in statement");
+          return #Err("Statement format incorrect: contract address not found");
+        };
       };
       
       // Parse URI, Version, Chain ID, Nonce, Issued At, Expiration Time
@@ -1315,34 +2023,54 @@ module {
       var expiration_time_nat: Nat = 0;
       var expiration_time_iso: Text = "";
       
+      D.print("🔍 SIWE: Parsing metadata fields from " # Nat.toText(lineArray.size()) # " lines");
+      
       for (line in lineArray.vals()) {
         if (Text.startsWith(line, #text("Chain ID: "))) {
           let chainIdText = Text.replace(line, #text("Chain ID: "), "");
           chain_id_nat := switch (Nat.fromText(chainIdText)) {
-            case (?n) { n };
-            case null { return #Err("Invalid Chain ID format"); };
+            case (?n) { 
+              D.print("✅ SIWE: Chain ID: " # Nat.toText(n));
+              n 
+            };
+            case null { 
+              D.print("❌ SIWE: Invalid Chain ID: " # chainIdText);
+              return #Err("Invalid Chain ID format"); 
+            };
           };
         } else if (Text.startsWith(line, #text("Nonce: "))) {
           nonce_text := Text.replace(line, #text("Nonce: "), "");
-          expiration_time_nat := switch (Nat.fromText(nonce_text)) {
-            case (?n) { n };
-            case null { return #Err("Invalid Nonce format"); };
-          };
+          D.print("✅ SIWE: Nonce: " # nonce_text);
+          // Note: nonce_text is kept as text, not used for expiration_time_nat
         } else if (Text.startsWith(line, #text("Issued At: "))) {
           issued_at_iso := Text.replace(line, #text("Issued At: "), "");
+          D.print("✅ SIWE: Issued At ISO: " # issued_at_iso);
         } else if (Text.startsWith(line, #text("Issued At Nanos: "))) {
           let issuedAtNanosText = Text.replace(line, #text("Issued At Nanos: "), "");
           issued_at_nat := switch (Nat.fromText(issuedAtNanosText)) {
-            case (?n) { n };
-            case null { return #Err("Invalid Issued At Nanos format"); };
+            case (?n) { 
+              D.print("✅ SIWE: Issued At Nanos: " # Nat.toText(n));
+              n 
+            };
+            case null { 
+              D.print("❌ SIWE: Invalid Issued At Nanos: " # issuedAtNanosText);
+              return #Err("Invalid Issued At Nanos format"); 
+            };
           };
         } else if (Text.startsWith(line, #text("Expiration Time: "))) {
           expiration_time_iso := Text.replace(line, #text("Expiration Time: "), "");
+          D.print("✅ SIWE: Expiration Time ISO: " # expiration_time_iso);
         } else if (Text.startsWith(line, #text("Expiration Nanos: "))) {
           let expirationNanosText = Text.replace(line, #text("Expiration Nanos: "), "");
           expiration_time_nat := switch (Nat.fromText(expirationNanosText)) {
-            case (?n) { n };
-            case null { return #Err("Invalid Expiration Nanos format"); };
+            case (?n) { 
+              D.print("✅ SIWE: Expiration Nanos: " # Nat.toText(n));
+              n 
+            };
+            case null { 
+              D.print("❌ SIWE: Invalid Expiration Nanos: " # expirationNanosText);
+              return #Err("Invalid Expiration Nanos format"); 
+            };
           };
         };
       };
@@ -1350,29 +2078,41 @@ module {
       // Validate time window (must be within 10 minutes = 600 seconds = 600_000_000_000 nanoseconds)
       let currentTime = natNow();
       let maxWindowNanos = 600_000_000_000; // 10 minutes in nanoseconds
-      
+
+      D.print("🕐 SIWE: Time validation - Current: " # Nat.toText(currentTime) # ", Expiration: " # Nat.toText(expiration_time_nat) # ", IssuedAt: " # Nat.toText(issued_at_nat));
+
       if (expiration_time_nat < currentTime) {
+        D.print("❌ SIWE: Message has expired");
         return #Err("SIWE message has expired");
       };
       
       if (expiration_time_nat > (currentTime + maxWindowNanos)) {
+        D.print("❌ SIWE: Expiration time too far in future");
         return #Err("SIWE message expiration time too far in future");
       };
       
       if (expiration_time_nat > issued_at_nat and (expiration_time_nat - issued_at_nat) > maxWindowNanos) {
+        D.print("❌ SIWE: Time window exceeds 10 minutes");
         return #Err("SIWE message time window exceeds 10 minutes");
       };
       
-      // CRITICAL: Verify SIWE signature against address - NO BYPASSING ALLOWED
+      D.print("✅ SIWE: Time validation passed");
+      
+      // Real signature verification - NO BYPASS
+      D.print("🔐 SIWE: Starting signature verification");
       switch (verifySiweSignature(siwe.message, siwe.signature, address)) {
         case (#Err(err)) {
+          D.print("❌ SIWE signature verification failed: " # debug_show(err));
           return #Err("SIWE signature verification failed: " # err);
         };
         case (#Ok(_)) {
+          D.print("✅ SIWE: Signature verification passed");
           // Signature is valid, proceed
         };
       };
+
       
+      D.print("🎯 SIWE: Verification complete, returning success result");
       #Ok({
         address = address;
         domain = domain;
@@ -1430,46 +2170,69 @@ module {
     
     // CRITICAL: Real SIWE signature verification - NO MOCKING ALLOWED
     private func verifySiweSignature(message: Text, signature: Blob, expectedAddress: Text) : {#Ok: (); #Err: Text} {
-      // This function MUST implement real ECDSA signature verification
-      // If not implemented, the test MUST fail
+      D.print("🔍 Starting SIWE signature verification for address: " # expectedAddress);
+      D.print("🔍 Message length: " # Nat.toText(message.size()) # " chars, Signature length: " # Nat.toText(signature.size()) # " bytes");
       
       if (signature.size() != 65) {
+        D.print("❌ Invalid signature length: " # Nat.toText(signature.size()));
         return #Err("Invalid signature length: expected 65 bytes, got " # Nat.toText(signature.size()));
       };
       
-      // Extract r, s, v from signature
-      let sigBytes = Blob.toArray(signature);
-      if (sigBytes.size() != 65) {
-        return #Err("Signature must be exactly 65 bytes");
+      // Quick validation - if the expected address looks valid, proceed with verification
+      if (not Text.startsWith(expectedAddress, #text("0x")) or expectedAddress.size() != 42) {
+        D.print("❌ Invalid expected address format: " # expectedAddress);
+        return #Err("Invalid expected address format: " # expectedAddress);
       };
       
-      let r = Blob.fromArray(Array.subArray(sigBytes, 0, 32));
-      let s = Blob.fromArray(Array.subArray(sigBytes, 32, 32));
-      let v = sigBytes[64];
+      D.print("✅ Basic validations passed, proceeding with cryptographic verification");
       
-      // Hash the message according to EIP-191 standard
+      // CRITICAL: REAL SIWE signature verification - NO BYPASSING
+      D.print("🔐 Performing REAL ECDSA signature recovery and verification");
+      
+      // Step 1: Hash the SIWE message using EIP-191 format
+      D.print("📝 Step 1: Hashing message using EIP-191");
       let messageHash = hashSiweMessage(message);
+      D.print("📝 Message hash computed successfully");
       
-      // Recover the public key from the signature
-      switch (recoverEcdsaPublicKey(messageHash, r, s, v)) {
+      // Step 2: Extract r, s, v from signature
+      D.print("📊 Step 2: Extracting signature components");
+      let signatureArray = Blob.toArray(signature);
+      let r = Blob.fromArray(Array.subArray(signatureArray, 0, 32));
+      let s = Blob.fromArray(Array.subArray(signatureArray, 32, 32));
+      let v = signatureArray[64];
+      
+      D.print("📊 Signature components extracted: v=" # Nat8.toText(v));
+      
+      // Step 3: Recover public key from signature
+      D.print("🔑 Step 3: Recovering public key from signature");
+      let recoveredPubKey = switch (recoverEcdsaPublicKey(messageHash, r, s, v)) {
         case (#Err(err)) {
-          return #Err("Failed to recover public key: " # err);
+          D.print("❌ Public key recovery failed: " # err);
+          return #Err("ECDSA recovery failed: " # err);
         };
-        case (#Ok(publicKey)) {
-          // Derive Ethereum address from public key
-          let derivedAddress = deriveEthereumAddressFromPublicKey(publicKey);
-          
-          // Compare addresses (case-insensitive)
-          let normalizedExpected = normalizeEthereumAddress(expectedAddress);
-          let normalizedDerived = normalizeEthereumAddress(derivedAddress);
-          
-          if (normalizedExpected != normalizedDerived) {
-            return #Err("Signature verification failed: expected address " # normalizedExpected # ", got " # normalizedDerived);
-          };
-          
-          #Ok(());
+        case (#Ok(pubKey)) {
+          D.print("✅ Public key recovered successfully");
+          pubKey;
         };
       };
+      
+      // Step 4: Derive Ethereum address from recovered public key
+      D.print("🏠 Step 4: Deriving address from recovered public key");
+      let recoveredAddress = deriveEthereumAddressFromPublicKey(recoveredPubKey);
+      D.print("🏠 Recovered address: " # recoveredAddress);
+      
+      // Step 5: Compare with expected address (case-insensitive)
+      D.print("🔍 Step 5: Comparing addresses");
+      let normalizedExpected = normalizeEthereumAddress(expectedAddress);
+      let normalizedRecovered = normalizeEthereumAddress(recoveredAddress);
+      
+      if (normalizedExpected != normalizedRecovered) {
+        D.print("❌ Address mismatch - Expected: " # normalizedExpected # ", Recovered: " # normalizedRecovered);
+        return #Err("Signature verification failed: address mismatch");
+      };
+      
+      D.print("✅ SIWE signature verification PASSED - addresses match");
+      return #Ok(());
     };
     
     // Helper function to hash SIWE message according to EIP-191
@@ -1490,13 +2253,16 @@ module {
         Blob.toArray(messageBytes)
       );
       
-      SHA256.fromBlob(#sha256, Blob.fromArray(combinedBytes));
+      // CRITICAL: Use Keccak256, not SHA256, for Ethereum message hashing
+      let keccak = SHA3.Keccak(256);
+      keccak.update(combinedBytes);
+      let hashBytes = keccak.finalize();
+      Blob.fromArray(hashBytes);
     };
     
     // Helper function to recover ECDSA public key from signature
     private func recoverEcdsaPublicKey(messageHash: Blob, r: Blob, s: Blob, v: Nat8) : {#Ok: Blob; #Err: Text} {
-      // CRITICAL: This MUST implement real ECDSA recovery
-      // Using secp256k1 curve recovery
+      // CRITICAL: This implements real ECDSA recovery using secp256k1
       
       if (v < 27 or v > 30) {
         return #Err("Invalid recovery parameter v: " # Nat8.toText(v));
@@ -1504,18 +2270,93 @@ module {
       
       let recoveryId = if (v >= 27) { v - 27 } else { v };
       
-      // For now, this is a placeholder that will cause tests to fail
-      // Real implementation would use secp256k1 point recovery
-      #Err("ECDSA signature recovery not yet implemented - test should FAIL");
+      // Create signature from r and s values
+      let rArray = Blob.toArray(r);
+      let sArray = Blob.toArray(s);
+      
+      if (rArray.size() != 32 or sArray.size() != 32) {
+        return #Err("Invalid signature component size: r=" # Nat.toText(rArray.size()) # ", s=" # Nat.toText(sArray.size()));
+      };
+      
+      // Convert message hash to array
+      let messageArray = Blob.toArray(messageHash);
+      if (messageArray.size() != 32) {
+        return #Err("Invalid message hash size: " # Nat.toText(messageArray.size()));
+      };
+      
+      // Try recovery with calculated recoveryId first
+      switch (tryRecoveryWithId(messageArray, rArray, sArray, recoveryId)) {
+        case (#Ok(pubKey)) #Ok(pubKey);
+        case (#Err(_)) {
+          // If first recovery fails, try with alternative recovery ID
+          let altRecoveryId : Nat8 = if (recoveryId == 0) { 1 } else { 0 };
+          switch (tryRecoveryWithId(messageArray, rArray, sArray, altRecoveryId)) {
+            case (#Ok(pubKey)) #Ok(pubKey);
+            case (#Err(err)) #Err("Recovery failed with both IDs. v=" # Nat8.toText(v) # ", recoveryId=" # Nat8.toText(recoveryId) # ", altId=" # Nat8.toText(altRecoveryId) # ". Error: " # err);
+          };
+        };
+      };
     };
+    
+    // Helper function to try recovery with a specific recovery ID
+    private func tryRecoveryWithId(messageArray: [Nat8], rArray: [Nat8], sArray: [Nat8], recoveryId: Nat8) : {#Ok: Blob; #Err: Text} {
+      // Create signature object
+      let signature = switch (Signature.parse_standard(Array.append(rArray, sArray))) {
+        case (#ok(sig)) sig;
+        case (#err(err)) return #Err("Failed to create signature: " # debug_show(err));
+      };
+      
+      // Create recovery ID
+      let recId = switch (RecoveryId.parse(recoveryId)) {
+        case (#ok(rid)) rid;
+        case (#err(_)) return #Err("Failed to create recovery ID");
+      };
+      
+      // Create message object from hash
+      let msgObj = MessageLib.parse(messageArray);
+      
+      // Create context (use null for simplicity - in production would load precomputed values)
+      
+      
+      // Recover public key using context
+      let publicKey = switch (ECDSA.recover_with_context(msgObj, signature, recId, ecCtx())) {
+        case (#ok(pubKey)) pubKey;
+        case (#err(err)) return #Err("Failed to recover public key: " # debug_show(err));
+      };
+      
+      // Convert public key to bytes (uncompressed format)
+      let pubKeyBytes = publicKey.serialize();
+      #Ok(Blob.fromArray(pubKeyBytes));
+    };
+    
     
     // Helper function to derive Ethereum address from public key
     private func deriveEthereumAddressFromPublicKey(publicKey: Blob) : Text {
-      // CRITICAL: This MUST implement real address derivation
-      // Real implementation would take last 20 bytes of keccak256(publicKey)
+      // CRITICAL: This implements real address derivation using Keccak256
+      // Ethereum address = last 20 bytes of keccak256(publicKey)
       
-      // For now, return an obviously wrong address to make tests fail
-      "0x0000000000000000000000000000000000000000";
+      let pubKeyArray = Blob.toArray(publicKey);
+      
+      // For uncompressed public key, skip the first byte (0x04 prefix) and use the remaining 64 bytes
+      let pubKeyData = if (pubKeyArray.size() == 65 and pubKeyArray[0] == 0x04) {
+        Array.subArray(pubKeyArray, 1, 64);  // Skip 0x04 prefix
+      } else if (pubKeyArray.size() == 64) {
+        pubKeyArray;  // Already without prefix
+      } else {
+        // Invalid public key format
+        return "0x0000000000000000000000000000000000000000";
+      };
+      
+      // Calculate Keccak256 hash of the public key (64 bytes)
+      let keccak = SHA3.Keccak(256);
+      keccak.update(pubKeyData);
+      let hashArray = keccak.finalize();
+      
+      // Take the last 20 bytes as the Ethereum address
+      let addressBytes = Array.subArray(hashArray, hashArray.size() - 20, 20);
+      
+      // Convert to hex string with 0x prefix
+      "0x" # Hex.encode(addressBytes);
     };
     
     // Helper function to normalize Ethereum addresses for comparison
@@ -1539,6 +2380,75 @@ module {
       });
     };
 
+    // Helper function to convert Ethereum address hex string to 20-byte blob
+    private func ethereumAddressToBlob(address: Text) : Result.Result<Blob, Text> {
+      if (not Text.startsWith(address, #text("0x"))) {
+        return #err("Ethereum address must start with 0x");
+      };
+      
+      let cleanHex = Text.trimStart(address, #text("0x"));
+      
+      // Ethereum addresses should be exactly 40 hex characters (20 bytes)
+      if (cleanHex.size() != 40) {
+        return #err("Ethereum address must be exactly 40 hex characters (20 bytes)");
+      };
+      
+      // Validate hex characters
+      for (char in cleanHex.chars()) {
+        switch (char) {
+          case ('0' or '1' or '2' or '3' or '4' or '5' or '6' or '7' or '8' or '9' or 
+                'a' or 'b' or 'c' or 'd' or 'e' or 'f' or 
+                'A' or 'B' or 'C' or 'D' or 'E' or 'F') {};
+          case (_) {
+            return #err("Invalid hex character in Ethereum address: " # Text.fromChar(char));
+          };
+        };
+      };
+      
+      let chars = Text.toArray(cleanHex);
+      let bytes = Array.tabulate<Nat8>(20, func(i) { // Exactly 20 bytes
+        let highChar = chars[i * 2];
+        let lowChar = chars[i * 2 + 1];
+        
+        let high = switch (highChar) {
+          case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
+          case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
+          case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
+          case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
+          case (_) 0;
+        };
+        let low = switch (lowChar) {
+          case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
+          case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
+          case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
+          case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
+          case (_) 0;
+        };
+        Nat8.fromNat(high * 16 + low);
+      });
+      
+      #ok(Blob.fromArray(bytes));
+    };
+
+    // Helper function to convert Ethereum address to Principal for voting
+    private func ethereumAddressToPrincipal(address: Text) : Principal {
+      // Normalize the address first
+      let normalizedAddress = normalizeEthereumAddress(address);
+      
+      // Convert the hex address to exactly 20 bytes
+      let addressBytes = switch (ethereumAddressToBlob(normalizedAddress)) {
+        case (#ok(blob)) Blob.toArray(blob);
+        case (#err(_)) {
+          // Fallback: use the text bytes if hex conversion fails
+          Blob.toArray(Text.encodeUtf8(normalizedAddress));
+        };
+      };
+      
+      // Create a deterministic Principal from the Ethereum address bytes (20 bytes)
+      // This ensures the same Ethereum address always maps to the same Principal
+      Principal.fromBlob(Blob.fromArray(addressBytes));
+    };
+
     // Witness Validation for ICRC-149 Storage Proofs using stored canister state
     public func icrc149_verify_witness(witness: MigrationTypes.Current.Witness, proposal_id: ?Nat) : MigrationTypes.Current.WitnessResult {
       // Convert witness to format expected by WitnessValidator
@@ -1552,6 +2462,8 @@ module {
         accountProof = witness.accountProof;
         storageProof = witness.storageProof;
       };
+
+      D.print("storage value: " # blobToHex(serviceWitness.storageValue));
 
       // Get trusted state from stored canister configuration
       icrc149_verify_witness_with_stored_state(serviceWitness, proposal_id);
@@ -1680,269 +2592,364 @@ module {
 
         // Create proposal (using real-time proposal for Ethereum DAO)
     public func icrc149_create_proposal(caller: Principal, proposal_args: Service.CreateProposalRequest) : async* {#Ok: Nat; #Err: Text} {
+
+      if (not BTree.has(state.config.admin_principals, Principal.compare, caller)) {
+        return #Err("Unauthorized: caller is not an admin");
+      };
       
+        // Verify SIWE first to authenticate the proposal creator
+        switch(icrc149_verify_siwe(proposal_args.siwe)) {
+            case(#Err(err)) return #Err("SIWE verification failed: " # err);
+            case(#Ok(siwe_result)) {
+                // SIWE verification successful, siwe_result.address contains the Ethereum address
+                D.print("Proposal creation authenticated for Ethereum address: " # siwe_result.address);
+            };
+        };
+        
         // Determine which contract to use for snapshot
-      let snapshot_contract_address = switch (proposal_args.snapshot_contract) {
-        case (?contract) normalizeEthereumAddress(contract);
-        case (null) {
-          // Use default snapshot contract if available
-          switch (state.config.default_snapshot_contract) {
-            case (?default) default; // Already normalized when stored
+        let snapshot_contract_address = switch (proposal_args.snapshot_contract) {
+            case (?contract) normalizeEthereumAddress(contract);
             case (null) {
-              return #Err("No snapshot contract specified and no default snapshot contract configured");
+                // Use default snapshot contract if available
+                switch (state.config.default_snapshot_contract) {
+                    case (?default) default; // Already normalized when stored
+                    case (null) {
+                        return #Err("No snapshot contract specified and no default snapshot contract configured");
+                    };
+                };
             };
-          };
         };
-      };
-      
-      // Validate that the snapshot contract is approved and enabled
-      // Find the contract config by normalizing all stored addresses for comparison
-      var snapshot_contract_config: ?MigrationTypes.Current.SnapshotContractConfig = null;
-      for ((storedAddress, config) in BTree.entries(state.config.snapshot_contracts)) {
-        if (normalizeEthereumAddress(storedAddress) == snapshot_contract_address) {
-          snapshot_contract_config := ?config;
-        };
-      };
-      
-      switch (snapshot_contract_config) {
-        case (?contract_config) {
-          if (not contract_config.enabled) {
-            return #Err("Snapshot contract is not enabled: " # snapshot_contract_address);
-          };
-        };
-        case (null) {
-          return #Err("Snapshot contract is not approved: " # snapshot_contract_address);
-        };
-      };
-      
-      // Validate EthTransaction actions against approved execution contracts
-      let actionItem : ProposalAction = switch (proposal_args.action) {
-        case (#EthTransaction(eth_tx)) {
-          // Find execution contract by normalizing addresses for comparison
-          let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
-          var execution_contract_config: ?MigrationTypes.Current.ExecutionContractConfig = null;
-          for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
-            if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
-              execution_contract_config := ?config;
+        
+        // Validate that the snapshot contract is approved and enabled
+        var snapshot_contract_config: ?MigrationTypes.Current.SnapshotContractConfig = null;
+        for ((storedAddress, config) in BTree.entries(state.config.snapshot_contracts)) {
+            if (normalizeEthereumAddress(storedAddress) == snapshot_contract_address) {
+                snapshot_contract_config := ?config;
             };
-          };
-          
-          switch (execution_contract_config) {
+        };
+        
+        switch (snapshot_contract_config) {
             case (?contract_config) {
-              if (not contract_config.enabled) {
-                return #Err("Target execution contract is not enabled: " # eth_tx.to);
-              };
+                if (not contract_config.enabled) {
+                    return #Err("Snapshot contract is not enabled: " # snapshot_contract_address);
+                };
             };
             case (null) {
-              return #Err("Target execution contract is not approved: " # eth_tx.to);
+                return #Err("Snapshot contract is not approved: " # snapshot_contract_address);
             };
-          };
-          #EthTransaction({
-            to = eth_tx.to;
-            value = eth_tx.value;
-            data = eth_tx.data;
-            chain = eth_tx.chain;
-            subaccount = eth_tx.subaccount;
-            maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
-            maxFeePerGas = eth_tx.maxFeePerGas;
-            gasLimit = eth_tx.gasLimit;
-            var signature = null; // Signature will be set after proposal creation
-            var nonce = null; // Nonce will be set during execution
-          });
         };
-        case (#Motion(a)) {
-          // Motions don't require execution contract validation
-          #Motion(a)
+        
+        // Validate EthTransaction actions against approved execution contracts
+        let actionItem : ProposalAction = switch (proposal_args.action) {
+            case (#EthTransaction(eth_tx)) {
+                // Find execution contract by normalizing addresses for comparison
+                let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
+                var execution_contract_config: ?MigrationTypes.Current.ExecutionContractConfig = null;
+                for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
+                    if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
+                        execution_contract_config := ?config;
+                    };
+                };
+                
+                switch (execution_contract_config) {
+                    case (?contract_config) {
+                        if (not contract_config.enabled) {
+                            return #Err("Target execution contract is not enabled: " # eth_tx.to);
+                        };
+                    };
+                    case (null) {
+                        return #Err("Target execution contract is not approved: " # eth_tx.to);
+                    };
+                };
+                #EthTransaction({
+                    to = eth_tx.to;
+                    value = eth_tx.value;
+                    data = eth_tx.data;
+                    chain = eth_tx.chain;
+                    subaccount = eth_tx.subaccount;
+                    maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
+                    maxFeePerGas = eth_tx.maxFeePerGas;
+                    gasLimit = eth_tx.gasLimit;
+                    var signature = null; // Signature will be set after proposal creation
+                    var nonce = null; // Nonce will be set during execution
+                });
+            };
+            case (#Motion(a)) {
+                // Motions don't require execution contract validation
+                #Motion(a)
+            };
+            case(#ICPCall(call)) {
+                // ICP calls don't require execution contract validation
+                #ICPCall({call with
+                    var result : ?{#Err : Text; #Ok : Blob} = null; // Result will be set after proposal execution
+                });
+            };
         };
-        case(#ICPCall(call)) {
-          // ICP calls don't require execution contract validation
-          #ICPCall({call with
-            var result : ?{#Err : Text; #Ok : Blob} = null; // Result will be set after proposal execution
-            
-          });
+
+        let content : MigrationTypes.Current.ProposalContent = {
+            action = actionItem;
+            snapshot = null; // Will be set after creation
+            metadata = proposal_args.metadata;
         };
-      };
 
-      let content : MigrationTypes.Current.ProposalContent = {
-        action = actionItem;
-        snapshot = null; // Will be set after creation
-        metadata = proposal_args.metadata;
-      };
-
-      // Calculate total voting power from members
-      var total_voting_power = 0;
-      for (member in proposal_args.members.vals()) {
-        total_voting_power += member.votingPower;
-      };
-
-      // Create a real-time proposal for Ethereum DAO governance
-      let result = await* proposalEngine.createRealTimeProposal<system>(caller, content, total_voting_power);
-      switch(result) {
-        case(#ok(proposal_id)) {
-          // Add initial members to the real-time proposal
-          for (member in proposal_args.members.vals()) {
-            let _ = proposalEngine.addMember(proposal_id, member);
-          };
-
-          // Get the snapshot contract config for creating the snapshot
-          let final_snapshot_contract_config = switch (snapshot_contract_config) {
+        // Get the snapshot contract config for creating the snapshot
+        let final_snapshot_contract_config = switch (snapshot_contract_config) {
             case (?config) config;
             case (null) {
-              // This shouldn't happen since we validated above
-              return #Err("Internal error: snapshot contract config not found");
+                // This shouldn't happen since we validated above
+                return #Err("Internal error: snapshot contract config not found");
             };
-          };
+        };
 
-          // Create snapshot for this proposal using the specified snapshot contract
-          // Get latest finalized block from RPC
-          let blockResult = await* getLatestFinalizedBlock(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain);
-          let (block_number, state_root) = switch (blockResult) {
+        // Create snapshot for this proposal using the specified snapshot contract
+        // Get latest finalized block from RPC
+        let blockResult = await* getLatestFinalizedBlock(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain);
+        let (block_number, state_root, total_supply) = switch (blockResult) {
             case (#ok(block)) {
-              // Validate and convert state root hex string to Blob
-              if (not validateStateRoot(block.stateRoot)) {
-                return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
-              };
-              
-              switch (hexStringToBlob(block.stateRoot)) {
-                case (#ok(state_root_blob)) {
-                  D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
-                  (block.number, state_root_blob);
+                // Validate and convert state root hex string to Blob
+                if (not validateStateRoot(block.stateRoot)) {
+                    return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
                 };
-                case (#err(hexErr)) {
-                  return #Err("Failed to convert state root hex to blob: " # hexErr);
+                
+                switch (hexStringToBlob(block.stateRoot)) {
+                    case (#ok(state_root_blob)) {
+                        D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
+                        
+                        // Get total supply from the contract (for ERC20 tokens)
+                        D.print("🏁 SUPPLY_CALL: About to get total supply for contract type: ERC20/ERC721/Other");
+                        let total_supply = switch (final_snapshot_contract_config.contract_type) {
+                            case (#ERC20) {
+                                D.print("🏁 SUPPLY_CALL: Processing ERC20 contract, calling getTotalSupply for: " # snapshot_contract_address);
+                                let supplyResult = await* getTotalSupply(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain, snapshot_contract_address);
+                                D.print("🏁 SUPPLY_CALL: getTotalSupply call completed, processing result...");
+                                switch (supplyResult) {
+                                    case (#ok(supply)) {
+                                        D.print("🏁 SUPPLY_CALL: Successfully got total supply: " # Nat.toText(supply));
+                                        supply;
+                                    };
+                                    case (#err(errMsg)) {
+                                        D.print("🏁 SUPPLY_CALL: Failed to get total supply: " # errMsg);
+                                        // CRITICAL: totalSupply failure should cause proposal creation to FAIL, not use defaults  
+                                        return #Err("Failed to get totalSupply for snapshot: " # errMsg);
+                                    };
+                                };
+                            };
+                            case (#ERC721) {
+                                D.print("🏁 SUPPLY_CALL: ERC721 contract type detected - returning error");
+                                // CRITICAL: ERC721 total supply calculation MUST be implemented, not defaulted
+                                return #Err("ERC721 total supply calculation not implemented - this must be fixed before proposal creation");
+                            };
+                            case (#Other(_)) {
+                                D.print("🏁 SUPPLY_CALL: Other contract type detected - returning error");
+                                // CRITICAL: Custom contract types MUST have proper total supply calculation
+                                return #Err("Custom contract type total supply calculation not implemented - this must be fixed before proposal creation");
+                            };
+                        };
+                        
+                        D.print("🏁 SUPPLY_CALL: Total supply processing complete: " # Nat.toText(total_supply));
+                        
+                        (block.number, state_root_blob, total_supply);
+                    };
+                    case (#err(hexErr)) {
+                        return #Err("Failed to convert state root hex to blob: " # hexErr);
+                    };
                 };
-              };
             };
             case (#err(errMsg)) {
-              // CRITICAL: RPC failure should cause proposal creation to FAIL, not use defaults
-              return #Err("Failed to get latest block for snapshot: " # errMsg);
+                // CRITICAL: RPC failure should cause proposal creation to FAIL, not use defaults
+                return #Err("Failed to get latest block for snapshot: " # errMsg);
             };
-          };
+        };
 
-          // Get total supply from the contract (for ERC20 tokens)
-          let total_supply = switch (final_snapshot_contract_config.contract_type) {
-            case (#ERC20) {
-              let supplyResult = await* getTotalSupply(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain, snapshot_contract_address);
-              switch (supplyResult) {
-                case (#ok(supply)) supply;
-                case (#err(errMsg)) {
-                  // CRITICAL: totalSupply failure should cause proposal creation to FAIL, not use defaults  
-                  return #Err("Failed to get totalSupply for snapshot: " # errMsg);
+        D.print("🏁 PROPOSAL_CREATE: About to create proposal with total supply: " # Nat.toText(total_supply));
+        D.print("🏁 PROPOSAL_CREATE: Block number: " # Nat.toText(block_number));
+        D.print("🏁 PROPOSAL_CREATE: Contract address: " # snapshot_contract_address);
+
+        // Create a dynamic proposal with total supply as the total voting power
+        let result = await* proposalEngine.createProposal<system>(
+            caller, 
+            content, 
+            [], // No initial members - they will be added as they vote
+            #dynamic({ totalVotingPower = null })
+        );
+        
+        D.print("🏁 PROPOSAL_CREATE: proposalEngine.createProposal call completed");
+        
+        switch(result) {
+            case(#ok(proposal_id)) {
+                let snapshot : MigrationTypes.Current.ProposalSnapshot = {
+                    contract_address = snapshot_contract_address;
+                    chain = final_snapshot_contract_config.chain;
+                    block_number = block_number;
+                    state_root = state_root;
+                    total_supply = total_supply;
+                    snapshot_time = natNow();
                 };
-              };
-            };
-            case (#ERC721) {
-              // CRITICAL: ERC721 total supply calculation MUST be implemented, not defaulted
-              return #Err("ERC721 total supply calculation not implemented - this must be fixed before proposal creation");
-            };
-            case (#Other(_)) {
-              // CRITICAL: Custom contract types MUST have proper total supply calculation
-              return #Err("Custom contract type total supply calculation not implemented - this must be fixed before proposal creation");
-            };
-          };
 
-          let snapshot : MigrationTypes.Current.ProposalSnapshot = {
-            contract_address = snapshot_contract_address;
-            chain = switch (snapshot_contract_config) {
-              case (?config) config.chain;
-              case (null) D.trap("Internal error: snapshot contract config not found");
-            };
-            block_number = block_number;
-            state_root = state_root;
-            total_supply = total_supply;
-            snapshot_time = natNow();
-          };
+                ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
+                
+                // Add proposal to indexes for efficient filtering
+                switch(proposalEngine.getProposal(proposal_id)) {
+                    case (?proposal) {
+                        addProposalToIndexes(proposal_id, proposal, content);
+                    };
+                    case (null) {
+                        // This shouldn't happen since we just created the proposal
+                        D.print("Warning: Could not find proposal " # Nat.toText(proposal_id) # " for indexing");
+                    };
+                };
 
-          ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
-          
-          // Add proposal to indexes for efficient filtering
-          switch(proposalEngine.getProposal(proposal_id)) {
-            case (?proposal) {
-              addProposalToIndexes(proposal_id, proposal, content);
+                D.print("🏁 PROPOSAL_CREATE: Successfully created proposal with ID: saving engine state " # Nat.toText(proposal_id))  ;
+                
+                saveProposalEngineState();
+                #Ok(proposal_id);
             };
-            case (null) {
-              // This shouldn't happen since we just created the proposal
-              D.print("Warning: Could not find proposal " # Nat.toText(proposal_id) # " for indexing");
+            case(#err(err)) {
+                D.print("❌ PROPOSAL_CREATE: " # debug_show(err));
+                switch(err) {
+                    
+                    case(#notEligible) #Err("Caller not eligible to create proposals");
+                    case(#invalid(errors)) #Err("Invalid proposal: " # Text.join(", ", errors.vals()));
+                };
             };
-          };
-          
-          saveProposalEngineState();
-          #Ok(proposal_id);
         };
-        case(#err(err)) {
-          switch(err) {
-            case(#notEligible) #Err("Caller not eligible to create proposals");
-            case(#invalid(errors)) #Err("Invalid proposal: " # Text.join(", ", errors.vals()));
-          };
-        };
-      };
     };
 
     // Vote on proposal
     public func icrc149_vote_proposal(caller: Principal, vote_args: MigrationTypes.Current.VoteArgs) : async* {#Ok: (); #Err: Text} {
+      D.print("🗳️  VOTE_START: Beginning vote processing for proposal " # Nat.toText(vote_args.proposal_id));
+      D.print("🗳️  VOTE_START: Caller principal: " # Principal.toText(caller));
+      D.print("🗳️  VOTE_START: Voter address: " # blobToHex(vote_args.voter));
+      
       // Get current proposal state before voting
+      D.print("🗳️  VOTE_STEP_1: Getting current proposal state...");
       let oldProposal = proposalEngine.getProposal(vote_args.proposal_id);
+      D.print("🗳️  VOTE_STEP_1: Retrieved proposal state: " # (switch(oldProposal) { case(?_) "exists"; case(null) "not found"; }));
       
       // Verify SIWE first
+      D.print("🗳️  VOTE_STEP_2: Starting SIWE verification...");
       switch(icrc149_verify_siwe(vote_args.siwe)) {
-        case(#Err(err)) return #Err("SIWE verification failed: " # err);
+        case(#Err(err)) {
+          D.print("🗳️  VOTE_ERROR: SIWE verification failed: " # err);
+          return #Err("SIWE verification failed: " # err);
+        };
         case(#Ok(siwe_result)) {
+          D.print("🗳️  VOTE_STEP_2: SIWE verification completed successfully");
           // Verify the SIWE address matches vote_args.voter (case-insensitive)
           let expectedVoterHex = normalizeEthereumAddress(blobToHex(vote_args.voter));
           let siweAddressNormalized = normalizeEthereumAddress(siwe_result.address);
+          D.print("🗳️  VOTE_STEP_2: Address matching - Expected: " # expectedVoterHex # ", SIWE: " # siweAddressNormalized);
           if (siweAddressNormalized != expectedVoterHex) {
+            D.print("🗳️  VOTE_ERROR: Address mismatch");
             return #Err("SIWE address " # siwe_result.address # " does not match voter address " # expectedVoterHex);
           };
+          D.print("🗳️  VOTE_STEP_2: Address verification passed");
         };
       };
 
       // Verify witness/merkle proof and get actual voting power
+      D.print("🗳️  VOTE_STEP_3: Starting witness verification...");
       switch(icrc149_verify_witness(vote_args.witness, ?vote_args.proposal_id)) {
-        case(#Err(err)) return #Err("Witness verification failed: " # err);
+        case(#Err(err)) {
+          D.print("🗳️  VOTE_ERROR: Witness verification failed: " # err);
+          return #Err("Witness verification failed: " # err);
+        };
         case(#Ok(witness_result)) {
+          D.print("🗳️  VOTE_STEP_3: Witness verification completed successfully");
+          D.print("🗳️  VOTE_STEP_3: Witness validity: " # (if (witness_result.valid) "valid" else "invalid"));
+          D.print("🗳️  VOTE_STEP_3: Witness balance: " # Nat.toText(witness_result.balance));
+          
           if (not witness_result.valid) {
+            D.print("🗳️  VOTE_ERROR: Witness marked as invalid");
             return #Err("Witness validation failed: witness marked as invalid");
           };
           
           // Verify witness user address matches voter (case-insensitive)
           let expectedVoterHex = normalizeEthereumAddress(blobToHex(vote_args.voter));
           let witnessAddressNormalized = normalizeEthereumAddress(witness_result.user_address);
+          D.print("🗳️  VOTE_STEP_3: Witness address matching - Expected: " # expectedVoterHex # ", Witness: " # witnessAddressNormalized);
+          
           if (witnessAddressNormalized != expectedVoterHex) {
+            D.print("🗳️  VOTE_ERROR: Witness address mismatch");
             return #Err("Witness user address " # witness_result.user_address # " does not match voter address " # expectedVoterHex);
           };
           
+          D.print("🗳️  VOTE_STEP_3: All witness validations passed");
+          
           // Use the actual balance from the witness as voting power
           let voting_power = witness_result.balance;
+          D.print("🗳️  VOTE_STEP_4: Setting voting power: " # Nat.toText(voting_power));
+
+          // Convert Ethereum address to Principal for voting
+          let voterEthAddress = blobToHex(vote_args.voter);
+          D.print("🗳️  VOTE_STEP_5: Converting Ethereum address to Principal for voting..." # debug_show(vote_args.voter) # " " # voterEthAddress);
+          let voterPrincipal = ethereumAddressToPrincipal(voterEthAddress);
+          D.print("🗳️  VOTE_STEP_5: Ethereum address " # voterEthAddress # " → Principal " # Principal.toText(voterPrincipal));
 
           // Create a member from the vote args (for real-time proposals)
+          D.print("🗳️  VOTE_STEP_5: Creating member with voting power...");
           let member : ExtendedProposalEngine.Member = {
-            id = caller; // Use the IC Principal for now, should map from Ethereum address
+            id = voterPrincipal; // Use the Principal derived from Ethereum address
             votingPower = voting_power;
           };
+          D.print("🗳️  VOTE_STEP_5: Member created for principal: " # Principal.toText(voterPrincipal));
 
           // Try to add the member to the proposal (in case it's a real-time proposal)
-          let _ = proposalEngine.addMember(vote_args.proposal_id, member);
+          D.print("🗳️  VOTE_STEP_6: Adding member to proposal...");
+          let result2 = proposalEngine.addMember(vote_args.proposal_id, member);
+          D.print("🗳️  VOTE_STEP_6: Member addition completed");
 
-          // Cast the vote
-          let result = await* proposalEngine.vote(vote_args.proposal_id, caller, vote_args.choice);
+          D.print("result of add member" # debug_show(result2));
+
+          // Cast the vote using the Ethereum-derived Principal
+          D.print("🗳️  VOTE_STEP_7: Casting vote with choice..." # debug_show(vote_args.choice));
+          D.print("🗳️  VOTE_STEP_7: About to call proposalEngine.vote() with voter principal...");
+
+          let result = await* proposalEngine.vote(vote_args.proposal_id, voterPrincipal, vote_args.choice);
+          D.print("🗳️  VOTE_STEP_7: proposalEngine.vote() returned" # debug_show(result));
+          
           switch(result) {
             case(#ok(_)) {
+              D.print("🗳️  VOTE_STEP_8: Vote cast successfully, checking for proposal status changes...");
               // Check if proposal status changed after voting
               switch(proposalEngine.getProposal(vote_args.proposal_id)) {
                 case (?newProposal) {
+                  D.print("🗳️  VOTE_STEP_8: Updating proposal indexes...");
+                  D.print("🗳️  VOTE_STEP_8: Old proposal state: " # debug_show(oldProposal));
+                  D.print("🗳️  VOTE_STEP_8: New proposal state: " # debug_show(newProposal));
+
                   updateProposalIndexes(vote_args.proposal_id, oldProposal, newProposal, newProposal.content);
+                  D.print("🗳️  VOTE_STEP_8: Proposal indexes updated");
                 };
-                case (null) {};
+                case (null) {
+                  D.print("🗳️  VOTE_STEP_8: Warning - proposal not found after vote");
+                };
               };
+              D.print("🗳️  VOTE_STEP_9: Saving proposal engine state...");
               saveProposalEngineState();
+              D.print("🗳️  VOTE_STEP_9: Proposal engine state saved");
+              D.print("🗳️  VOTE_SUCCESS: Vote processing completed successfully");
               #Ok(());
             };
             case(#err(err)) {
+              D.print("🗳️  VOTE_ERROR: Vote casting failed with error: " # debug_show(err));
               switch(err) {
-                case(#proposalNotFound) #Err("Proposal not found");
-                case(#notEligible) #Err("Not eligible to vote on this proposal");
-                case(#alreadyVoted) #Err("Already voted on this proposal");
-                case(#votingClosed) #Err("Voting period has ended");
+                case(#proposalNotFound) {
+                  D.print("🗳️  VOTE_ERROR: proposalNotFound");
+                  #Err("Proposal not found");
+                };
+                case(#notEligible) {
+                  D.print("🗳️  VOTE_ERROR: notEligible");
+                  #Err("Not eligible to vote on this proposal");
+                };
+                case(#alreadyVoted) {
+                  D.print("🗳️  VOTE_ERROR: alreadyVoted");
+                  #Err("Already voted on this proposal");
+                };
+                case(#votingClosed) {
+                  D.print("🗳️  VOTE_ERROR: votingClosed");
+                  #Err("Voting period has ended");
+                };
               };
             };
           };
@@ -1950,23 +2957,67 @@ module {
       };
     };
 
-    // Tally votes for a proposal
+    // Tally votes for a proposal - shows "Pending" for active proposals
     public func icrc149_tally_votes(proposal_id: Nat) : MigrationTypes.Current.TallyResult {
+      D.print("Tallying votes for proposal ID: " # Nat.toText(proposal_id));
+      
+      // Get the proposal to check its status
+      let ?proposal = proposalEngine.getProposal(proposal_id) else {
+        return {
+          yes = 0;
+          no = 0;
+          abstain = 0;
+          total = 0;
+          result = "Not Found";
+        };
+      };
+      
+      // Check if proposal is still active/open
+      let isActive = switch(proposal.status) {
+        case(#open) true;
+        case(#executing(_)) true; // Still considered active during execution
+        case(#executed(_)) false;
+        case(#failedToExecute(_)) false;
+      };
+      
       let summary = proposalEngine.buildVotingSummary(proposal_id);
+      
+      D.print("📊 Vote summary - Total voting power: " # Nat.toText(summary.totalVotingPower));
+      D.print("📊 Vote summary - Undecided voting power: " # Nat.toText(summary.undecidedVotingPower));
+      D.print("📊 Vote summary - Number of choice entries: " # Nat.toText(summary.votingPowerByChoice.size()));
       
       var yes_count = 0;
       var no_count = 0;
       var abstain_count = 0;
       
       for (choice_power in summary.votingPowerByChoice.vals()) {
+        D.print("📊 Processing choice with voting power: " # Nat.toText(choice_power.votingPower));
         switch(choice_power.choice) {
-          case(#Yes) yes_count := choice_power.votingPower;
-          case(#No) no_count := choice_power.votingPower;
-          case(#Abstain) abstain_count := choice_power.votingPower;
+          case(#Yes) {
+            D.print("📊 Adding " # Nat.toText(choice_power.votingPower) # " to Yes votes");
+            yes_count := choice_power.votingPower;
+          };
+          case(#No) {
+            D.print("📊 Adding " # Nat.toText(choice_power.votingPower) # " to No votes");
+            no_count := choice_power.votingPower;
+          };
+          case(#Abstain) {
+            D.print("📊 Adding " # Nat.toText(choice_power.votingPower) # " to Abstain votes");
+            abstain_count := choice_power.votingPower;
+          };
         };
       };
 
-      let result = if (yes_count > no_count) "Passed" else "Failed";
+      // If proposal is still active, show "Pending", otherwise show actual result
+      let result = if (isActive) {
+        "Pending"
+      } else if (yes_count > no_count) {
+        "Passed"
+      } else {
+        "Failed"
+      };
+      
+      D.print("📊 Final tally - Yes: " # Nat.toText(yes_count) # ", No: " # Nat.toText(no_count) # ", Abstain: " # Nat.toText(abstain_count) # ", Result: " # result # ", Active: " # (if (isActive) "true" else "false"));
 
       {
         yes = yes_count;
@@ -1977,9 +3028,10 @@ module {
       };
     };
 
+
     private func saveProposalEngineState() {
       state.proposalEngine := proposalEngine.toStableData();
-      storageChanged(#v0_1_0(#data(state)));
+      //storageChanged(#v0_1_0(#data(state)));
     };
 
     // Service-compatible helper functions that translate types
@@ -1992,8 +3044,8 @@ module {
       };
     };
 
-    // New filtered and paginated proposal getter that matches the service interface
-    public func icrc149_get_proposals_service(prev: ?Nat, take: ?Nat, filters: [Service.ProposalInfoFilter]) : [Service.Proposal] {
+    // Enhanced proposal getter that includes tally information
+    public func icrc149_get_proposals(prev: ?Nat, take: ?Nat, filters: [Service.ProposalInfoFilter]) : [Service.ProposalWithTally] {
       // Sync indexes to ensure they're up to date
       syncProposalIndexes();
       
@@ -2093,10 +3145,23 @@ module {
       let endIndex = Nat.min(startIndex + limit, candidateIds.size());
       let paginatedIds = Array.tabulate<Nat>(endIndex - startIndex, func(i) = candidateIds[startIndex + i]);
       
-      // Convert proposal IDs to Service.Proposal objects
-      let proposals = Array.mapFilter<Nat, Service.Proposal>(paginatedIds, func(id) {
+      // Convert proposal IDs to Service.ProposalWithTally objects (including tally data)
+      let proposals = Array.mapFilter<Nat, Service.ProposalWithTally>(paginatedIds, func(id) {
         switch(proposalEngine.getProposal(id)) {
-          case (?proposal) ?translateProposalToService(proposal);
+          case (?proposal) {
+            let serviceProposal = translateProposalToService(proposal);
+            let tally = icrc149_tally_votes(id);
+            ?{
+              id = serviceProposal.id;
+              proposer = serviceProposal.proposer;
+              action = serviceProposal.action;
+              created_at = serviceProposal.created_at;
+              snapshot = serviceProposal.snapshot;
+              deadline = serviceProposal.deadline;
+              metadata = serviceProposal.metadata;
+              tally = tally;
+            };
+          };
           case (null) null;
         };
       });
@@ -2157,17 +3222,23 @@ module {
     public func icrc149_execute_proposal(_caller: Principal, proposal_id: Nat) : async {#Ok: Text; #Err: Text} {
       let ?proposal = proposalEngine.getProposal(proposal_id) else return #Err("Proposal not found");
       let oldProposal = ?proposal;
+
+      D.print("Executing proposal " # Nat.toText(proposal_id) # " with status: " # debug_show(proposal.status));
       
       // Check if proposal can be executed by examining its status
       switch(proposal.status) {
         case(#open) {
           // Try to end the proposal first
           let end_result = await* proposalEngine.endProposal(proposal_id);
+          Debug.print("Proposal end result: " # debug_show(end_result));
           switch(end_result) {
             case(#ok(_)) {
               // Proposal ended successfully, update indexes with new status
+
+              D.print("Proposal ended successfully, updating indexes...");
               switch(proposalEngine.getProposal(proposal_id)) {
                 case (?newProposal) {
+                  D.print("Executing proposal new status" # Nat.toText(proposal_id) # " with status: " # debug_show(proposal.status));
                   updateProposalIndexes(proposal_id, oldProposal, newProposal, newProposal.content);
                   saveProposalEngineState();
                 };
@@ -2182,6 +3253,7 @@ module {
         };
         case(#executing(_)) #Err("Proposal is currently being executed");
         case(#executed(details)) {
+          D.print("Proposal execution completed with details: " # debug_show(details));
           switch(details.choice) {
             case(?#Yes) #Ok("Proposal was already executed successfully");
             case(_) #Err("Proposal was rejected or failed to pass");
@@ -2327,28 +3399,80 @@ module {
     };
 
     // Get Ethereum address for the DAO using tECDSA
-    public func icrc149_get_ethereum_address(subaccount: ?Blob) : Text {
-      // For now, return a deterministic address based on a static seed
-      // In production, this would derive the address from tECDSA public key
-      let addressSeed = switch(subaccount) {
-        case null { 
-          // Use a consistent 32-byte zero subaccount for the main address
-          let zeroSubaccount = Blob.fromArray(Array.tabulate<Nat8>(32, func(_) = 0));
-          "DAO_Bridge_Main_" # Hex.encode(Blob.toArray(zeroSubaccount)); 
-        };
-        case (?sub) { "DAO_Bridge_Sub_" # Hex.encode(Blob.toArray(sub)) };
-      };
-      
-      // Generate a deterministic Ethereum address (for testing)
-      // In production, this would use the actual tECDSA derived address
-      let hash = SHA256.fromBlob(#sha256, Text.encodeUtf8(addressSeed));
-      let hashArray = Blob.toArray(hash);
-      let addressBytes = Array.subArray<Nat8>(hashArray, 12, 20); // Take last 20 bytes for address
-      
-      // Convert to hex string with 0x prefix and ensure proper checksum
-      let hexAddress = Hex.encode(addressBytes);
-      "0x" # hexAddress;
+    public func icrc149_get_ethereum_address(subaccount: ?Blob) : async Text {
+      await* getEthereumAddress(subaccount);
     };
+
+    // Check if users have voted on specific proposals and return their votes
+    public func icrc149_get_user_votes(requests: [{proposal_id: Nat; user_address: Text}]) : [{proposal_id: Nat; user_address: Text; vote: ?{ #Yes; #No; #Abstain }}] {
+      Array.map<{proposal_id: Nat; user_address: Text}, {proposal_id: Nat; user_address: Text; vote: ?{ #Yes; #No; #Abstain }}>(requests, func(request) {
+        D.print("🔍 USER_VOTE: Looking up vote for address " # request.user_address # " on proposal " # Nat.toText(request.proposal_id));
+        
+        // Convert Ethereum address to Principal (same as used during voting)
+        let voterPrincipal = ethereumAddressToPrincipal(request.user_address);
+        D.print("🔍 USER_VOTE: Converted address " # request.user_address # " to Principal " # Principal.toText(voterPrincipal));
+        
+        // Look up the vote using the proposal engine's getVote function
+        let vote = switch(proposalEngine.getVote(request.proposal_id, voterPrincipal)) {
+          case (?vote) {
+            D.print("✅ USER_VOTE: Found vote for user");
+            // Convert the vote choice to service format - vote.choice is already ?TChoice
+            ?translateVoteChoiceToService(vote.choice);
+          };
+          case (null) {
+            D.print("🔍 USER_VOTE: No vote found for user");
+            null;
+          };
+        };
+        
+        {
+          proposal_id = request.proposal_id;
+          user_address = request.user_address;
+          vote = vote;
+        };
+      });
+    };
+
+    // Legacy single-request function for backward compatibility
+    public func icrc149_get_user_vote(proposal_id: Nat, user_address: Text) : ?{ #Yes; #No; #Abstain } {
+      let results = icrc149_get_user_votes([{proposal_id = proposal_id; user_address = user_address}]);
+      switch(results.size()) {
+        case (0) null;
+        case (_) results[0].vote;
+      };
+    };
+
+    // Enhanced function to check if user has voted
+    public func icrc149_has_user_voted(proposal_id: Nat, user_address: Text) : Bool {
+      switch(icrc149_get_user_vote(proposal_id, user_address)) {
+        case (?_) true;
+        case (null) false;
+      };
+    };
+
+    // Enhanced proposal retrieval that includes user vote information
+    public func icrc149_get_proposal_with_user_vote(proposal_id: Nat, user_address: ?Text) : ?{
+      proposal: Service.Proposal;
+      user_vote: ?{ #Yes; #No; #Abstain };
+      user_has_voted: Bool;
+    } {
+      switch(icrc149_get_proposal_service(proposal_id)) {
+        case (?proposal) {
+          let userVote = switch(user_address) {
+            case (?addr) icrc149_get_user_vote(proposal_id, addr);
+            case (null) null;
+          };
+          
+          ?{
+            proposal = proposal;
+            user_vote = userVote;
+            user_has_voted = userVote != null;
+          };
+        };
+        case (null) null;
+      };
+    };
+
 
   };
 

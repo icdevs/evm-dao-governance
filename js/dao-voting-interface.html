@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICRC149 DAO Voting Interface</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+    <!-- DFinity libraries from unpkg CDN -->
+    <script src="https://unpkg.com/@dfinity/agent@0.21.0/lib/cjs/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/candid@0.21.0/lib/cjs/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/principal@0.21.0/lib/cjs/index.js"></script>
+    
+    <script>
+        // Wait for DFinity libraries to load and make them available globally
+        setTimeout(() => {
+            // The libraries should be available as global variables now
+            if (typeof window.IC !== 'undefined') {
+                window.dfinity = {
+                    agent: window.IC,
+                    candid: { IDL: window.IDL },
+                    principal: { Principal: window.Principal }
+                };
+            } else {
+                // Fallback: create minimal mock for development
+                console.warn('DFinity libraries not loaded, using minimal implementation');
+                window.dfinity = {
+                    agent: {
+                        HttpAgent: class MockHttpAgent {
+                            constructor(config) {
+                                this.host = config.host;
+                                console.log(`HttpAgent initialized with host: ${this.host}`);
+                            }
+                            async fetchRootKey() {
+                                console.log('fetchRootKey called');
+                            }
+                        },
+                        Actor: {
+                            createActor: (idlFactory, config) => {
+                                console.log('createActor called with canister:', config.canisterId);
+                                return new MockCanisterActor(config.canisterId);
+                            }
+                        }
+                    },
+                    candid: {
+                        IDL: {
+                            Nat: 'nat',
+                            Text: 'text',
+                            Bool: 'bool',
+                            Principal: 'principal',
+                            Vec: (type) => ({ vec: type }),
+                            Opt: (type) => ({ opt: type }),
+                            Record: (fields) => ({ record: fields }),
+                            Variant: (variants) => ({ variant: variants }),
+                            Func: (args, returns, annotations = []) => ({ func: { args, returns, annotations } }),
+                            Service: (methods) => ({ service: methods }),
+                            Tuple: (...types) => ({ tuple: types }),
+                            Nat8: 'nat8'
+                        }
+                    }
+                };
+                
+                // Mock canister actor for development
+                class MockCanisterActor {
+                    constructor(canisterId) {
+                        this.canisterId = canisterId;
+                    }
+                    
+                    async icrc149_get_proposals() {
+                        console.log('Mock: icrc149_get_proposals called');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        // Return the actual proposals from your canister
+                        return [
+                            {
+                                id: 2n,
+                                action: {
+                                    EthTransaction: {
+                                        to: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+                                        value: 0n,
+                                        data: new Uint8Array([169, 5, 156, 187]), // transfer function signature
+                                        chain: {
+                                            chain_id: 31337n,
+                                            network_name: 'anvil'
+                                        }
+                                    }
+                                },
+                                metadata: 'Send 1 governance token to 0x4A7C969110f7358bF334b49A2FF1a2585ac372B8',
+                                deadline: BigInt(Date.now() * 1_000_000 + 600_000_000_000), // 10 minutes from now in nanoseconds
+                                created_at: BigInt((Date.now() - 300000) * 1_000_000), // 5 minutes ago in nanoseconds
+                                proposer: 'uxrrr-q7777-77774-qaaaq-cai',
+                                snapshot: {
+                                    block_number: 100n,
+                                    contract_address: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+                                    chain: {
+                                        chain_id: 31337n,
+                                        network_name: 'anvil'
+                                    },
+                                    state_root: new Uint8Array(32),
+                                    total_supply: 1000000n,
+                                    snapshot_time: BigInt((Date.now() - 300000) * 1_000_000)
+                                }
+                            }
+                        ];
+                    }
+                    
+                    async icrc149_get_snapshot_contracts() {
+                        console.log('Mock: icrc149_get_snapshot_contracts called');
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        return [
+                            ['0x5FbDB2315678afecb367f032d93F642f64180aa3', {
+                                contract_address: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+                                enabled: true,
+                                contract_type: { ERC20: null },
+                                balance_storage_slot: 0n,
+                                chain: {
+                                    chain_id: 31337n,
+                                    network_name: 'anvil'
+                                }
+                            }]
+                        ];
+                    }
+                    
+                    async icrc149_vote_proposal(args) {
+                        console.log('Mock: icrc149_vote_proposal called with:', args);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        return { Ok: 'Vote submitted successfully' };
+                    }
+                    
+                    async icrc149_execute_proposal(proposalId) {
+                        console.log('Mock: icrc149_execute_proposal called with:', proposalId);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        return { Ok: 'Proposal executed successfully' };
+                    }
+                }
+            }
+            
+            // Define IDL factory
+            const idlFactory = ({ IDL }) => {
+                const ProposalId = IDL.Nat;
+                const Result = IDL.Variant({ Ok: IDL.Text, Err: IDL.Text });
+                
+                return IDL.Service({
+                    icrc149_get_proposals: IDL.Func([], [IDL.Vec(IDL.Record({
+                        id: IDL.Nat,
+                        action: IDL.Variant({
+                            Motion: IDL.Text,
+                            EthTransaction: IDL.Record({
+                                to: IDL.Text,
+                                value: IDL.Nat,
+                                data: IDL.Vec(IDL.Nat8),
+                                chain: IDL.Record({
+                                    chain_id: IDL.Nat,
+                                    network_name: IDL.Text
+                                })
+                            })
+                        }),
+                        metadata: IDL.Opt(IDL.Text),
+                        deadline: IDL.Nat,
+                        created_at: IDL.Nat,
+                        proposer: IDL.Principal,
+                        snapshot: IDL.Opt(IDL.Record({
+                            block_number: IDL.Nat,
+                            contract_address: IDL.Text,
+                            chain: IDL.Record({
+                                chain_id: IDL.Nat,
+                                network_name: IDL.Text
+                            }),
+                            state_root: IDL.Vec(IDL.Nat8),
+                            total_supply: IDL.Nat,
+                            snapshot_time: IDL.Nat
+                        }))
+                    }))], ['query']),
+                    icrc149_get_snapshot_contracts: IDL.Func([], [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Record({
+                        contract_address: IDL.Text,
+                        enabled: IDL.Bool,
+                        contract_type: IDL.Variant({ ERC20: IDL.Null }),
+                        balance_storage_slot: IDL.Nat,
+                        chain: IDL.Record({
+                            chain_id: IDL.Nat,
+                            network_name: IDL.Text
+                        })
+                    })))], ['query']),
+                    icrc149_vote_proposal: IDL.Func([IDL.Record({
+                        proposal_id: ProposalId,
+                        voter: IDL.Vec(IDL.Nat8),
+                        choice: IDL.Variant({ Yes: IDL.Null, No: IDL.Null, Abstain: IDL.Null }),
+                        siwe: IDL.Record({ message: IDL.Text, signature: IDL.Vec(IDL.Nat8) }),
+                        witness: IDL.Record({
+                            blockHash: IDL.Vec(IDL.Nat8),
+                            blockNumber: IDL.Nat,
+                            userAddress: IDL.Vec(IDL.Nat8),
+                            contractAddress: IDL.Vec(IDL.Nat8),
+                            storageKey: IDL.Vec(IDL.Nat8),
+                            storageProof: IDL.Vec(IDL.Vec(IDL.Nat8))
+                        })
+                    })], [Result]),
+                    icrc149_execute_proposal: IDL.Func([ProposalId], [Result])
+                });
+            };
+            
+            // Make IDL factory available globally
+            window.idlFactory = idlFactory;
+            
+            console.log('✅ DFinity libraries loaded successfully');
+        }, 1000);
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #333;
+            font-size: 1.5em;
+            font-weight: 500;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .combo-input {
+            position: relative;
+        }
+        
+        .combo-input select {
+            appearance: none;
+            background: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") no-repeat right 0.75rem center/1.25rem 1.25rem;
+            padding-right: 2.5rem;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-weight: 500;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .status.warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        
+        .proposal-card {
+            background: white;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            transition: all 0.3s;
+        }
+        
+        .proposal-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.1);
+        }
+        
+        .proposal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .proposal-id {
+            font-weight: 700;
+            color: #667eea;
+            font-size: 1.1em;
+        }
+        
+        .proposal-status {
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-active {
+            background: #e7f5e7;
+            color: #2d7d2d;
+        }
+        
+        .status-passed {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-executed {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .vote-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .vote-buttons button {
+            flex: 1;
+            margin: 0;
+        }
+        
+        .network-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .network-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+        
+        .network-indicator.connected {
+            background: #28a745;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .vote-tally {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .tally-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .tally-bar {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        
+        .tally-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+        
+        .tally-yes { background: #28a745; }
+        .tally-no { background: #dc3545; }
+        .tally-abstain { background: #6c757d; }
+        
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .form-row {
+                flex-direction: column;
+            }
+            
+            .proposal-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .vote-buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗳️ ICRC149 DAO Voting Interface</h1>
+            <p>Decentralized governance with Ethereum-based voting</p>
+        </div>
+        
+        <div class="content">
+            <!-- Connection Status -->
+            <div class="network-status">
+                <div class="network-indicator" id="networkIndicator"></div>
+                <span id="networkStatus">Disconnected</span>
+                <button id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+            </div>
+            
+            <!-- Configuration Section -->
+            <div class="section">
+                <h2>🔧 Configuration</h2>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="canisterId">DAO Canister ID</label>
+                        <input type="text" id="canisterId" placeholder="uxrrr-q7777-77774-qaaaq-cai" value="uxrrr-q7777-77774-qaaaq-cai" maxlength="64">
+                    </div>
+                    <div class="form-group">
+                        <label for="environment">Environment</label>
+                        <select id="environment" onchange="updateEnvironment()">
+                            <option value="local">Local Development</option>
+                            <option value="ic">Internet Computer</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="chainId">Chain ID</label>
+                        <div class="combo-input">
+                            <select id="chainIdSelect" onchange="updateChainId()">
+                                <option value="">Select Chain...</option>
+                                <option value="1">Ethereum Mainnet (1)</option>
+                                <option value="11155111">Sepolia Testnet (11155111)</option>
+                                <option value="137">Polygon Mainnet (137)</option>
+                                <option value="80001">Polygon Mumbai (80001)</option>
+                                <option value="42161">Arbitrum One (42161)</option>
+                                <option value="421613">Arbitrum Goerli (421613)</option>
+                                <option value="10">Optimism (10)</option>
+                                <option value="420">Optimism Goerli (420)</option>
+                                <option value="31337" selected>Local/Anvil (31337)</option>
+                                <option value="custom">Custom...</option>
+                            </select>
+                        </div>
+                        <input type="number" id="chainIdInput" placeholder="Enter custom chain ID" value="31337" class="hidden">
+                    </div>
+                    <div class="form-group">
+                        <label for="contractAddress">Contract Address</label>
+                        <input type="text" id="contractAddress" placeholder="0x..." value="0x5fbdb2315678afecb367f032d93f642f64180aa3"maxlength="42">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="loadProposals()" id="loadProposalsBtn">
+                        <span class="loading hidden" id="loadingSpinner"></span>
+                        Load Proposals
+                    </button>
+                    <button onclick="discoverStorageSlot()" class="btn-warning" id="discoverSlotBtn">
+                        Discover Storage Slot
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Proposals Section -->
+            <div class="section">
+                <h2>📋 Proposals</h2>
+                <div id="proposalsContainer">
+                    <div class="status info">
+                        Configure the settings above and click "Load Proposals" to view available proposals.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Status Messages -->
+            <div id="statusMessages"></div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let metamaskProvider = null;
+        let dfxAgent = null;
+        let canisterActor = null;
+        let userAddress = null;
+        let currentChainId = null;
+        let storageSlot = null;
+        
+        // Known chain configurations
+        const CHAIN_CONFIGS = {
+            1: { name: 'Ethereum Mainnet', symbol: 'ETH', rpc: 'https://eth.llamarpc.com' },
+            11155111: { name: 'Sepolia Testnet', symbol: 'ETH', rpc: 'https://sepolia.infura.io/v3/' },
+            137: { name: 'Polygon Mainnet', symbol: 'MATIC', rpc: 'https://polygon-rpc.com' },
+            80001: { name: 'Polygon Mumbai', symbol: 'MATIC', rpc: 'https://rpc-mumbai.maticvigil.com' },
+            42161: { name: 'Arbitrum One', symbol: 'ETH', rpc: 'https://arb1.arbitrum.io/rpc' },
+            421613: { name: 'Arbitrum Goerli', symbol: 'ETH', rpc: 'https://goerli-rollup.arbitrum.io/rpc' },
+            10: { name: 'Optimism', symbol: 'ETH', rpc: 'https://mainnet.optimism.io' },
+            420: { name: 'Optimism Goerli', symbol: 'ETH', rpc: 'https://goerli.optimism.io' },
+            31337: { name: 'Local/Anvil', symbol: 'ETH', rpc: 'http://127.0.0.1:8545' }
+        };
+        
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            initializeApp();
+        });
+        
+        async function initializeApp() {
+            try {
+                // Check if MetaMask is available
+                if (typeof window.ethereum !== 'undefined') {
+                    metamaskProvider = new ethers.BrowserProvider(window.ethereum);
+                    
+                    // Listen for account changes
+                    window.ethereum.on('accountsChanged', (accounts) => {
+                        if (accounts.length === 0) {
+                            disconnectWallet();
+                        } else {
+                            userAddress = accounts[0];
+                            updateUI();
+                        }
+                    });
+                    
+                    // Listen for chain changes
+                    window.ethereum.on('chainChanged', (chainId) => {
+                        currentChainId = parseInt(chainId, 16);
+                        updateUI();
+                    });
+                    
+                    // Check if already connected
+                    const accounts = await metamaskProvider.send("eth_accounts", []);
+                    if (accounts.length > 0) {
+                        userAddress = accounts[0];
+                        const network = await metamaskProvider.getNetwork();
+                        currentChainId = Number(network.chainId);
+                        updateConnectionStatus(true);
+                    }
+                } else {
+                    showStatus('MetaMask not detected. Please install MetaMask to use this interface.', 'error');
+                }
+                
+                updateUI();
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showStatus('Failed to initialize application: ' + error.message, 'error');
+            }
+        }
+        
+        async function connectWallet() {
+            try {
+                if (!metamaskProvider) {
+                    throw new Error('MetaMask not available');
+                }
+                
+                await metamaskProvider.send("eth_requestAccounts", []);
+                const signer = await metamaskProvider.getSigner();
+                userAddress = await signer.getAddress();
+                
+                const network = await metamaskProvider.getNetwork();
+                currentChainId = Number(network.chainId);
+                
+                updateConnectionStatus(true);
+                showStatus(`Connected to ${userAddress}`, 'success');
+            } catch (error) {
+                console.error('Connection error:', error);
+                showStatus('Failed to connect wallet: ' + error.message, 'error');
+            }
+        }
+        
+        function disconnectWallet() {
+            userAddress = null;
+            currentChainId = null;
+            updateConnectionStatus(false);
+            showStatus('Wallet disconnected', 'info');
+        }
+        
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('networkIndicator');
+            const status = document.getElementById('networkStatus');
+            const connectBtn = document.getElementById('connectBtn');
+            
+            if (connected) {
+                indicator.classList.add('connected');
+                status.textContent = `Connected: ${userAddress?.slice(0, 6)}...${userAddress?.slice(-4)} (Chain: ${currentChainId})`;
+                connectBtn.textContent = 'Disconnect';
+                connectBtn.onclick = disconnectWallet;
+            } else {
+                indicator.classList.remove('connected');
+                status.textContent = 'Disconnected';
+                connectBtn.textContent = 'Connect Wallet';
+                connectBtn.onclick = connectWallet;
+            }
+        }
+        
+        function updateEnvironment() {
+            const env = document.getElementById('environment').value;
+            // Auto-set canister ID for local development
+            if (env === 'local') {
+                document.getElementById('canisterId').value = 'uxrrr-q7777-77774-qaaaq-cai';
+            }
+            showStatus(`Environment set to: ${env}`, 'info');
+        }
+        
+        function updateChainId() {
+            const select = document.getElementById('chainIdSelect');
+            const input = document.getElementById('chainIdInput');
+            
+            if (select.value === 'custom') {
+                select.classList.add('hidden');
+                input.classList.remove('hidden');
+                input.focus();
+            } else if (select.value) {
+                input.classList.add('hidden');
+                select.classList.remove('hidden');
+                input.value = select.value;
+            }
+        }
+        
+        async function initializeDfxAgent() {
+            const env = document.getElementById('environment').value;
+            const canisterId = document.getElementById('canisterId').value;
+            
+            if (!canisterId) {
+                throw new Error('Canister ID is required');
+            }
+            
+            try {
+                let agent;
+                
+                if (env === 'local') {
+                    // Local development configuration
+                    agent = new window.dfinity.agent.HttpAgent({
+                        host: 'http://127.0.0.1:8080'
+                    });
+                    
+                    // Fetch root key for local development
+                    await agent.fetchRootKey();
+                } else {
+                    // Internet Computer configuration
+                    agent = new window.dfinity.agent.HttpAgent({
+                        host: 'https://ic0.app'
+                    });
+                }
+                
+                dfxAgent = agent;
+                
+                // Create canister actor
+                canisterActor = window.dfinity.agent.Actor.createActor(idlFactory, {
+                    agent: dfxAgent,
+                    canisterId: canisterId
+                });
+                
+                showStatus(`Connected to canister: ${canisterId}`, 'success');
+                return canisterActor;
+                
+            } catch (error) {
+                console.error('DFX agent initialization error:', error);
+                throw new Error(`Failed to connect to canister: ${error.message}`);
+            }
+        }
+        
+        // Helper function to wait for libraries to load
+        async function loadProposals() {
+            const loadBtn = document.getElementById('loadProposalsBtn');
+            const spinner = document.getElementById('loadingSpinner');
+            const container = document.getElementById('proposalsContainer');
+            
+            try {
+                loadBtn.disabled = true;
+                spinner.classList.remove('hidden');
+                
+                if (!userAddress) {
+                    throw new Error('Please connect your wallet first');
+                }
+                
+                const chainId = document.getElementById('chainIdInput').value || document.getElementById('chainIdSelect').value;
+                const contractAddress = document.getElementById('contractAddress').value;
+                
+                if (!chainId || !contractAddress) {
+                    throw new Error('Please specify chain ID and contract address');
+                }
+                
+                // Initialize DFX agent if not already done
+                if (!canisterActor) {
+                    await initializeDfxAgent();
+                }
+                
+                // Get contract configuration from canister
+                const contractConfig = await getContractConfig(chainId, contractAddress);
+                if (contractConfig) {
+                    storageSlot = contractConfig.balance_storage_slot;
+                    showStatus(`Contract configuration loaded. Storage slot: ${storageSlot}`, 'success');
+                }
+                
+                // Load proposals for this contract
+                const proposals = await loadProposalsFromCanister(chainId, contractAddress);
+                
+                // Get user's voting power and existing votes
+                const userVotingData = await getUserVotingData(chainId, contractAddress, userAddress);
+                
+                // Render proposals
+                renderProposals(proposals, userVotingData);
+                
+            } catch (error) {
+                console.error('Load proposals error:', error);
+                showStatus('Failed to load proposals: ' + error.message, 'error');
+                container.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
+            } finally {
+                loadBtn.disabled = false;
+                spinner.classList.add('hidden');
+            }
+        }
+        
+        async function getContractConfig(chainId, contractAddress) {
+            try {
+                if (!canisterActor) {
+                    throw new Error('Canister actor not initialized');
+                }
+                
+                console.log(`Getting config for chain ${chainId}, contract ${contractAddress}`);
+                
+                // Call the real canister to get contract configuration
+                const configs = await canisterActor.icrc149_get_snapshot_contracts();
+                
+                // Find config for this contract address
+                const config = configs.find(([addr, config]) => addr.toLowerCase() === contractAddress.toLowerCase());
+                
+                if (config) {
+                    return config[1]; // Return the config object
+                } else {
+                    console.log('No configuration found for contract:', contractAddress);
+                    return null;
+                }
+            } catch (error) {
+                console.error('Failed to get contract config:', error);
+                return null;
+            }
+        }
+        
+        async function loadProposalsFromCanister(chainId, contractAddress) {
+            try {
+                if (!canisterActor) {
+                    throw new Error('Canister actor not initialized');
+                }
+                
+                console.log(`Loading proposals for chain ${chainId}, contract ${contractAddress}`);
+                
+                // Call the real canister to get proposals
+                const proposals = await canisterActor.icrc149_get_proposals();
+                
+                console.log('Loaded proposals from canister:', proposals);
+                return proposals;
+            } catch (error) {
+                console.error('Failed to load proposals:', error);
+                throw error;
+            }
+        }
+        
+        async function getUserVotingData(chainId, contractAddress, userAddress) {
+            try {
+                // Get user's token balance at various blocks
+                const balance = await getUserTokenBalance(contractAddress, userAddress);
+                
+                // Get user's existing votes
+                // In real implementation: await canisterActor.icrc149_get_user_votes(userAddress);
+                const existingVotes = new Map(); // proposalId -> vote choice
+                
+                return {
+                    balance: balance,
+                    existingVotes: existingVotes
+                };
+            } catch (error) {
+                console.error('Failed to get user voting data:', error);
+                return {
+                    balance: BigInt(0),
+                    existingVotes: new Map()
+                };
+            }
+        }
+        
+        async function getUserTokenBalance(contractAddress, userAddress) {
+            try {
+                if (!metamaskProvider) {
+                    return BigInt(0);
+                }
+                
+                // ERC20 balanceOf function call
+                const balanceData = `0x70a08231${userAddress.slice(2).padStart(64, '0')}`;
+                const result = await metamaskProvider.send('eth_call', [
+                    {
+                        to: contractAddress,
+                        data: balanceData
+                    },
+                    'latest'
+                ]);
+                
+                // Handle empty or invalid responses
+                if (!result || result === '0x' || result === '0x0') {
+                    return BigInt(0);
+                }
+                
+                try {
+                    return ethers.getBigInt(result);
+                } catch (conversionError) {
+                    console.warn('Failed to convert balance result to BigInt:', result, conversionError);
+                    return BigInt(0);
+                }
+            } catch (error) {
+                console.error('Failed to get token balance:', error);
+                return BigInt(0);
+            }
+        }
+        
+        function renderProposals(proposals, userVotingData) {
+            const container = document.getElementById('proposalsContainer');
+            
+            if (proposals.length === 0) {
+                container.innerHTML = '<div class="status info">No proposals found for this contract.</div>';
+                return;
+            }
+            
+            const proposalsHtml = proposals.map(proposal => {
+                // For now, use placeholder vote data since real proposals might not have vote tallies yet
+                const totalVotes = 0;
+                const yesVotes = 0;
+                const noVotes = 0;
+                const abstainVotes = 0;
+                
+                const yesPercent = 0;
+                const noPercent = 0;
+                const abstainPercent = 0;
+                
+                const hasVoted = userVotingData.existingVotes.has(Number(proposal.id));
+                const userVote = userVotingData.existingVotes.get(Number(proposal.id));
+                const isActive = Number(proposal.deadline) > (Date.now() * 1_000_000); // deadline is in nanoseconds
+                const isPastDeadline = Number(proposal.deadline) < (Date.now() * 1_000_000);
+                const userBalance = Number(userVotingData.balance);
+                
+                let statusClass = 'status-active';
+                let statusText = 'Active';
+                if (isPastDeadline) {
+                    statusClass = 'status-expired';
+                    statusText = 'Expired';
+                }
+                
+                // Determine action type and description
+                let actionType = 'Unknown';
+                let actionDescription = 'No description available';
+                
+                if ('EthTransaction' in proposal.action) {
+                    actionType = 'Ethereum Transaction';
+                    actionDescription = `Transaction to ${proposal.action.EthTransaction.to}`;
+                } else if ('ICPCall' in proposal.action) {
+                    actionType = 'ICP Call';
+                    actionDescription = `Call ${proposal.action.ICPCall.method} on ${proposal.action.ICPCall.canister}`;
+                } else if ('Motion' in proposal.action) {
+                    actionType = 'Motion';
+                    actionDescription = proposal.action.Motion;
+                }
+                
+                return `
+                    <div class="proposal-card">
+                        <div class="proposal-header">
+                            <div class="proposal-id">Proposal #${proposal.id}</div>
+                            <div class="proposal-status ${statusClass}">${statusText}</div>
+                        </div>
+                        
+                        <div class="proposal-metadata">
+                            <strong>Action Type:</strong> ${actionType}<br>
+                            <strong>Description:</strong> ${proposal.metadata || actionDescription}<br>
+                            <strong>Proposer:</strong> ${proposal.proposer.toString()}
+                        </div>
+                        
+                        <div class="proposal-details">
+                            <p><strong>Created:</strong> ${new Date(Number(proposal.created_at) / 1_000_000).toLocaleString()}</p>
+                            <p><strong>Deadline:</strong> ${new Date(Number(proposal.deadline) / 1_000_000).toLocaleString()}</p>
+                            ${proposal.snapshot ? `<p><strong>Snapshot Block:</strong> ${Number(proposal.snapshot.block_number)}</p>` : ''}
+                            <p><strong>Your Balance:</strong> ${ethers.formatEther(userBalance.toString())} tokens</p>
+                            ${hasVoted ? `<p><strong>Your Vote:</strong> ${userVote}</p>` : ''}
+                        </div>
+                        
+                        <div class="vote-info">
+                            <button onclick="loadVoteTally(${proposal.id})" class="btn-secondary">
+                                Load Vote Tally
+                            </button>
+                            <div id="tally-${proposal.id}"></div>
+                        </div>
+                        
+                        ${isActive && !hasVoted && userBalance > 0 ? `
+                            <div class="vote-buttons">
+                                <button class="btn-success" onclick="castVote(${proposal.id}, 'Yes')">
+                                    Vote Yes
+                                </button>
+                                <button class="btn-danger" onclick="castVote(${proposal.id}, 'No')">
+                                    Vote No
+                                </button>
+                                <button class="btn-secondary" onclick="castVote(${proposal.id}, 'Abstain')">
+                                    Abstain
+                                </button>
+                            </div>
+                        ` : ''}
+                        
+                        ${hasVoted ? `
+                            <div class="status success">
+                                ✅ You have already voted: ${userVote}
+                            </div>
+                        ` : ''}
+                        
+                        ${userBalance === 0 ? `
+                            <div class="status warning">
+                                ⚠️ You have no voting power (0 tokens)
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = proposalsHtml;
+        }
+        
+        async function castVote(proposalId, choice) {
+            try {
+                if (!userAddress) {
+                    throw new Error('Please connect your wallet first');
+                }
+                
+                if (!canisterActor) {
+                    await initializeDfxAgent();
+                }
+                
+                const chainId = document.getElementById('chainIdInput').value || document.getElementById('chainIdSelect').value;
+                const contractAddress = document.getElementById('contractAddress').value;
+                
+                showStatus(`Preparing to cast ${choice} vote for proposal ${proposalId}...`, 'info');
+                
+                // Generate SIWE proof
+                const siweProof = await generateSIWEProof(proposalId, choice, contractAddress);
+                
+                // Generate witness proof
+                const witness = await generateWitnessProof(contractAddress, userAddress, proposalId);
+                
+                // Cast vote
+                const voteArgs = {
+                    proposal_id: BigInt(proposalId),
+                    voter: ethers.getBytes(userAddress),
+                    choice: choice === 'Yes' ? { Yes: null } : choice === 'No' ? { No: null } : { Abstain: null },
+                    siwe: siweProof,
+                    witness: witness
+                };
+                
+                showStatus(`Submitting ${choice} vote...`, 'info');
+                
+                // Call canister
+                const result = await canisterActor.icrc149_vote_proposal(voteArgs);
+                
+                if ('Ok' in result) {
+                    showStatus(`✅ Vote cast successfully: ${choice}`, 'success');
+                    // Reload proposals to show updated state
+                    await loadProposals();
+                } else {
+                    throw new Error(`Vote failed: ${JSON.stringify(result.Err)}`);
+                }
+                
+            } catch (error) {
+                console.error('Vote casting error:', error);
+                showStatus('Failed to cast vote: ' + error.message, 'error');
+            }
+        }
+        
+        async function loadVoteTally(proposalId) {
+            try {
+                // For now, just show a placeholder message
+                const tallyDiv = document.getElementById(`tally-${proposalId}`);
+                tallyDiv.innerHTML = `
+                    <div class="status info">
+                        Vote tally loading functionality will be implemented once the canister provides vote counting methods.
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Vote tally loading error:', error);
+                showStatus('Failed to load vote tally: ' + error.message, 'error');
+            }
+        }
+        
+        async function endVote(proposalId) {
+            try {
+                if (!canisterActor) {
+                    await initializeDfxAgent();
+                }
+                
+                showStatus(`Executing proposal ${proposalId}...`, 'info');
+                
+                const result = await canisterActor.icrc149_execute_proposal(BigInt(proposalId));
+                
+                if ('Ok' in result) {
+                    showStatus(`✅ Proposal ${proposalId} executed successfully`, 'success');
+                    await loadProposals();
+                } else {
+                    throw new Error(`Execution failed: ${JSON.stringify(result.Err)}`);
+                }
+                
+            } catch (error) {
+                console.error('Proposal execution error:', error);
+                showStatus('Failed to execute proposal: ' + error.message, 'error');
+            }
+        }
+        
+        async function generateSIWEProof(proposalId, choice, contractAddress) {
+            try {
+                const signer = await metamaskProvider.getSigner();
+                
+                // Create SIWE message
+                const domain = 'dao-voting.example.com';
+                const address = await signer.getAddress();
+                const statement = `Vote ${choice} on proposal ${proposalId} for contract ${contractAddress}`;
+                const uri = `https://${domain}`;
+                const version = '1';
+                const chainId = currentChainId;
+                const nonce = Date.now().toString();
+                const issuedAt = new Date().toISOString();
+                const expirationTime = new Date(Date.now() + 600000).toISOString(); // 10 minutes
+                
+                const message = `${domain} wants you to sign in with your Ethereum account:
+${address}
+
+${statement}
+
+URI: ${uri}
+Version: ${version}
+Chain ID: ${chainId}
+Nonce: ${nonce}
+Issued At: ${issuedAt}
+Expiration Time: ${expirationTime}`;
+                
+                const signature = await signer.signMessage(message);
+                
+                return {
+                    message: message,
+                    signature: ethers.getBytes(signature)
+                };
+                
+            } catch (error) {
+                console.error('SIWE proof generation error:', error);
+                throw new Error('Failed to generate SIWE proof: ' + error.message);
+            }
+        }
+        
+        async function generateWitnessProof(contractAddress, userAddress, proposalId) {
+            try {
+                // Get the proposal to find the snapshot block
+                const proposals = await loadProposalsFromCanister(currentChainId, contractAddress);
+                const proposal = proposals.find(p => Number(p.id) === proposalId);
+                
+                if (!proposal) {
+                    throw new Error('Proposal not found');
+                }
+                
+                const blockNumber = proposal.snapshot ? Number(proposal.snapshot.block_number) : 0;
+                
+                // Generate storage key for user's balance
+                const slot = storageSlot || 0; // Use discovered slot or default to 0
+                const storageKey = getERC20BalanceStorageKey(userAddress, slot);
+                
+                // Get proof from Ethereum
+                const proof = await metamaskProvider.send('eth_getProof', [
+                    contractAddress,
+                    [storageKey],
+                    `0x${blockNumber.toString(16)}`
+                ]);
+                
+                const block = await metamaskProvider.send('eth_getBlockByNumber', [
+                    `0x${blockNumber.toString(16)}`,
+                    false
+                ]);
+                
+                return {
+                    blockHash: ethers.getBytes(block.hash),
+                    blockNumber: BigInt(blockNumber),
+                    userAddress: ethers.getBytes(userAddress),
+                    contractAddress: ethers.getBytes(contractAddress),
+                    storageKey: ethers.getBytes(storageKey),
+                    storageValue: ethers.getBytes(proof.storageProof[0]?.value || '0x0'),
+                    accountProof: proof.accountProof.map(p => ethers.getBytes(p)),
+                    storageProof: proof.storageProof[0]?.proof.map(p => ethers.getBytes(p)) || []
+                };
+                
+            } catch (error) {
+                console.error('Witness proof generation error:', error);
+                throw new Error('Failed to generate witness proof: ' + error.message);
+            }
+        }
+        
+        function getERC20BalanceStorageKey(userAddress, slotIndex) {
+            // Standard ERC20 balance mapping: mapping(address => uint256) balances
+            // Storage key = keccak256(abi.encode(userAddress, slotIndex))
+            const paddedAddress = ethers.zeroPadValue(userAddress, 32);
+            const paddedSlot = ethers.zeroPadValue(`0x${slotIndex.toString(16)}`, 32);
+            return ethers.keccak256(ethers.concat([paddedAddress, paddedSlot]));
+        }
+        
+        async function discoverStorageSlot() {
+            try {
+                if (!userAddress) {
+                    throw new Error('Please connect your wallet first');
+                }
+                
+                const contractAddress = document.getElementById('contractAddress').value;
+                if (!contractAddress) {
+                    throw new Error('Please enter a contract address');
+                }
+                
+                showStatus('🔍 Discovering storage slot for balance mapping...', 'info');
+                
+                // Get current balance via balanceOf call
+                const actualBalance = await getUserTokenBalance(contractAddress, userAddress);
+                
+                if (actualBalance === BigInt(0)) {
+                    throw new Error('You have 0 tokens. Storage slot discovery requires a non-zero balance.');
+                }
+                
+                showStatus(`Current balance: ${ethers.formatEther(actualBalance.toString())} tokens. Searching for storage slot...`, 'info');
+                
+                // Try common storage slots (0-10)
+                for (let slot = 0; slot <= 10; slot++) {
+                    try {
+                        const storageKey = getERC20BalanceStorageKey(userAddress, slot);
+                        const storageValue = await metamaskProvider.send('eth_getStorageAt', [
+                            contractAddress,
+                            storageKey,
+                            'latest'
+                        ]);
+                        
+                        const storageBalance = ethers.getBigInt(storageValue || '0x0');
+                        
+                        if (storageBalance === actualBalance) {
+                            storageSlot = slot;
+                            showStatus(`✅ Found storage slot: ${slot}`, 'success');
+                            
+                            // If we have a canister actor, update the configuration
+                            if (canisterActor) {
+                                try {
+                                    const chainId = document.getElementById('chainIdInput').value || document.getElementById('chainIdSelect').value;
+                                    await updateCanisterStorageSlot(chainId, contractAddress, slot);
+                                } catch (updateError) {
+                                    console.error('Failed to update canister config:', updateError);
+                                    showStatus(`Found slot ${slot} but failed to update canister: ${updateError.message}`, 'warning');
+                                }
+                            }
+                            
+                            return slot;
+                        }
+                    } catch (error) {
+                        console.log(`Slot ${slot} check failed:`, error.message);
+                    }
+                }
+                
+                throw new Error('Could not find storage slot in range 0-10. The contract may use a non-standard storage layout.');
+                
+            } catch (error) {
+                console.error('Storage slot discovery error:', error);
+                showStatus('Storage slot discovery failed: ' + error.message, 'error');
+            }
+        }
+        
+        async function updateCanisterStorageSlot(chainId, contractAddress, slot) {
+            // Update the canister's storage slot configuration
+            const config = {
+                contract_address: contractAddress,
+                chain: { chain_id: BigInt(chainId), network_name: CHAIN_CONFIGS[chainId]?.name || 'Unknown' },
+                rpc_service: {
+                    rpc_type: 'custom',
+                    canister_id: null, // Use default EVM RPC canister
+                    custom_config: []
+                },
+                contract_type: { ERC20: null },
+                balance_storage_slot: BigInt(slot),
+                enabled: true
+            };
+            
+            const result = await canisterActor.icrc149_update_snapshot_contract_config(contractAddress, [config]);
+            
+            if ('Ok' in result) {
+                showStatus(`✅ Canister configuration updated with storage slot ${slot}`, 'success');
+            } else {
+                throw new Error(`Failed to update canister: ${JSON.stringify(result.Err)}`);
+            }
+        }
+        
+        function updateUI() {
+            // Update any UI elements based on current state
+            const chainId = document.getElementById('chainIdInput').value || document.getElementById('chainIdSelect').value;
+            if (chainId && CHAIN_CONFIGS[chainId]) {
+                const config = CHAIN_CONFIGS[chainId];
+                // Could update UI to show chain info
+            }
+        }
+        
+        function showStatus(message, type) {
+            const container = document.getElementById('statusMessages');
+            const statusDiv = document.createElement('div');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            
+            container.appendChild(statusDiv);
+            
+            // Auto-remove after 5 seconds for non-error messages
+            if (type !== 'error') {
+                setTimeout(() => {
+                    if (statusDiv.parentNode) {
+                        statusDiv.parentNode.removeChild(statusDiv);
+                    }
+                }, 5000);
+            }
+            
+            // Scroll to show the message
+            statusDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    </script>
+</body>
+</html>

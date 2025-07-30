@@ -5,13 +5,13 @@ import Nat "mo:base/Nat";
 import Nat8 "mo:base/Nat8";
 import Iter "mo:base/Iter";
 import Result "mo:base/Result";
-import Debug "mo:base/Debug";
+import _Debug "mo:base/Debug";
 import Buffer "mo:base/Buffer";
 
-import RLP "mo:rlp-motoko";
+import _RLP "mo:rlp-motoko";
 import Sha3 "mo:sha3";
-import EvmVerifier "mo:evm-proof-verifier/Verifier";
-import EvmTypes "mo:evm-proof-verifier/types";
+import _EvmVerifier "mo:evm-proof-verifier/Verifier";
+import _EvmTypes "mo:evm-proof-verifier/types";
 
 import Service "service";
 
@@ -74,13 +74,22 @@ module {
   };
 
   // Calculate storage key for ERC20 balance mapping
-  // Key = keccak256(abi.encodePacked(userAddress, slot))
+  // Key = keccak256(abi.encode(userAddress, slot)) - addresses are LEFT-PADDED to 32 bytes
   private func calculateStorageKey(userAddress: Blob, slot: Nat) : Blob {
     let userBytes = Blob.toArray(userAddress);
     let slotBytes = Blob.toArray(natToBlob32(slot));
     
-    // Concatenate user address (20 bytes) + slot (32 bytes)
-    let combined = Array.append(userBytes, slotBytes);
+    // Pad user address to 32 bytes (left-padded with zeros for abi.encode semantics)
+    var paddedUserBytes = Array.init<Nat8>(32, 0);
+    if (userBytes.size() <= 32) {
+      let startIndex = 32 - userBytes.size();
+      for (i in Iter.range(0, userBytes.size() - 1)) {
+        paddedUserBytes[startIndex + i] := userBytes[i];
+      };
+    };
+    
+    // Concatenate padded user address (32 bytes) + slot (32 bytes)
+    let combined = Array.append(Array.freeze(paddedUserBytes), slotBytes);
     
     // Hash with Keccak256
     let hashBytes = keccak256(combined);
@@ -119,7 +128,7 @@ module {
   private func validateStorageProof(
     storageProof: [Blob],
     storageKey: Blob,
-    storageValue: Blob,
+    _: Blob, // storageValue parameter (unused in simplified validation)
     storageRoot: Blob
   ) : Bool {
     // For now, we'll do a simplified validation since the EVM proof verifier

@@ -2,7 +2,8 @@
   "canisters": {
     "main": {
       "main": "./src/main.mo",
-      "type": "motoko"
+      "type": "motoko",
+      "gzip": true
     },
      "evm_rpc": {
       "id": "7hfb6-caaaa-aaaar-qadga-cai",

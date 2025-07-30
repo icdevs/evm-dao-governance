@@ -46,9 +46,12 @@ All ICRC-149 functions are prefixed with `icrc149_`:
 
 ### Proposal Management
 - `icrc149_create_proposal(proposal_args)` - Create a new proposal with specified snapshot contract
+- `icrc149_get_proposals(prev, take, filters)` - Query proposals with pagination and filtering, includes tally data (QUERY)
 - `icrc149_vote_proposal(vote_args)` - Vote on a proposal with cryptographic proof
-- `icrc149_tally_votes(proposal_id)` - Get current vote tally for a proposal
 - `icrc149_execute_proposal(proposal_id)` - Execute a passed proposal
+
+### Deprecated Functions
+- ~~`icrc149_tally_votes(proposal_id)`~~ - **Deprecated**: Tally data is now included in `icrc149_get_proposals`
 
 ### Ethereum Integration
 - `icrc149_send_eth_tx(eth_tx)` - Send an Ethereum transaction
@@ -108,8 +111,9 @@ let vote_args = {
 
 let vote_result = await canister.icrc149_vote_proposal(vote_args);
 
-// Check results
-let tally = await canister.icrc149_tally_votes(1);
+// Get proposals with tally data included (no separate tally call needed)
+let proposals = await canister.icrc149_get_proposals(null, ?10, []);
+// Each proposal now includes tally: { yes: Nat; no: Nat; abstain: Nat; total: Nat; result: Text }
 ```
 
 ## Architecture

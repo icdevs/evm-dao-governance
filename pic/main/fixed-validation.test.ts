@@ -10,7 +10,7 @@ import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declar
 import type { _SERVICE as mainService } from "../../src/declarations/main/main.did.js";
 import type { Witness__1, WitnessResult } from "../../src/declarations/main/main.did.js";
 
-export const WASM_PATH = ".dfx/local/canisters/main/main.wasm";
+export const WASM_PATH = ".dfx/local/canisters/main/main.wasm.gz";
 
 let replacer = (_key: any, value: any) => typeof value === "bigint" ? value.toString() + "n" : value;
 export const sub_WASM_PATH = process.env['SUB_WASM_PATH'] || WASM_PATH; 

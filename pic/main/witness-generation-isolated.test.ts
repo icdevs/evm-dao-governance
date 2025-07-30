@@ -65,28 +65,39 @@ describe("Witness Generation Test", () => {
       throw new Error('Anvil failed to start after 20 attempts');
     }
 
-    // Deploy a simple ERC20 token for testing
-    console.log("📝 Deploying test ERC20 token...");
+    // Deploy a simple test contract and set up storage for testing
+    console.log("📝 Setting up test environment...");
     const deployer = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", provider);
     
-    // Simple ERC20 contract bytecode and ABI
-    const erc20Abi = [
-      "constructor(string memory name, string memory symbol)",
-      "function balanceOf(address owner) view returns (uint256)",
-      "function transfer(address to, uint256 amount) returns (bool)",
-      "function mint(address to, uint256 amount) returns (bool)"
-    ];
+    // Use a deterministic contract address for testing
+    const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; 
+    const testAddress = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"; // User #1 from Anvil
     
-    // Deploy a test token (using a simple mock contract)
-    const tokenFactory = new ethers.ContractFactory(erc20Abi, "0x", deployer);
+    // Set contract code (minimal ERC20-like)
+    await provider.send("anvil_setCode", [contractAddress, "0x6080604052348015600f57600080fd5b506004361060285760003560e01c806370a0823114602d575b600080fd5b60436004803603810190603f9190605c565b6049565b60405160509190607a565b60405180910390f35b60008060008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020549050919050565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b600060aa8260008401111560b857600080fd5b50919050565b60c48160008401111560d257600080fd5b50919050565b600060da8260008401111560e857600080fd5b50919050565b600080fd5b6000819050919050565b60ff8160008401111561010d57600080fd5b50919050565b61011681610100565b811461012157600080fd5b50565b600081359050610133816110d7565b92915050565b60006020828403121561014b5761014a60eb565b5b600061015984828501610124565b9150509291505056fea2646970667358221220e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e564736f6c63430008070033"]);
     
-    // For simplicity, let's use a pre-deployed address that we know will have storage
-    // We'll just use one of the Anvil accounts and give it some balance
-    const testAddress = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
-    const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Common first deployed contract address
+    // Set balance directly in storage slot 0 (standard ERC20 _balances mapping)
+    // Calculate storage key for the test user's balance using same method as witness generator
+    const userAddressBytes = ethers.getBytes(testAddress);
+    const slotBytes = ethers.zeroPadValue(ethers.toBeHex(0), 32); // slot 0 
+    const combinedBytes = new Uint8Array(userAddressBytes.length + ethers.getBytes(slotBytes).length);
+    combinedBytes.set(userAddressBytes, 0);
+    combinedBytes.set(ethers.getBytes(slotBytes), userAddressBytes.length);
+    const storageKey = ethers.keccak256(combinedBytes);
+    
+    // Set the user's balance to 5000 tokens (with 18 decimals)
+    const balanceValue = ethers.toBeHex(ethers.parseUnits("5000", 18), 32);
+    await provider.send("anvil_setStorageAt", [contractAddress, storageKey, balanceValue]);
     
     console.log(`Test token address: ${contractAddress}`);
     console.log(`Test user address: ${testAddress}`);
+    console.log(`Storage key: ${storageKey}`);
+    console.log(`Balance value: ${balanceValue}`);
+    
+    // Verify the storage was set correctly
+    const storedValue = await provider.send("eth_getStorageAt", [contractAddress, storageKey, "latest"]);
+    console.log(`Stored value: ${storedValue}`);
+    console.log(`Expected balance: ${ethers.formatUnits(ethers.getBigInt(storedValue), 18)} tokens`);
     
     // Store the addresses for the test
     (global as any).testTokenAddress = contractAddress;

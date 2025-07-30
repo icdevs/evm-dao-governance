@@ -164,6 +164,13 @@ module {
     metadata: ?Text;
   };
 
+  // Enhanced proposal type that includes user vote information
+  public type ProposalWithUserVote = {
+    proposal: Proposal;
+    user_vote: ?{ #Yes; #No; #Abstain };
+    user_has_voted: Bool;
+  };
+
   // ICRC-149 filters & supporting types following ICRC-137 pattern
   public type ProposalInfoFilter = {
     #by_id: Nat;
@@ -203,6 +210,22 @@ module {
     result: Text;
   };
 
+  // Enhanced proposal type that includes tally information
+  public type ProposalWithTally = {
+    id: Nat;
+    proposer: Principal;
+    action: {
+      #Motion: Text;
+      #EthTransaction: EthTx;
+      #ICPCall: ICPCall;
+    };
+    created_at: Nat;
+    snapshot: ?ProposalSnapshot;
+    deadline: Nat;
+    metadata: ?Text;
+    tally: TallyResult;
+  };
+
   public type Value = {
     #Nat: Nat;
     #Nat8: Nat8;
@@ -223,8 +246,8 @@ module {
   public type CreateProposalRequest = {
     action: { #Motion: Text; #EthTransaction: EthTx; #ICPCall: ICPCall };
     metadata: ?Text;
-    members: [{ id: Principal; votingPower: Nat }];
     snapshot_contract: ?Text; // Optional snapshot contract for proposal
+    siwe: SIWEProof; // Required SIWE proof for proposal creation
   };
 
   ////////////////////////////////////
@@ -243,9 +266,10 @@ module {
     icrc149_update_execution_contract_config: (Text, ?ExecutionContractConfig) -> async Result<(), Text>;
     icrc149_update_icp_method_config: (Principal, Text, ?ICPMethodConfig) -> async Result<(), Text>;
     icrc149_update_admin_principal: (Principal, Bool) -> async Result<(), Text>;
+    icrc149_update_evm_rpc_canister: (Principal) -> async Result<(), Text>;
 
     // Get proposals with pagination and filtering
-    icrc149_get_proposals: query (?Nat, ?Nat, [ProposalInfoFilter]) -> async [Proposal];
+    icrc149_get_proposals: query (?Nat, ?Nat, [ProposalInfoFilter]) -> async [ProposalWithTally];
 
     // Get proposal snapshot for a specific proposal
     icrc149_proposal_snapshot: query (Nat) -> async ProposalSnapshot;
@@ -259,7 +283,8 @@ module {
     // Proposal - Updated to include snapshot_contract
     icrc149_create_proposal: (CreateProposalRequest) -> async Result<Nat, Text>;
     icrc149_vote_proposal: (VoteArgs) -> async Result<(), Text>;
-    icrc149_tally_votes: (Nat) -> async TallyResult;
+    // Deprecated: Tally data is now included in icrc149_get_proposals
+    // icrc149_tally_votes: (Nat) -> async TallyResult;
     icrc149_execute_proposal: (Nat) -> async Result<Text, Text>;
 
     // ETH Integration
@@ -272,6 +297,9 @@ module {
     icrc149_set_controller: (Principal) -> async Result<(), Text>;
     icrc149_set_default_snapshot_contract: (?Text) -> async Result<(), Text>;
     icrc149_health_check: query () -> async Text;
+
+    // Test function for parallel RPC calls
+    test_parallel_rpc_calls: (Text) -> async {#Ok: (Nat, Nat, Nat); #Err: Text};
 
     // Standard Compliance
     icrc10_supported_standards: query () -> async [{ name: Text; url: Text }];

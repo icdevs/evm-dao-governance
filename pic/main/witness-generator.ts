@@ -72,12 +72,73 @@ export async function generateRealWitness(
       `0x${blockNumber.toString(16)}` : 
       blockNumber;
 
+    // 🔍 DEBUG: Verify balance before getting proof
+    console.log(`🔍 Pre-proof verification:`);
+    console.log(`  Contract: ${contractAddress}`);
+    console.log(`  User: ${userAddress}`);
+    console.log(`  Block: ${blockTag} (${blockNumber})`);
+    console.log(`  Storage key: ${storageKey}`);
+    
+    // Verify balance with direct eth_call
+    const balanceOfData = "0x70a08231" + userAddress.substring(2).padStart(64, '0');
+    const directBalance = await provider.send("eth_call", [
+      { to: contractAddress, data: balanceOfData },
+      blockTag
+    ]);
+    
+    // Handle empty or invalid balance responses safely
+    const safeDirectBalance = directBalance && directBalance !== '0x' ? directBalance : '0x0';
+    const expectedBalance = ethers.getBigInt(safeDirectBalance);
+    console.log(`  Direct balance via eth_call: ${safeDirectBalance} (${expectedBalance.toString()} wei)`);
+
+    // 🔍 CRITICAL: Try multiple storage slots to find the correct one for OpenZeppelin ERC20
+    console.log(`🔍 Searching for correct storage slot (OpenZeppelin ERC20 may not use slot 0)...`);
+    console.log(`🔍 Expected balance from eth_call: ${expectedBalance.toString()} tokens`);
+    let correctSlot = slotIndex;
+    let correctStorageValue = '0x0';
+    
+    // Try slots 0-5 to find the one that matches the balance
+    for (let testSlot = 0; testSlot <= 50; testSlot++) {
+      const testStorageKey = calculateERC20StorageKey(userAddress, testSlot);
+      
+      console.log(`🔍 Testing slot ${testSlot} with storage key: ${testStorageKey}`);
+      
+      // Get proof for this slot
+      const testProof = await provider.send("eth_getProof", [
+        contractAddress,
+        [testStorageKey],
+        blockTag
+      ]);
+      
+      const testValue = testProof.storageProof[0]?.value || '0x0';
+      const testBalance = ethers.getBigInt(testValue);
+      
+      console.log(`  Slot ${testSlot}: Storage value = ${testValue}, Balance = ${testBalance.toString()}`);
+      console.log(`  Slot ${testSlot}: Expected = ${expectedBalance.toString()}, Got = ${testBalance.toString()}`);
+      
+      if (testBalance === expectedBalance && testBalance > 0n) {
+        console.log(`✅ Found correct storage slot: ${testSlot}`);
+        correctSlot = testSlot;
+        correctStorageValue = testValue;
+        break;
+      }
+    }
+    
+    if (correctStorageValue === '0x0' && expectedBalance > 0n) {
+      console.log(`⚠️  WARNING: Could not find storage slot with matching balance!`);
+      console.log(`⚠️  Expected balance: ${expectedBalance.toString()}, but all slots returned 0`);
+      console.log(`⚠️  This indicates the storage layout may be different than expected`);
+    }
+    
+    // Use the correct storage key for the final proof
+    const finalStorageKey = calculateERC20StorageKey(userAddress, correctSlot);
+
     // Get the proof from the Ethereum node with timeout
-    console.log(`🔗 Calling eth_getProof with timeout protection...`);
+    console.log(`🔗 Calling eth_getProof with final storage key...`);
     const proofTimeout = 10000; // 10 seconds
     const proofPromise = provider.send("eth_getProof", [
       contractAddress,
-      [storageKey],
+      [finalStorageKey],
       blockTag
     ]);
     const proofTimeoutPromise = new Promise((_, reject) => 
@@ -89,7 +150,17 @@ export async function generateRealWitness(
     console.log(`✅ Received proof:
       Account proof entries: ${proof.accountProof.length}
       Storage proof entries: ${proof.storageProof[0]?.proof?.length || 0}
-      Storage value: ${proof.storageProof[0]?.value || '0x0'}`);
+      Storage value: ${proof.storageProof[0]?.value || '0x0'}
+      Expected storage key: ${finalStorageKey}
+      Actual storage key: ${proof.storageProof[0]?.key || 'missing'}
+      Used storage slot: ${correctSlot}`);
+    
+    // 🔍 DEBUG: Compare storage keys
+    if (proof.storageProof[0]?.key && proof.storageProof[0].key !== finalStorageKey) {
+      console.log(`⚠️  Storage key mismatch!`);
+      console.log(`  Expected: ${finalStorageKey}`);
+      console.log(`  Received: ${proof.storageProof[0].key}`);
+    }
 
     // Get block information with timeout
     console.log(`🔗 Fetching block information for ${blockTag}...`);
@@ -122,13 +193,26 @@ export async function generateRealWitness(
       return hexStr.replace('0x', '0x0');
     };
     
+    // Debug storage value conversion
+    console.log(`🔍 Storage value conversion debug:
+      Raw storage value: ${rawStorageValue}
+      Padded storage value: ${paddedStorageValue}
+      Is valid hex: ${ethers.isHexString(paddedStorageValue)}
+      Expected length: 66 characters (0x + 64 hex digits for 32 bytes)`);
+    
+    // Convert to bytes with detailed logging
+    const storageValueBytes = ethers.getBytes(paddedStorageValue);
+    console.log(`🔍 Storage value bytes: ${storageValueBytes.length} bytes`);
+    console.log(`🔍 Storage value hex: 0x${Array.from(storageValueBytes).map(b => b.toString(16).padStart(2, '0')).join('')}`);
+    console.log(`🔍 Storage value as BigInt: ${ethers.getBigInt(paddedStorageValue).toString()}`);
+
     const witness: MotokoWitness = {
       blockHash: ethers.getBytes(block.hash),
       blockNumber: BigInt(block.number),
       userAddress: ethers.getBytes(userAddress),
       contractAddress: ethers.getBytes(contractAddress),
-      storageKey: ethers.getBytes(storageKey),
-      storageValue: ethers.getBytes(paddedStorageValue),
+      storageKey: ethers.getBytes(finalStorageKey),
+      storageValue: storageValueBytes,
       accountProof: proof.accountProof.map((p: string) => ethers.getBytes(ensureEvenHex(p))),
       storageProof: proof.storageProof[0]?.proof?.map((p: string) => ethers.getBytes(ensureEvenHex(p))) || []
     };
@@ -137,7 +221,9 @@ export async function generateRealWitness(
       Block: ${witness.blockNumber}
       Account proof entries: ${witness.accountProof.length}
       Storage proof entries: ${witness.storageProof.length}
-      Storage value length: ${witness.storageValue.length} bytes`);
+      Storage value length: ${witness.storageValue.length} bytes
+      Storage value first 4 bytes: [${Array.from(witness.storageValue.slice(0, 4)).join(', ')}]
+      Storage value last 4 bytes: [${Array.from(witness.storageValue.slice(-4)).join(', ')}]`);
     
     return witness;
 
@@ -151,22 +237,34 @@ export async function generateRealWitness(
  * Calculate storage key for ERC20 balance mapping
  * Standard Solidity mapping: mapping(address => uint256) balances;
  * Storage key = keccak256(abi.encode(address, slot))
+ * 
+ * CRITICAL: Must use abi.encode semantics, not abi.encodePacked!
+ * - Address must be LEFT-PADDED to 32 bytes (not 20 bytes)
+ * - Slot must be padded to 32 bytes
+ * - Then concatenate and hash: keccak256(pad32(address) || pad32(slot))
  */
 function calculateERC20StorageKey(userAddress: string, slot: number = 0): string {
-  // Pad address to 32 bytes
-  const paddedAddress = ethers.zeroPadValue(ethers.getAddress(userAddress), 32);
+  // Convert address to bytes and LEFT-PAD to 32 bytes (abi.encode semantics)
+  // Address is uint160, so left-pad with zeros to make it 32 bytes
+  const addressPadded = ethers.zeroPadValue(userAddress, 32);
+  const addressBytes = ethers.getBytes(addressPadded);
   
-  // Pad slot to 32 bytes
-  const paddedSlot = ethers.zeroPadValue(ethers.toBeHex(slot), 32);
+  // Convert slot to 32 bytes
+  const slotBytes = ethers.zeroPadValue(ethers.toBeHex(slot), 32);
+  const slotBytesArray = ethers.getBytes(slotBytes);
   
-  // Concatenate and hash
-  const concatenated = paddedAddress + paddedSlot.slice(2); // Remove 0x from slot
-  const storageKey = ethers.keccak256('0x' + concatenated.slice(2));
+  // Concatenate padded address (32 bytes) + padded slot (32 bytes) for abi.encode
+  const combinedBytes = new Uint8Array(32 + 32); // 64 bytes total
+  combinedBytes.set(addressBytes, 0);      // First 32 bytes: padded address
+  combinedBytes.set(slotBytesArray, 32);   // Next 32 bytes: padded slot
   
-  console.log(`🔑 Storage key calculation:
-    Address: ${paddedAddress}
-    Slot: ${paddedSlot}
-    Concatenated: 0x${concatenated.slice(2)}
+  const storageKey = ethers.keccak256(combinedBytes);
+  
+  console.log(`🔑 Storage key calculation (abi.encode):
+    Original Address: ${userAddress}
+    Address (LEFT-PADDED to 32 bytes): ${ethers.hexlify(addressBytes)}
+    Slot (32 bytes): ${ethers.hexlify(slotBytesArray)}
+    Combined bytes (64 total): ${ethers.hexlify(combinedBytes)}
     Storage Key: ${storageKey}`);
   
   return storageKey;
@@ -268,7 +366,7 @@ export async function getTokenBalance(
   
   // Handle empty or invalid responses
   if (!result || result === '0x' || result.length <= 2) {
-    console.log(`⚠️  No balance data returned from contract ${contractAddress} for address ${userAddress}`);
+    console.log(`⚠️  No balance data returned from contract ${contractAddress} for address ${userAddress} - returning 0`);
     return 0n; // Return 0 balance for non-existent contracts or empty responses
   }
   

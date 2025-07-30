@@ -40,5 +40,5 @@
     "./pic/global-setup.ts",
     "./pic/global-teardown.ts",
     "./pic/types.d.ts"
-, "pic/main/hardhat-integration.test.tsxxx"  ]
+, "pic/main/hardhat-integration.test.tsxxx", "pic/main/eth-transaction-execution.test.tscopy"  ]
 }

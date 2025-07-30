@@ -1,0 +1,24 @@
+{
+  "name": "icrc149-voting-interface",
+  "version": "1.0.0",
+  "description": "ICRC149 DAO Voting Interface with DFinity Integration",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "python3 -m http.server 8080",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^2.1.0",
+    "@dfinity/candid": "^2.1.0",
+    "@dfinity/identity": "^2.1.0",
+    "@dfinity/principal": "^2.1.0",
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "type": "module"
+}

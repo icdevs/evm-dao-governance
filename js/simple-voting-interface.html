@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICRC149 DAO Voting - Module Example</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+    <script src="https://unpkg.com/@dfinity/agent@2.4.0/lib/cjs/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/candid@2.4.0/lib/cjs/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/identity@2.4.0/lib/cjs/index.js"></script>
+    <script src="https://unpkg.com/@dfinity/principal@2.4.0/lib/cjs/index.js"></script>
+    <script type="module" src="./icrc149-voting-interface.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border-left: 4px solid #007bff;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .proposal {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+            background: white;
+        }
+        .proposal h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        .vote-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .vote-buttons button {
+            flex: 1;
+            margin: 0;
+        }
+        .btn-yes { background: #28a745; }
+        .btn-no { background: #dc3545; }
+        .btn-abstain { background: #6c757d; }
+        .btn-yes:hover { background: #218838; }
+        .btn-no:hover { background: #c82333; }
+        .btn-abstain:hover { background: #5a6268; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗳️ ICRC149 DAO Voting Interface</h1>
+        
+        <!-- Connection Section -->
+        <div class="section">
+            <h2>🔗 Connection</h2>
+            <div class="form-group">
+                <label>Wallet Status:</label>
+                <div id="walletStatus">Not connected</div>
+            </div>
+            <button onclick="connectWallet()" id="connectBtn">Connect MetaMask</button>
+        </div>
+        
+        <!-- Configuration Section -->
+        <div class="section">
+            <h2>⚙️ Configuration</h2>
+            <div class="form-group">
+                <label for="environment">Environment:</label>
+                <select id="environment">
+                    <option value="local">Local Development</option>
+                    <option value="ic">Internet Computer</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="canisterId">Canister ID:</label>
+                <input type="text" id="canisterId" placeholder="rdmx6-jaaaa-aaaaa-aaadq-cai">
+            </div>
+            <div class="form-group">
+                <label for="chainId">Chain ID:</label>
+                <select id="chainId">
+                    <option value="">Select Chain...</option>
+                    <option value="1">Ethereum Mainnet (1)</option>
+                    <option value="11155111">Sepolia Testnet (11155111)</option>
+                    <option value="137">Polygon Mainnet (137)</option>
+                    <option value="31337">Local/Anvil (31337)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="contractAddress">Contract Address:</label>
+                <input type="text" id="contractAddress" placeholder="0x..." maxlength="42">
+            </div>
+            <button onclick="initializeSystem()">Initialize System</button>
+            <button onclick="discoverSlot()">Discover Storage Slot</button>
+        </div>
+        
+        <!-- Proposals Section -->
+        <div class="section">
+            <h2>📋 Proposals</h2>
+            <button onclick="loadProposals()">Load Proposals</button>
+            <div id="proposalsContainer">
+                <div class="status info">Configure the system and click "Load Proposals" to view available proposals.</div>
+            </div>
+        </div>
+        
+        <!-- Status Messages -->
+        <div id="statusContainer"></div>
+    </div>
+
+    <script type="module">
+        import ICRC149VotingInterface from './icrc149-voting-interface.js';
+        
+        // Global instance
+        let votingInterface = null;
+        let isInitialized = false;
+        
+        // Initialize the voting interface
+        window.addEventListener('load', () => {
+            try {
+                votingInterface = new ICRC149VotingInterface();
+                
+                // Set up event handlers
+                votingInterface.onAccountChange = (address) => {
+                    updateWalletStatus(address);
+                };
+                
+                votingInterface.onChainChange = (chainId) => {
+                    showStatus(`Chain changed to: ${chainId}`, 'info');
+                };
+                
+                votingInterface.onStatusUpdate = (message, type) => {
+                    showStatus(message, type);
+                };
+                
+                showStatus('Voting interface initialized', 'success');
+            } catch (error) {
+                showStatus('Failed to initialize: ' + error.message, 'error');
+            }
+        });
+        
+        // Connect wallet
+        window.connectWallet = async () => {
+            try {
+                if (!votingInterface) {
+                    throw new Error('Voting interface not initialized');
+                }
+                
+                const result = await votingInterface.connectWallet();
+                updateWalletStatus(result.address);
+                showStatus(`Connected: ${result.address} (Chain: ${result.chainId})`, 'success');
+            } catch (error) {
+                showStatus('Failed to connect wallet: ' + error.message, 'error');
+            }
+        };
+        
+        // Update wallet status display
+        function updateWalletStatus(address) {
+            const status = document.getElementById('walletStatus');
+            const btn = document.getElementById('connectBtn');
+            
+            if (address) {
+                status.textContent = `Connected: ${address.slice(0, 6)}...${address.slice(-4)}`;
+                btn.textContent = 'Connected ✓';
+                btn.disabled = true;
+            } else {
+                status.textContent = 'Not connected';
+                btn.textContent = 'Connect MetaMask';
+                btn.disabled = false;
+            }
+        }
+        
+        // Initialize the system
+        window.initializeSystem = async () => {
+            try {
+                const canisterId = document.getElementById('canisterId').value;
+                const environment = document.getElementById('environment').value;
+                
+                if (!canisterId) {
+                    throw new Error('Please enter a canister ID');
+                }
+                
+                await votingInterface.initializeCanister(canisterId, environment);
+                isInitialized = true;
+                showStatus(`System initialized with canister: ${canisterId}`, 'success');
+                
+                // Try to load contract config if contract address is provided
+                const contractAddress = document.getElementById('contractAddress').value;
+                if (contractAddress) {
+                    try {
+                        const config = await votingInterface.getContractConfig(contractAddress);
+                        showStatus(`Contract config loaded. Storage slot: ${config.balance_storage_slot}`, 'success');
+                    } catch (error) {
+                        showStatus(`Contract config not found: ${error.message}`, 'info');
+                    }
+                }
+                
+            } catch (error) {
+                showStatus('Failed to initialize system: ' + error.message, 'error');
+            }
+        };
+        
+        // Discover storage slot
+        window.discoverSlot = async () => {
+            try {
+                if (!votingInterface || !votingInterface.userAddress) {
+                    throw new Error('Please connect wallet first');
+                }
+                
+                const contractAddress = document.getElementById('contractAddress').value;
+                if (!contractAddress) {
+                    throw new Error('Please enter a contract address');
+                }
+                
+                showStatus('🔍 Discovering storage slot...', 'info');
+                const slot = await votingInterface.discoverStorageSlot(contractAddress);
+                showStatus(`✅ Found storage slot: ${slot}`, 'success');
+                
+                // Update canister if initialized
+                if (isInitialized) {
+                    const chainId = document.getElementById('chainId').value;
+                    if (chainId) {
+                        await votingInterface.updateCanisterStorageSlot(chainId, contractAddress, slot);
+                        showStatus(`Canister updated with storage slot: ${slot}`, 'success');
+                    }
+                }
+                
+            } catch (error) {
+                showStatus('Storage slot discovery failed: ' + error.message, 'error');
+            }
+        };
+        
+        // Load proposals
+        window.loadProposals = async () => {
+            try {
+                if (!isInitialized) {
+                    throw new Error('Please initialize the system first');
+                }
+                
+                const contractAddress = document.getElementById('contractAddress').value;
+                
+                showStatus('Loading proposals...', 'info');
+                const proposals = await votingInterface.loadProposals(contractAddress);
+                
+                await renderProposals(proposals);
+                showStatus(`Loaded ${proposals.length} proposals`, 'success');
+                
+            } catch (error) {
+                showStatus('Failed to load proposals: ' + error.message, 'error');
+                document.getElementById('proposalsContainer').innerHTML = 
+                    `<div class="status error">Error: ${error.message}</div>`;
+            }
+        };
+        
+        // Render proposals
+        async function renderProposals(proposals) {
+            const container = document.getElementById('proposalsContainer');
+            
+            if (proposals.length === 0) {
+                container.innerHTML = '<div class="status info">No proposals found.</div>';
+                return;
+            }
+            
+            // Get user balance for display
+            const contractAddress = document.getElementById('contractAddress').value;
+            let userBalance = BigInt(0);
+            if (votingInterface.userAddress && contractAddress) {
+                try {
+                    userBalance = await votingInterface.getUserTokenBalance(contractAddress);
+                } catch (error) {
+                    console.error('Failed to get user balance:', error);
+                }
+            }
+            
+            const proposalsHtml = proposals.map(proposal => {
+                const totalVotes = proposal.vote_tally.total;
+                const yesPercent = totalVotes > 0 ? (proposal.vote_tally.yes / totalVotes) * 100 : 0;
+                const noPercent = totalVotes > 0 ? (proposal.vote_tally.no / totalVotes) * 100 : 0;
+                const abstainPercent = totalVotes > 0 ? (proposal.vote_tally.abstain / totalVotes) * 100 : 0;
+                
+                const isActive = proposal.status === 'Active' && proposal.end_time > Date.now();
+                const isPastEndTime = proposal.end_time < Date.now();
+                const canVote = isActive && userBalance > 0 && votingInterface.userAddress;
+                const canExecute = isPastEndTime && proposal.status === 'Passed';
+                
+                return `
+                    <div class="proposal">
+                        <h3>Proposal #${proposal.id}</h3>
+                        <p><strong>Status:</strong> ${proposal.status}</p>
+                        <p><strong>Description:</strong> ${proposal.metadata[0] || 'No description'}</p>
+                        <p><strong>End Time:</strong> ${new Date(proposal.end_time).toLocaleString()}</p>
+                        <p><strong>Snapshot Block:</strong> ${proposal.snapshot_block}</p>
+                        
+                        <div>
+                            <strong>Vote Tally:</strong><br>
+                            Yes: ${ethers.formatEther(proposal.vote_tally.yes.toString())} (${yesPercent.toFixed(1)}%)<br>
+                            No: ${ethers.formatEther(proposal.vote_tally.no.toString())} (${noPercent.toFixed(1)}%)<br>
+                            Abstain: ${ethers.formatEther(proposal.vote_tally.abstain.toString())} (${abstainPercent.toFixed(1)}%)<br>
+                            Total: ${ethers.formatEther(totalVotes.toString())} tokens
+                        </div>
+                        
+                        ${canVote ? `
+                            <div class="vote-buttons">
+                                <button class="btn-yes" onclick="castVote(${proposal.id}, 'Yes')">Vote Yes</button>
+                                <button class="btn-no" onclick="castVote(${proposal.id}, 'No')">Vote No</button>
+                                <button class="btn-abstain" onclick="castVote(${proposal.id}, 'Abstain')">Abstain</button>
+                            </div>
+                        ` : ''}
+                        
+                        ${canExecute ? `
+                            <button onclick="executeProposal(${proposal.id})">Execute Proposal</button>
+                        ` : ''}
+                        
+                        ${userBalance === BigInt(0) ? `
+                            <div class="status info">You have no voting power (0 tokens)</div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = proposalsHtml;
+        }
+        
+        // Cast vote
+        window.castVote = async (proposalId, choice) => {
+            try {
+                if (!votingInterface.userAddress) {
+                    throw new Error('Please connect wallet first');
+                }
+                
+                const contractAddress = document.getElementById('contractAddress').value;
+                if (!contractAddress) {
+                    throw new Error('Contract address not specified');
+                }
+                
+                showStatus(`Casting ${choice} vote for proposal ${proposalId}...`, 'info');
+                
+                const result = await votingInterface.castVote(proposalId, choice, contractAddress);
+                showStatus(`✅ Vote cast successfully: ${choice}`, 'success');
+                
+                // Reload proposals to show updated state
+                setTimeout(() => loadProposals(), 2000);
+                
+            } catch (error) {
+                showStatus('Failed to cast vote: ' + error.message, 'error');
+            }
+        };
+        
+        // Execute proposal
+        window.executeProposal = async (proposalId) => {
+            try {
+                showStatus(`Executing proposal ${proposalId}...`, 'info');
+                
+                const result = await votingInterface.executeProposal(proposalId);
+                showStatus(`✅ Proposal ${proposalId} executed successfully`, 'success');
+                
+                // Reload proposals to show updated state
+                setTimeout(() => loadProposals(), 2000);
+                
+            } catch (error) {
+                showStatus('Failed to execute proposal: ' + error.message, 'error');
+            }
+        };
+        
+        // Show status message
+        function showStatus(message, type) {
+            const container = document.getElementById('statusContainer');
+            const statusDiv = document.createElement('div');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            
+            container.appendChild(statusDiv);
+            
+            // Auto-remove non-error messages after 5 seconds
+            if (type !== 'error') {
+                setTimeout(() => {
+                    if (statusDiv.parentNode) {
+                        statusDiv.parentNode.removeChild(statusDiv);
+                    }
+                }, 5000);
+            }
+            
+            statusDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+        
+        // Make functions globally available
+        window.showStatus = showStatus;
+    </script>
+</body>
+</html>
