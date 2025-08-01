@@ -1136,29 +1136,6 @@
             }
         }
         
-        async function endVote(proposalId) {
-            try {
-                if (!canisterActor) {
-                    await initializeDfxAgent();
-                }
-                
-                showStatus(`Executing proposal ${proposalId}...`, 'info');
-                
-                const result = await canisterActor.icrc149_execute_proposal(BigInt(proposalId));
-                
-                if ('Ok' in result) {
-                    showStatus(`✅ Proposal ${proposalId} executed successfully`, 'success');
-                    await loadProposals();
-                } else {
-                    throw new Error(`Execution failed: ${JSON.stringify(result.Err)}`);
-                }
-                
-            } catch (error) {
-                console.error('Proposal execution error:', error);
-                showStatus('Failed to execute proposal: ' + error.message, 'error');
-            }
-        }
-        
         async function generateSIWEProof(proposalId, choice, contractAddress) {
             try {
                 const signer = await metamaskProvider.getSigner();

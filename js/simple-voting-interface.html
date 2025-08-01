@@ -125,7 +125,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🗳️ ICRC149 DAO Voting Interface</h1>
+        <h1>🗳️ EthDAOs</h1>
         
         <!-- Connection Section -->
         <div class="section">
@@ -355,7 +355,6 @@
                 const isActive = proposal.status === 'Active' && proposal.end_time > Date.now();
                 const isPastEndTime = proposal.end_time < Date.now();
                 const canVote = isActive && userBalance > 0 && votingInterface.userAddress;
-                const canExecute = isPastEndTime && proposal.status === 'Passed';
                 
                 return `
                     <div class="proposal">
@@ -379,10 +378,6 @@
                                 <button class="btn-no" onclick="castVote(${proposal.id}, 'No')">Vote No</button>
                                 <button class="btn-abstain" onclick="castVote(${proposal.id}, 'Abstain')">Abstain</button>
                             </div>
-                        ` : ''}
-                        
-                        ${canExecute ? `
-                            <button onclick="executeProposal(${proposal.id})">Execute Proposal</button>
                         ` : ''}
                         
                         ${userBalance === BigInt(0) ? `
@@ -417,22 +412,6 @@
                 
             } catch (error) {
                 showStatus('Failed to cast vote: ' + error.message, 'error');
-            }
-        };
-        
-        // Execute proposal
-        window.executeProposal = async (proposalId) => {
-            try {
-                showStatus(`Executing proposal ${proposalId}...`, 'info');
-                
-                const result = await votingInterface.executeProposal(proposalId);
-                showStatus(`✅ Proposal ${proposalId} executed successfully`, 'success');
-                
-                // Reload proposals to show updated state
-                setTimeout(() => loadProposals(), 2000);
-                
-            } catch (error) {
-                showStatus('Failed to execute proposal: ' + error.message, 'error');
             }
         };
         

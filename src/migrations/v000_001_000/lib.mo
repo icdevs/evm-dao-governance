@@ -68,12 +68,12 @@ module {
             var admin_principals = adminTree;
             var proposal_duration_days = switch (args) {
               case (?initArgs) {
-                switch (initArgs.proposal_duration_days) {
+                switch (initArgs.proposal_duration_nanoseconds) {
                   case (?duration) duration;
-                  case (null) 4; // Default to 4 days if not provided
+                  case (null) 4 * 24 * 60 * 60 * 1_000_000_000; // Default to 4 days in nanoseconds if not provided
                 };
               };
-              case (null) 4; // Default to 4 days if no args provided
+              case (null) 4 * 24 * 60 * 60 * 1_000_000_000; // Default to 4 days in nanoseconds if no args provided
             };
             var default_snapshot_contract = if (BTree.size(snapshotTree) > 0) { 
               switch (BTree.entries(snapshotTree) |> _.next()) {
@@ -115,7 +115,7 @@ module {
             var execution_contracts = executionTree;
             var approved_icp_methods = icpMethodsTree;
             var admin_principals = adminTree;
-            var proposal_duration_days = 4; // Default 4 day voting period
+            var proposal_duration_days = 4 * 24 * 60 * 60 * 1_000_000_000; // Default 4 days in nanoseconds
             var default_snapshot_contract = ?defaultSnapshotContract.contract_address;
             var evm_rpc_canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // Default to mainnet EVM RPC canister
           };

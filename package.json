@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
-    "build": "tsc --noEmit",
+    "build": "cd js && npm run build",
     "build:js": "tsc --outDir build --declaration",
+    "build:tsc": "tsc --noEmit",
     "dev": "tsc --watch --noEmit",
     "serve": "python3 -m http.server 8082 --directory js",
     "serve:node": "npx http-server js -p 8082 -o",
@@ -27,7 +28,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "ethers": "^6.13.2",
+    "ethers": "^6.15.0",
     "keccak": "^3.0.4",
     "rlp": "^3.0.0"
   },
@@ -44,5 +45,8 @@
     "jest": "^29.7.0",
     "ts-jest": "^29.3.1",
     "typescript": "^5.8.2"
+  },
+  "directories": {
+    "test": "test"
   }
 }

@@ -8,11 +8,13 @@ import Star "mo:star/star";
 import ovsfixed "mo:ovs-fixed";
 import Int "mo:base/Int";
 import Time "mo:base/Time";
+import Timer "mo:base/Timer";
 import Principal "mo:base/Principal";
 import Blob "mo:base/Blob";
 import Bool "mo:base/Bool";
 import Nat "mo:base/Nat";
 import Nat8 "mo:base/Nat8";
+import Float "mo:base/Float";
 import BTree "mo:stableheapbtreemap/BTree";
 import Text "mo:base/Text";
 import ExtendedProposalEngine "../../../../../../../../ICDevs/projects/motoko_proposal_engine/src/ExtendedProposalEngine";
@@ -28,6 +30,7 @@ import SHA256 "mo:sha2/Sha256";
 import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
 import Debug "mo:base/Debug";
+import Utils "Utils";
 
 // EVM Transaction Libraries
 import EVMAddress "mo:evm-txs/Address";
@@ -160,6 +163,43 @@ module {
     storageChanged(#v0_1_0(#data(state)));
 
     let _self : Service.Service = actor(Principal.toText(canister));
+
+    // Execution lock to prevent concurrent proposal execution attempts
+    // Maps proposal_id -> Bool (true if currently executing)
+    private var executingProposals = BTree.init<Nat, Bool>(?16);
+    
+    // Transaction queue for Ethereum transactions
+    // Each entry contains: proposal_id, eth_tx, timestamp, and processing status
+    public type QueuedTransaction = {
+      proposal_id: Nat;
+      eth_tx: MigrationTypes.Current.EthTx;
+      queued_at: Int;
+      var status: TransactionStatus;
+      var processing_attempts: Nat;
+      var last_attempt_at: ?Int;
+      var error_message: ?Text;
+      var transaction_hash: ?Text;
+    };
+    
+    public type TransactionStatus = {
+      #pending;     // Waiting to be processed
+      #processing;  // Currently being processed
+      #completed;   // Successfully sent to blockchain
+      #failed;      // Failed after attempts
+    };
+    
+    private var transactionQueue = BTree.init<Nat, QueuedTransaction>(?16); // Queue indexed by sequence number
+    private var queueSequence : Nat = 0; // Auto-incrementing sequence for queue order
+    private var isProcessingQueue : Bool = false; // Simple flag to prevent concurrent queue processing
+    
+    // Processed transactions storage - keeps completed/failed transactions for lookup
+    private var processedTransactions = BTree.init<Nat, QueuedTransaction>(?16); // Indexed by sequence number
+    
+    // Queue processing engine variables
+    private var queueProcessingTimer : ?Nat = null; // Timer ID for single queue processing
+    private var lastProcessedSequence : Nat = 0; // Track last processed transaction for restart recovery
+    private let QUEUE_PROCESSING_DELAY_SECONDS : Nat = 10; // Wait 10 seconds before processing next item
+    private let MAX_PROCESSING_ATTEMPTS : Nat = 1; // Only try once as requested
 
     // Import types from EVMRPCService module
     type Block = EVMRPCService.Block;
@@ -318,8 +358,8 @@ module {
                   };
                 };
                 case (#Consistent(#Err(err))) {
-                  D.print("❌ eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") failed: " # formatRpcError(err));
-                  return #err("Failed to get block " # Nat.toText(targetBlockNumber) # ": " # formatRpcError(err));
+                  D.print("❌ eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") failed: " # Utils.formatRpcError(err));
+                  return #err("Failed to get block " # Nat.toText(targetBlockNumber) # ": " # Utils.formatRpcError(err));
                 };
                 case (#Inconsistent(results)) {
                   D.print("⚠️ eth_getBlockByNumber(" # Nat.toText(targetBlockNumber) # ") returned inconsistent results");
@@ -337,7 +377,7 @@ module {
                             return #err("Block " # Nat.toText(targetBlockNumber) # " has invalid state root: " # block.stateRoot);
                           };
                         };
-                        case (#Err(err)) return #err("Failed to get block " # Nat.toText(targetBlockNumber) # ": " # formatRpcError(err));
+                        case (#Err(err)) return #err("Failed to get block " # Nat.toText(targetBlockNumber) # ": " # Utils.formatRpcError(err));
                       };
                     };
                   };
@@ -346,8 +386,8 @@ module {
             };
           };
           case (#Consistent(#Err(err))) {
-            D.print("❌ eth_getBlockByNumber(Latest) failed: " # formatRpcError(err));
-            return #err("Failed to get latest block: " # formatRpcError(err));
+            D.print("❌ eth_getBlockByNumber(Latest) failed: " # Utils.formatRpcError(err));
+            return #err("Failed to get latest block: " # Utils.formatRpcError(err));
           };
           case (#Inconsistent(results)) {
             D.print("⚠️ eth_getBlockByNumber(Latest) returned inconsistent results from " # Nat.toText(results.size()) # " providers");
@@ -391,7 +431,7 @@ module {
                       };
                     };
                   };
-                  case (#Err(err)) return #err("Failed to get latest block: " # formatRpcError(err));
+                  case (#Err(err)) return #err("Failed to get latest block: " # Utils.formatRpcError(err));
                 };
               };
             };
@@ -402,104 +442,7 @@ module {
       };
     };
 
-    // Helper function to format RPC errors consistently
-    private func formatRpcError(err: EVMRPCService.RpcError) : Text {
-      switch (err) {
-        case (#HttpOutcallError(httpErr)) {
-          switch (httpErr) {
-            case (#IcError({ message })) "IC error: " # message;
-            case (#InvalidHttpJsonRpcResponse({ body })) "Invalid JSON RPC response: " # body;
-          };
-        };
-        case (#JsonRpcError({ message })) "JSON RPC error: " # message;
-        case (#ProviderError(provErr)) {
-          switch (provErr) {
-            case (#TooFewCycles({ expected; received })) "Too few cycles: expected " # Nat.toText(expected) # ", received " # Nat.toText(received);
-            case (#InvalidRpcConfig(msg)) "Invalid RPC config: " # msg;
-            case (#MissingRequiredProvider) "Missing required provider";
-            case (#ProviderNotFound) "Provider not found";
-            case (#NoPermission) "No permission";
-          };
-        };
-        case (#ValidationError(valErr)) {
-          switch (valErr) {
-            case (#Custom(msg)) "Validation error: " # msg;
-            case (#InvalidHex(msg)) "Invalid hex: " # msg;
-          };
-        };
-      };
-    };
-
-    // Helper function to convert hex string to Blob with validation
-    private func hexStringToBlob(hexStr: Text) : Result.Result<Blob, Text> {
-      if (not Text.startsWith(hexStr, #text("0x"))) {
-        return #err("Hex string must start with 0x");
-      };
-      
-      let cleanHex = Text.trimStart(hexStr, #text("0x"));
-      
-      // Validate hex characters
-      for (char in cleanHex.chars()) {
-        switch (char) {
-          case ('0' or '1' or '2' or '3' or '4' or '5' or '6' or '7' or '8' or '9' or 
-                'a' or 'b' or 'c' or 'd' or 'e' or 'f' or 
-                'A' or 'B' or 'C' or 'D' or 'E' or 'F') {};
-          case (_) {
-            return #err("Invalid hex character: " # Text.fromChar(char));
-          };
-        };
-      };
-      
-      // Ensure even number of characters
-      let normalizedHex = if (cleanHex.size() % 2 == 1) {
-        "0" # cleanHex;
-      } else {
-        cleanHex;
-      };
-      
-      // For state root, ensure we have exactly 64 characters (32 bytes)
-      let paddedHex = if (normalizedHex.size() < 64) {
-        // Pad with leading zeros to ensure 32 bytes
-        let paddingCount = 64 - normalizedHex.size();
-        let paddingArray = Array.tabulate<Text>(paddingCount, func(_) = "0");
-        let paddingText = Array.foldLeft<Text, Text>(paddingArray, "", func(acc, x) = acc # x);
-        paddingText # normalizedHex;
-      } else if (normalizedHex.size() > 64) {
-        // Take only the first 64 characters for state root
-        let chars = Text.toArray(normalizedHex);
-        let truncatedChars = Array.tabulate<Char>(64, func(i) {
-          if (i < chars.size()) chars[i] else '0'
-        });
-        Text.fromArray(truncatedChars);
-      } else {
-        normalizedHex;
-      };
-      
-      let chars = Text.toArray(paddedHex);
-      let byteCount = chars.size() / 2;
-      let bytes = Array.tabulate<Nat8>(byteCount, func(i) {
-        let highChar = chars[i * 2];
-        let lowChar = chars[i * 2 + 1];
-        
-        let high = switch (highChar) {
-          case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
-          case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
-          case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
-          case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
-          case (_) 0; // Should not happen due to validation above
-        };
-        let low = switch (lowChar) {
-          case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
-          case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
-          case ('a' or 'A') 10; case ('b' or 'B') 11; case ('c' or 'C') 12;
-          case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
-          case (_) 0; // Should not happen due to validation above
-        };
-        Nat8.fromNat(high * 16 + low);
-      });
-      
-      #ok(Blob.fromArray(bytes));
-    };
+    
 
     // Helper function to validate state root format
     private func validateStateRoot(stateRoot: Text) : Bool {
@@ -508,6 +451,8 @@ module {
       stateRoot.size() >= 66 and // 0x + 64 hex chars = 66 total
       stateRoot.size() <= 66; // Exactly 66 characters for valid state root
     };
+
+
     private func getTotalSupply(rpc_service: MigrationTypes.Current.EthereumRPCService, chain: MigrationTypes.Current.EthereumNetwork, contract_address: Text) : async* Result.Result<Nat, Text> {
       D.print("🚀 TOTAL_SUPPLY: Starting getTotalSupply for contract " # contract_address);
       
@@ -739,10 +684,7 @@ module {
     // Note: Using null for now - in production, should load precomputed values
     
 
-    // Helper function to create nonce key for address tracking
-    private func makeNonceKey(chainId: Nat, address: Text) : Text {
-      Nat.toText(chainId) # ":" # address;
-    };
+ 
 
     // Helper function to get Ethereum address from ECDSA public key and derivation path
     private func getEthereumAddress(subaccount: ?Blob) : async* Text {
@@ -770,46 +712,365 @@ module {
       };
     };
 
-    // Helper function to get next nonce for an Ethereum address
-    private func getNextNonce(chainId: Nat, address: Text, rpc_service: MigrationTypes.Current.EthereumRPCService) : async* Nat {
-      let nonceKey = makeNonceKey(chainId, address);
+
+    // Helper function to fetch nonce directly from blockchain
+    private func fetchNonceFromBlockchain(chainId: Nat, address: Text, rpc_service: MigrationTypes.Current.EthereumRPCService) : async* Nat {
+      try {
+        let rpcActor = getEvmRpcActor(rpc_service);
+        let rpcServices = getRpcServices({chain_id = chainId; network_name = ""}, rpc_service);
+        
+        D.print("🔍 NONCE: Fetching nonce from blockchain for address: " # address);
+        let result = await(with cycles=127817059200) rpcActor.eth_getTransactionCount(rpcServices, ?{
+          responseSizeEstimate = ?256;
+          responseConsensus = null; // Use default consensus strategy
+        }, { address = address; block = #Latest });
+        
+        switch (result) {
+          case (#Consistent(#Ok(nonce))) {
+            D.print("✅ NONCE: Fetched nonce from blockchain: " # Nat.toText(nonce));
+            nonce;
+          };
+          case (#Consistent(#Err(err))) {
+            D.print("❌ NONCE: RPC error fetching nonce: " # debug_show(err));
+            0; // Default to 0 if unable to fetch
+          };
+          case (#Inconsistent(err)) {
+            D.print("❌ NONCE: Inconsistent response fetching nonce: " # debug_show(err));
+            0; // Default to 0 if unable to fetch
+          };
+        };
+      } catch (e) {
+        D.print("❌ NONCE: Exception fetching nonce: " # Error.message(e));
+        0; // Default to 0 on error
+      };
+    };
+
+    // Helper function to recover nonce when "nonce too low" error occurs
+    // Helper function to add transaction to queue
+    private func addTransactionToQueue<system>(proposal_id: Nat, eth_tx: MigrationTypes.Current.EthTx) : Nat {
+      let queueEntry = {
+        proposal_id = proposal_id;
+        eth_tx = eth_tx;
+        queued_at = Time.now();
+        var status = #pending : TransactionStatus;
+        var processing_attempts = 0;
+        var last_attempt_at = null : ?Int;
+        var error_message = null : ?Text;
+        var transaction_hash = null : ?Text;
+      };
       
-      // Check local cache first
-      switch (BTree.get(state.ethereumNonces, Text.compare, nonceKey)) {
-        case (?cachedNonce) {
-          // Increment cached nonce
-          let newNonce = cachedNonce + 1;
-          ignore BTree.insert(state.ethereumNonces, Text.compare, nonceKey, newNonce);
-          newNonce;
+      let sequenceId = queueSequence;
+      queueSequence += 1;
+      
+      ignore BTree.insert(transactionQueue, Nat.compare, sequenceId, queueEntry);
+      
+      D.print("� QUEUE: Added transaction for proposal " # Nat.toText(proposal_id) # " to queue at position " # Nat.toText(sequenceId));
+      D.print("📊 QUEUE: Queue size is now: " # Nat.toText(BTree.size(transactionQueue)));
+      
+      // Start queue processing timer if not already running
+      startQueueProcessingTimer<system>();
+      
+      sequenceId;
+    };
+    
+    // Start queue processing with delay (single-shot timer)
+    private func startQueueProcessingTimer<system>() : () {
+      switch (queueProcessingTimer) {
+        case (?_) {
+          // Timer already scheduled
+          D.print("⏰ QUEUE_TIMER: Processing already scheduled");
         };
         case (null) {
-          // Fetch current nonce from blockchain
+          D.print("⏰ QUEUE_TIMER: Scheduling queue processing in " # Nat.toText(QUEUE_PROCESSING_DELAY_SECONDS) # " seconds");
+          let timerId = Timer.setTimer<system>(
+            #seconds(QUEUE_PROCESSING_DELAY_SECONDS),
+            processQueueTimerCallback
+          );
+          queueProcessingTimer := ?timerId;
+        };
+      };
+    };
+    
+    // Schedule next queue processing after current item completes
+    private func scheduleNextQueueProcessing<system>() : () {
+      // Clear current timer
+      queueProcessingTimer := null;
+      
+      // Check if there are more pending items
+      switch (getNextQueuedTransaction()) {
+        case (null) {
+          D.print("⏰ QUEUE_SCHEDULE: No more pending transactions, stopping scheduler");
+        };
+        case (?_) {
+          D.print("⏰ QUEUE_SCHEDULE: More transactions pending, scheduling next processing");
+          startQueueProcessingTimer<system>();
+        };
+      };
+    };
+    
+    // Timer callback for queue processing (single execution)
+    private func processQueueTimerCallback() : async () {
+      D.print("⏰ QUEUE_TIMER: Timer fired, processing next transaction...");
+      
+      // Clear the timer reference since this is a one-shot
+      queueProcessingTimer := null;
+      
+      try {
+        let result = await* processNextQueuedTransaction();
+        D.print("⏰ QUEUE_TIMER: Processing completed with result: " # debug_show(result));
+        
+        // Schedule next processing if there are more items
+        scheduleNextQueueProcessing<system>();
+      } catch (e) {
+        D.print("❌ QUEUE_TIMER: Error processing queue: " # Error.message(e));
+        
+        // Even on error, schedule next processing to handle remaining items
+        scheduleNextQueueProcessing<system>();
+      };
+    };
+    
+    // Helper function to get next pending transaction from queue (ordered by sequence)
+    private func getNextQueuedTransaction() : ?(Nat, QueuedTransaction) {
+      // Get the first (lowest sequence number) pending transaction
+      for ((seqId, queueEntry) in BTree.entries(transactionQueue)) {
+        if (queueEntry.status == #pending) {
+          return ?(seqId, queueEntry);
+        };
+      };
+      null;
+    };
+    
+    // Main queue processing function - processes one transaction at a time
+    private func processNextQueuedTransaction() : async* Result.Result<Text, Text> {
+      D.print("🔄 QUEUE_PROCESS: Starting queue processing...");
+      
+      // Check if we have any pending transactions
+      switch (getNextQueuedTransaction()) {
+        case (null) {
+          D.print("🔄 QUEUE_PROCESS: No pending transactions in queue");
+          return #err("No pending transactions");
+        };
+        case (?(sequenceId, queueEntry)) {
+          D.print("🔄 QUEUE_PROCESS: Found pending transaction at sequence " # Nat.toText(sequenceId));
+          D.print("🔄 QUEUE_PROCESS: Proposal ID: " # Nat.toText(queueEntry.proposal_id));
+          D.print("🔄 QUEUE_PROCESS: Queued at: " # Int.toText(queueEntry.queued_at));
+          D.print("🔄 QUEUE_PROCESS: Processing attempts: " # Nat.toText(queueEntry.processing_attempts));
+          
+          // Mark as processing
+          queueEntry.status := #processing;
+          queueEntry.processing_attempts += 1;
+          queueEntry.last_attempt_at := ?Time.now();
+          
+          D.print("🔄 QUEUE_PROCESS: Marked transaction as processing, attempt #" # Nat.toText(queueEntry.processing_attempts));
+          
           try {
-            let rpcActor = getEvmRpcActor(rpc_service);
-            let rpcServices = getRpcServices({chain_id = chainId; network_name = ""}, rpc_service);
-
-            let result = await(with cycles=127817059200) rpcActor.eth_getTransactionCount(rpcServices, ?{
-              responseSizeEstimate = ?64;
-              responseConsensus = null; // Use default consensus strategy
-            }, { address = address; block = #Latest });
+            // Get the Ethereum address for this subaccount
+            D.print("🔄 QUEUE_PROCESS: Getting Ethereum address for subaccount...");
+            let ethAddress = await* getEthereumAddress(queueEntry.eth_tx.subaccount);
+            D.print("🔄 QUEUE_PROCESS: Ethereum address: " # ethAddress);
+            
+            // Configure RPC service
+            let rpc_service = {
+              rpc_type = switch (queueEntry.eth_tx.chain.chain_id) {
+                case (1) "mainnet";
+                case (5) "goerli";
+                case (11155111) "sepolia";
+                case (_) "custom";
+              };
+              canister_id = state.config.evm_rpc_canister_id;
+              custom_config = null;
+            };
+            
+            // Create derivation path
+            let derivationPath = switch (queueEntry.eth_tx.subaccount) {
+              case (?blob) [blob];
+              case (null) [];
+            };
+            
+            // Execute the transaction
+            D.print("🔄 QUEUE_PROCESS: Executing Ethereum transaction...");
+            let result = await* executeEthereumTransaction(
+              queueEntry.eth_tx,
+              rpc_service,
+              ethAddress,
+              derivationPath
+            );
             
             switch (result) {
-              case (#Consistent(#Ok(nonce))) {
-                ignore BTree.insert(state.ethereumNonces, Text.compare, nonceKey, nonce);
-                nonce;
+              case (#Ok(txHash)) {
+                D.print("✅ QUEUE_PROCESS: Transaction successful! Hash: " # txHash);
+                
+                // Mark as completed and record the transaction hash
+                queueEntry.status := #completed;
+                queueEntry.transaction_hash := ?txHash;
+                queueEntry.error_message := null;
+                
+                // Move to processed transactions storage
+                ignore BTree.insert(processedTransactions, Nat.compare, sequenceId, queueEntry);
+                D.print("✅ QUEUE_PROCESS: Moved completed transaction to processed storage");
+                
+                // Remove from active queue
+                let removed = removeTransactionFromQueue(sequenceId);
+                D.print("✅ QUEUE_PROCESS: Removed from active queue: " # debug_show(removed));
+                
+                // Update last processed sequence for restart recovery
+                lastProcessedSequence := sequenceId;
+                
+                D.print("✅ QUEUE_PROCESS: Updated last processed sequence to: " # Nat.toText(lastProcessedSequence));
+                
+                #ok(txHash);
               };
-              case (_) {
-                // Default to 0 if unable to fetch
-                ignore BTree.insert(state.ethereumNonces, Text.compare, nonceKey, 0);
-                0;
+              case (#Err(errorMsg)) {
+                D.print("❌ QUEUE_PROCESS: Transaction failed: " # errorMsg);
+                
+                // Mark as failed since we only try once
+                queueEntry.status := #failed;
+                queueEntry.error_message := ?errorMsg;
+                queueEntry.transaction_hash := null;
+                
+                // Move to processed transactions storage
+                ignore BTree.insert(processedTransactions, Nat.compare, sequenceId, queueEntry);
+                D.print("❌ QUEUE_PROCESS: Moved failed transaction to processed storage");
+                
+                // Remove from active queue
+                let removed = removeTransactionFromQueue(sequenceId);
+                D.print("❌ QUEUE_PROCESS: Removed from active queue: " # debug_show(removed));
+                
+                // Update last processed sequence for restart recovery
+                lastProcessedSequence := sequenceId;
+                
+                D.print("❌ QUEUE_PROCESS: Marked transaction as failed, updated last processed sequence to: " # Nat.toText(lastProcessedSequence));
+                
+                #err(errorMsg);
               };
             };
           } catch (e) {
-            // Default to 0 on error
-            ignore BTree.insert(state.ethereumNonces, Text.compare, nonceKey, 0);
-            0;
+            let errorMsg = "Queue processing exception: " # Error.message(e);
+            D.print("❌ QUEUE_PROCESS: Exception: " # errorMsg);
+            
+            // Mark as failed
+            queueEntry.status := #failed;
+            queueEntry.error_message := ?errorMsg;
+            queueEntry.transaction_hash := null;
+            
+            // Move to processed transactions storage
+            ignore BTree.insert(processedTransactions, Nat.compare, sequenceId, queueEntry);
+            D.print("❌ QUEUE_PROCESS: Moved exception-failed transaction to processed storage");
+            
+            // Remove from active queue
+            let removed = removeTransactionFromQueue(sequenceId);
+            D.print("❌ QUEUE_PROCESS: Removed from active queue: " # debug_show(removed));
+            
+            // Update last processed sequence for restart recovery
+            lastProcessedSequence := sequenceId;
+            
+            D.print("❌ QUEUE_PROCESS: Marked transaction as failed due to exception, updated last processed sequence to: " # Nat.toText(lastProcessedSequence));
+            
+            #err(errorMsg);
           };
         };
+      };
+    };
+    
+    // Helper function to remove transaction from queue
+    private func removeTransactionFromQueue(sequenceId: Nat) : Bool {
+      switch (BTree.delete(transactionQueue, Nat.compare, sequenceId)) {
+        case (?_) {
+          D.print("📤 QUEUE: Removed transaction at sequence " # Nat.toText(sequenceId) # " from queue");
+          D.print("� QUEUE: Queue size is now: " # Nat.toText(BTree.size(transactionQueue)));
+          true;
+        };
+        case (null) false;
+      };
+    };
+
+    // Simple Ethereum transaction executor (no mutex, no retries - just one attempt)
+    private func executeEthereumTransaction(
+      eth_tx: MigrationTypes.Current.EthTx, 
+      rpc_service: MigrationTypes.Current.EthereumRPCService,
+      ethAddress: Text,
+      derivationPath: [Blob]
+    ) : async* {#Ok: Text; #Err: Text} {
+      
+      D.print("🎯 ETH_TX_EXECUTE: STARTING SIMPLE ETHEREUM TRANSACTION EXECUTION");
+      D.print("🎯 ETH_TX_EXECUTE: To: " # eth_tx.to);
+      D.print("🎯 ETH_TX_EXECUTE: From: " # ethAddress);
+      D.print("🎯 ETH_TX_EXECUTE: Value: " # Nat.toText(eth_tx.value));
+      
+      try {
+        // Step 1: Get current nonce from blockchain
+        D.print("🎯 ETH_TX_EXECUTE: Step 1 - Getting nonce from blockchain...");
+        let nonce = await* fetchNonceFromBlockchain(eth_tx.chain.chain_id, ethAddress, rpc_service);
+        D.print("🎯 ETH_TX_EXECUTE: Using nonce: " # Nat.toText(nonce));
+        
+        // Step 2: Create transaction structure
+        D.print("🎯 ETH_TX_EXECUTE: Step 2 - Creating transaction structure...");
+        let transaction = {
+          chainId = Nat64.fromNat(eth_tx.chain.chain_id);
+          nonce = Nat64.fromNat(nonce);
+          maxPriorityFeePerGas = Nat64.fromNat(eth_tx.maxPriorityFeePerGas);
+          gasLimit = Nat64.fromNat(eth_tx.gasLimit);
+          maxFeePerGas = Nat64.fromNat(eth_tx.maxFeePerGas);
+          to = eth_tx.to;
+          value = eth_tx.value;
+          data = "0x" # Hex.encode(Blob.toArray(eth_tx.data));
+          accessList = [] : [(Text, [Text])];
+          r = "0x00";
+          s = "0x00";
+          v = "0x00";
+        };
+        
+        // Step 3: Encode and sign
+        D.print("🎯 ETH_TX_EXECUTE: Step 3 - Encoding and signing...");
+        let encodedTx = Transaction1559.getMessageToSign(transaction);
+        let txHash = switch (encodedTx) {
+          case (#ok(bytes)) bytes;
+          case (#err(err)) return #Err("Failed to encode transaction: " # err);
+        };
+        
+        Cycles.add<system>(126_153_846_153);
+        let { signature } = await IC_ECDSA_ACTOR.sign_with_ecdsa({
+          message_hash = Blob.fromArray(txHash);
+          derivation_path = derivationPath;
+          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
+        });
+        
+        let { public_key; chain_code = _ } = await IC_ECDSA_ACTOR.ecdsa_public_key({
+          canister_id = ?Principal.fromActor(_self);
+          derivation_path = derivationPath;
+          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
+        });
+        
+        // Step 4: Serialize and send
+        D.print("🎯 ETH_TX_EXECUTE: Step 4 - Serializing and sending...");
+        let signedTx = Transaction1559.signAndSerialize(
+          transaction,
+          Blob.toArray(signature),
+          Blob.toArray(public_key),
+          ecCtx()
+        );
+        
+        let rawTxHex = switch (signedTx) {
+          case (#ok((_, txBytes))) Hex.encode(txBytes);
+          case (#err(err)) return #Err("Failed to serialize transaction: " # err);
+        };
+        
+        let result = await* ethSendRawTransaction(eth_tx.chain.chain_id, rpc_service, rawTxHex);
+        switch (result) {
+          case (#ok(txHash)) {
+            D.print("🎯 ETH_TX_EXECUTE: SUCCESS - Transaction hash: " # txHash);
+            #Ok(txHash);
+          };
+          case (#err(err)) {
+            D.print("🎯 ETH_TX_EXECUTE: FAILED - Error: " # err);
+            #Err(err);
+          };
+        };
+        
+      } catch (e) {
+        let errorMsg = "Transaction execution exception: " # Error.message(e);
+        D.print("🎯 ETH_TX_EXECUTE: EXCEPTION - " # errorMsg);
+        #Err(errorMsg);
       };
     };
 
@@ -827,7 +1088,7 @@ module {
         
         Cycles.add<system>(1_000_000_000); // 1B cycles for transaction
         let result = await (with cycles=127817059200  ) rpcActor.eth_sendRawTransaction(rpcServices, ?{
-          responseSizeEstimate = ?128;
+          responseSizeEstimate = ?1024;
           responseConsensus = null; // Use default consensus strategy
         }, finalTx);
         
@@ -857,7 +1118,8 @@ module {
         #err("Transaction failed: " # Error.message(e));
       };
     };
-    public func icrc149_send_eth_tx(_caller: Principal, eth_tx: Service.EthTx) : async {#Ok: Text; #Err: Text} {
+
+    public func icrc149_send_eth_tx(_caller: Principal, eth_tx: MigrationTypes.Current.EthTx) : async {#Ok: Text; #Err: Text} {
       D.print("💰 ETH_TX: ========== STARTING ETHEREUM TRANSACTION SEND ==========");
       D.print("💰 ETH_TX: Caller: " # Principal.toText(_caller));
       D.print("💰 ETH_TX: Chain ID: " # Nat.toText(eth_tx.chain.chain_id));
@@ -891,136 +1153,37 @@ module {
         D.print("💰 ETH_TX: Step 2 COMPLETE - RPC service type: " # rpc_service.rpc_type);
         D.print("💰 ETH_TX: Step 2 COMPLETE - RPC canister ID: " # Principal.toText(rpc_service.canister_id));
         
-        // Get next nonce for this address
-        D.print("💰 ETH_TX: Step 3 - Getting next nonce for address: " # ethAddress);
-        let nonce = await* getNextNonce(eth_tx.chain.chain_id, ethAddress, rpc_service);
-        D.print("💰 ETH_TX: Step 3 COMPLETE - Nonce: " # Nat.toText(nonce));
-        
         // Create derivation path
-        D.print("💰 ETH_TX: Step 4 - Creating derivation path...");
+        D.print("💰 ETH_TX: Step 3 - Creating derivation path...");
         let derivationPath = switch (eth_tx.subaccount) {
           case (?blob) [blob];
           case (null) [];
         };
-        D.print("💰 ETH_TX: Step 4 COMPLETE - Derivation path length: " # Nat.toText(derivationPath.size()));
+        D.print("💰 ETH_TX: Step 3 COMPLETE - Derivation path length: " # Nat.toText(derivationPath.size()));
         
-        // Create EIP-1559 transaction
-        D.print("💰 ETH_TX: Step 5 - Creating EIP-1559 transaction structure...");
-        let transaction = {
-          chainId = Nat64.fromNat(eth_tx.chain.chain_id);
-          nonce = Nat64.fromNat(nonce);
-          maxPriorityFeePerGas = Nat64.fromNat(eth_tx.maxPriorityFeePerGas);
-          gasLimit = Nat64.fromNat(eth_tx.gasLimit);
-          maxFeePerGas = Nat64.fromNat(eth_tx.maxFeePerGas);
-          to = eth_tx.to;
-          value = eth_tx.value;
-          data = "0x" # Hex.encode(Blob.toArray(eth_tx.data));
-          accessList = [];
-          r = "0x00";
-          s = "0x00";
-          v = "0x00";
-        };
-
-        D.print("💰 ETH_TX: Step 5 SUCCESS - Transaction structure created " # debug_show(transaction));
-        D.print("💰 ETH_TX: Step 5 COMPLETE - Transaction structure created");
-        D.print("💰 ETH_TX: Step 5 DETAILS - To: " # transaction.to);
-        D.print("💰 ETH_TX: Step 5 DETAILS - Value: " # Nat.toText(transaction.value));
-        D.print("💰 ETH_TX: Step 5 DETAILS - ChainId: " # Nat64.toText(transaction.chainId));
-        D.print("💰 ETH_TX: Step 5 DETAILS - Nonce: " # Nat64.toText(transaction.nonce));
-        D.print("💰 ETH_TX: Step 5 DETAILS - Data: " # transaction.data);
+        // Use simple transaction execution
+        D.print("💰 ETH_TX: Step 4 - Using simple transaction execution...");
+        let result = await* executeEthereumTransaction(eth_tx, rpc_service, ethAddress, derivationPath);
+        D.print("💰 ETH_TX: Step 4 RESULT - Simple transaction execution returned: " # debug_show(result));
         
-        // Create transaction hash for signing
-        D.print("💰 ETH_TX: Step 6 - Encoding transaction for signing...");
-        let encodedTx = Transaction1559.getMessageToSign(transaction);
-        let txHash = switch (encodedTx) {
-          case (#ok(bytes)) {
-            D.print("💰 ETH_TX: Step 6 SUCCESS - Transaction encoded, hash length: " # Nat.toText(bytes.size()));
-            bytes;
-          };
-          case (#err(err)) {
-            D.print("💰 ETH_TX: Step 6 ERROR - Failed to encode transaction: " # err);
-            return #Err("Failed to encode transaction: " # err);
-          };
-        };
-        
-        // Sign the transaction hash
-        D.print("💰 ETH_TX: Step 7 - Signing transaction with tECDSA...");
-        D.print("💰 ETH_TX: Step 7 DETAILS - Using key: " # ECDSA_KEY_NAME);
-        D.print("💰 ETH_TX: Step 7 DETAILS - Message hash length: " # Nat.toText(txHash.size()));
-        D.print("💰 ETH_TX: Step 7 DETAILS - Adding 10B cycles for ECDSA signing");
-        Cycles.add<system>(10_000_000_000); // 10B cycles for ECDSA signing
-        let { signature } = await IC_ECDSA_ACTOR.sign_with_ecdsa({
-          message_hash = Blob.fromArray(txHash);
-          derivation_path = derivationPath;
-          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
-        });
-        D.print("💰 ETH_TX: Step 7 SUCCESS - Transaction signed, signature length: " # Nat.toText(signature.size()));
-        
-        // Get public key for recovery
-        D.print("💰 ETH_TX: Step 8 - Getting public key for signature recovery...");
-        let { public_key; chain_code = _ } = await IC_ECDSA_ACTOR.ecdsa_public_key({
-          canister_id = ?Principal.fromActor(_self);
-          derivation_path = derivationPath;
-          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
-        });
-        D.print("💰 ETH_TX: Step 8 SUCCESS - Public key retrieved, length: " # Nat.toText(public_key.size()));
-        
-        // Serialize the signed transaction
-        D.print("💰 ETH_TX: Step 9 - Serializing signed transaction...");
-        let signedTx = Transaction1559.signAndSerialize(
-          transaction,
-          Blob.toArray(signature),
-          Blob.toArray(public_key),
-          ecCtx()
-        );
-        
-        let rawTxHex = switch (signedTx) {
-          case (#ok((_, txBytes))) {
-            let hexString = Hex.encode(txBytes);
-            D.print("💰 ETH_TX: Step 9 SUCCESS - Transaction serialized, hex length: " # Nat.toText(hexString.size()));
-            D.print("💰 ETH_TX: Step 9 DETAILS - Raw tx (first 100 chars): " # (if (hexString.size() > 100) {
-              let chars = Text.toArray(hexString);
-              let truncated = Array.subArray(chars, 0, 100);
-              Text.fromArray(truncated);
-            } else hexString));
-            hexString;
-          };
-          case (#err(err)) {
-            D.print("💰 ETH_TX: Step 9 ERROR - Failed to serialize signed transaction: " # err);
-            return #Err("Failed to serialize signed transaction: " # err);
-          };
-        };
-        
-        // Send the raw transaction
-        D.print("💰 ETH_TX: Step 10 - Sending raw transaction to blockchain...");
-        D.print("💰 ETH_TX: Step 10 DETAILS - Calling ethSendRawTransaction with chainId: " # Nat.toText(eth_tx.chain.chain_id));
-        D.print("💰 ETH_TX: Step 10 DETAILS - Raw transaction hex: " # rawTxHex);
-        let result = await* ethSendRawTransaction(eth_tx.chain.chain_id, rpc_service, rawTxHex);
-        D.print("💰 ETH_TX: Step 10 RESULT - ethSendRawTransaction returned: " # debug_show(result));
-        
-        D.print("💰 ETH_TX: Step 11 - Processing final result...");
         switch (result) {
-          case (#ok(txHash)) {
-            D.print("💰 ETH_TX: Step 11 SUCCESS - Transaction hash received: " # txHash);
+          case (#Ok(txHash)) {
             D.print("💰 ETH_TX: ========== ETHEREUM TRANSACTION COMPLETED SUCCESSFULLY ==========");
+            D.print("💰 ETH_TX: Final transaction hash: " # txHash);
             #Ok(txHash);
           };
-          case (#err(err)) {
-            D.print("💰 ETH_TX: Step 11 ERROR - Transaction failed: " # err);
+          case (#Err(err)) {
             D.print("💰 ETH_TX: ========== ETHEREUM TRANSACTION FAILED ==========");
+            D.print("💰 ETH_TX: Final error: " # err);
             #Err(err);
           };
         };
         
       } catch (e) {
+        D.print("💰 ETH_TX: ========== ETHEREUM TRANSACTION EXCEPTION ==========");
+        D.print("💰 ETH_TX: Exception: " # Error.message(e));
         #Err("Transaction failed: " # Error.message(e));
       };
-    };
-
-    public func icrc149_get_eth_tx_status(_tx_hash: Text) : Text {
-      // CRITICAL: This MUST implement real ETH transaction status checking
-      // If not implemented, return error status to make tests fail
-      "IMPLEMENTATION_MISSING_TEST_SHOULD_FAIL";
     };
 
     private func equalVoteChoice(a: MigrationTypes.Current.VoteChoice, b: MigrationTypes.Current.VoteChoice) : Bool {
@@ -1138,7 +1301,7 @@ module {
     // Sync all proposal indexes - useful for ensuring indexes are up to date
     private func syncProposalIndexes() {
       // Get all proposals and ensure their current status is properly indexed
-      let allProposals = proposalEngine.getProposals(10000, 0); // Get a large batch
+      let allProposals = getProposalEngine().getProposals(10000, 0); // Get a large batch
       for (proposal in allProposals.data.vals()) {
         // Check if proposal exists in status index
         let currentStatus = getProposalStatus(proposal);
@@ -1162,92 +1325,7 @@ module {
     // ===== COMPREHENSIVE DEBUGGING FUNCTIONS =====
     
     // Debug function to verify address funding via RPC using transaction count as proxy
-    public func debug_verify_address_funding(_caller: Principal, address: Text, chain_id: Nat) : async {#Ok: {address: Text; nonce: Text; status: Text}; #Err: Text} {
-      D.print("🔍 DEBUG_FUNDING: Checking address status for: " # address);
-      D.print("🔍 DEBUG_FUNDING: Chain ID: " # Nat.toText(chain_id));
-      
-      try {
-        let rpc_service = {
-          rpc_type = "custom";
-          canister_id = state.config.evm_rpc_canister_id;
-          custom_config = ?[("url", "http://127.0.0.1:8545")];
-        };
-        
-        let rpcActor = getEvmRpcActor(rpc_service);
-        let rpcServices = getRpcServices({chain_id = chain_id; network_name = ""}, rpc_service);
-        
-        D.print("🔍 DEBUG_FUNDING: Making eth_getTransactionCount RPC call...");
-        let result = await(with cycles=127817059200) rpcActor.eth_getTransactionCount(rpcServices, ?{
-          responseSizeEstimate = ?64;
-          responseConsensus = null;
-        }, {
-          address = address;
-          block = #Latest;
-        });
-        
-        D.print("🔍 DEBUG_FUNDING: eth_getTransactionCount result: " # debug_show(result));
-        
-        switch (result) {
-          case (#Consistent(#Ok(nonce))) {
-            let nonceText = Nat.toText(nonce);
-            let status = if (nonce == 0) {
-              "Address exists but no transactions sent (may or may not have ETH balance)";
-            } else {
-              "Address has sent " # nonceText # " transactions (likely has/had ETH balance)";
-            };
-            
-            D.print("✅ DEBUG_FUNDING: Address " # address # " nonce: " # nonceText);
-            #Ok({
-              address = address;
-              nonce = nonceText;
-              status = status;
-            });
-          };
-          case (#Consistent(#Err(err))) {
-            let errorMsg = "Failed to get transaction count: " # formatRpcError(err);
-            D.print("❌ DEBUG_FUNDING: " # errorMsg);
-            #Err(errorMsg);
-          };
-          case (#Inconsistent(results)) {
-            D.print("⚠️ DEBUG_FUNDING: Inconsistent results, using first successful one");
-            switch (results.size()) {
-              case (0) {
-                let errorMsg = "No RPC responses for transaction count check";
-                D.print("❌ DEBUG_FUNDING: " # errorMsg);
-                #Err(errorMsg);
-              };
-              case (_) {
-                let firstResult = results[0].1;
-                switch (firstResult) {
-                  case (#Ok(nonce)) {
-                    let nonceText = Nat.toText(nonce);
-                    let status = if (nonce == 0) {
-                      "Address exists but no transactions sent";
-                    } else {
-                      "Address has sent " # nonceText # " transactions";
-                    };
-                    #Ok({
-                      address = address;
-                      nonce = nonceText;
-                      status = status;
-                    });
-                  };
-                  case (#Err(err)) {
-                    let errorMsg = "First result error: " # formatRpcError(err);
-                    D.print("❌ DEBUG_FUNDING: " # errorMsg);
-                    #Err(errorMsg);
-                  };
-                };
-              };
-            };
-          };
-        };
-      } catch (e) {
-        let errorMsg = "Exception during address check: " # Error.message(e);
-        D.print("❌ DEBUG_FUNDING: " # errorMsg);
-        #Err(errorMsg);
-      };
-    };
+    
 
     // Debug function to get all addresses used by the canister
     public func debug_get_all_addresses(_caller: Principal) : async {#Ok: {treasury_address: Text; tx_specific_address: ?Text}; #Err: Text} {
@@ -1276,362 +1354,157 @@ module {
       };
     };
 
-    // Debug function to construct and return raw transaction bytes
-    public func debug_construct_transaction(_caller: Principal, eth_tx: Service.EthTx) : async {#Ok: {raw_tx_hex: Text; from_address: Text; decoded_fields: Text}; #Err: Text} {
-      D.print("🔍 DEBUG_TX_CONSTRUCT: ========== CONSTRUCTING DEBUG TRANSACTION ==========");
-      D.print("🔍 DEBUG_TX_CONSTRUCT: To: " # eth_tx.to);
-      D.print("🔍 DEBUG_TX_CONSTRUCT: Value: " # Nat.toText(eth_tx.value));
-      D.print("🔍 DEBUG_TX_CONSTRUCT: Gas limit: " # Nat.toText(eth_tx.gasLimit));
-      D.print("🔍 DEBUG_TX_CONSTRUCT: Max fee per gas: " # Nat.toText(eth_tx.maxFeePerGas));
-      D.print("🔍 DEBUG_TX_CONSTRUCT: Max priority fee per gas: " # Nat.toText(eth_tx.maxPriorityFeePerGas));
-      D.print("🔍 DEBUG_TX_CONSTRUCT: Data: " # debug_show(eth_tx.data));
-      
-      try {
-        // Get the Ethereum address for this subaccount
-        D.print("🔍 DEBUG_TX_CONSTRUCT: Getting Ethereum address...");
-        let ethAddress = await* getEthereumAddress(eth_tx.subaccount);
-        D.print("🔍 DEBUG_TX_CONSTRUCT: From address: " # ethAddress);
-        
-        // Create RPC service
-        let rpc_service = {
-          rpc_type = "custom";
-          canister_id = state.config.evm_rpc_canister_id;
-          custom_config = ?[("url", "http://127.0.0.1:8545")];
-        };
-        
-        // Get nonce
-        D.print("🔍 DEBUG_TX_CONSTRUCT: Getting nonce...");
-        let nonce = await* getNextNonce(eth_tx.chain.chain_id, ethAddress, rpc_service);
-        D.print("🔍 DEBUG_TX_CONSTRUCT: Nonce: " # Nat.toText(nonce));
-        
-        // Create transaction structure
-        let transaction = {
-          chainId = Nat64.fromNat(eth_tx.chain.chain_id);
-          nonce = Nat64.fromNat(nonce);
-          maxPriorityFeePerGas = Nat64.fromNat(eth_tx.maxPriorityFeePerGas);
-          gasLimit = Nat64.fromNat(eth_tx.gasLimit);
-          maxFeePerGas = Nat64.fromNat(eth_tx.maxFeePerGas);
-          to = eth_tx.to;
-          value = eth_tx.value;
-          data = "0x" # Hex.encode(Blob.toArray(eth_tx.data));
-          accessList = [];
-          r = "0x00";
-          s = "0x00";
-          v = "0x00";
-        };
-        
-        D.print("🔍 DEBUG_TX_CONSTRUCT: Transaction structure created");
-        
-        // Create transaction hash for signing
-        D.print("🔍 DEBUG_TX_CONSTRUCT: Encoding transaction for signing...");
-        let encodedTx = Transaction1559.getMessageToSign(transaction);
-        let txHash = switch (encodedTx) {
-          case (#ok(bytes)) {
-            D.print("🔍 DEBUG_TX_CONSTRUCT: Transaction encoded successfully");
-            bytes;
-          };
-          case (#err(err)) {
-            D.print("🔍 DEBUG_TX_CONSTRUCT: Failed to encode: " # err);
-            return #Err("Failed to encode transaction: " # err);
-          };
-        };
-        
-        // Get derivation path
-        let derivationPath = switch (eth_tx.subaccount) {
-          case (?blob) [blob];
-          case (null) [];
-        };
-        
-        // Sign the transaction
-        D.print("🔍 DEBUG_TX_CONSTRUCT: Signing transaction...");
-        let { signature } = await IC_ECDSA_ACTOR.sign_with_ecdsa({
-          message_hash = Blob.fromArray(txHash);
-          derivation_path = derivationPath;
-          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
-        });
-        
-        // Get public key
-        let { public_key; chain_code = _ } = await IC_ECDSA_ACTOR.ecdsa_public_key({
-          canister_id = ?Principal.fromActor(_self);
-          derivation_path = derivationPath;
-          key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
-        });
-        
-        // Serialize the signed transaction
-        let signedTx = Transaction1559.signAndSerialize(
-          transaction,
-          Blob.toArray(signature),
-          Blob.toArray(public_key),
-          ecCtx()
-        );
-        
-        let rawTxHex = switch (signedTx) {
-          case (#ok((_, txBytes))) {
-            let hexString = Hex.encode(txBytes);
-            D.print("🔍 DEBUG_TX_CONSTRUCT: Transaction serialized successfully");
-            hexString;
-          };
-          case (#err(err)) {
-            D.print("🔍 DEBUG_TX_CONSTRUCT: Failed to serialize: " # err);
-            return #Err("Failed to serialize transaction: " # err);
-          };
-        };
-        
-        // Create human-readable decoded fields
-        let decodedFields = "chainId=" # Nat64.toText(transaction.chainId) #
-                          ", nonce=" # Nat64.toText(transaction.nonce) #
-                          ", to=" # transaction.to #
-                          ", value=" # Nat.toText(transaction.value) # " wei" #
-                          ", gasLimit=" # Nat64.toText(transaction.gasLimit) #
-                          ", maxFeePerGas=" # Nat64.toText(transaction.maxFeePerGas) # " wei" #
-                          ", maxPriorityFeePerGas=" # Nat64.toText(transaction.maxPriorityFeePerGas) # " wei" #
-                          ", data=" # transaction.data;
-        
-        D.print("🔍 DEBUG_TX_CONSTRUCT: ========== TRANSACTION CONSTRUCTION COMPLETE ==========");
-        
-        #Ok({
-          raw_tx_hex = rawTxHex;
-          from_address = ethAddress;
-          decoded_fields = decodedFields;
-        });
-        
-      } catch (e) {
-        let errorMsg = "Failed to construct transaction: " # Error.message(e);
-        D.print("❌ DEBUG_TX_CONSTRUCT: " # errorMsg);
-        #Err(errorMsg);
-      };
-    };
+    
 
-    // Debug function to show exact address derivation and compare with transaction
-    public func debug_address_derivation_detailed(_caller: Principal, subaccount: ?Blob) : async {#Ok: {treasury_address: Text; provided_subaccount_address: Text; derivation_path_info: Text; address_match: Bool}; #Err: Text} {
-      D.print("🔍 DEBUG_DERIVATION: ========== DETAILED ADDRESS DERIVATION DEBUG ==========");
-      D.print("🔍 DEBUG_DERIVATION: Caller: " # Principal.toText(_caller));
-      D.print("🔍 DEBUG_DERIVATION: Provided subaccount: " # debug_show(subaccount));
-      
-      try {
-        // Get treasury address (null subaccount)
-        D.print("🔍 DEBUG_DERIVATION: Getting treasury address (null subaccount)...");
-        let treasuryAddress = await* getEthereumAddress(null);
-        D.print("✅ DEBUG_DERIVATION: Treasury address: " # treasuryAddress);
-        
-        // Get address for provided subaccount
-        D.print("🔍 DEBUG_DERIVATION: Getting address for provided subaccount...");
-        let providedSubaccountAddress = await* getEthereumAddress(subaccount);
-        D.print("✅ DEBUG_DERIVATION: Provided subaccount address: " # providedSubaccountAddress);
-        
-        // Check derivation path details
-        let derivationPathInfo = switch (subaccount) {
-          case (?blob) {
-            "Subaccount provided: blob size=" # Nat.toText(blob.size()) # ", derivation_path=[" # debug_show(blob) # "]";
-          };
-          case (null) {
-            "No subaccount provided: derivation_path=[]";
-          };
-        };
-        
-        let addressMatch = treasuryAddress == providedSubaccountAddress;
-        
-        D.print("🔍 DEBUG_DERIVATION: Derivation path info: " # derivationPathInfo);
-        D.print("🔍 DEBUG_DERIVATION: Address match: " # Bool.toText(addressMatch));
-        D.print("🔍 DEBUG_DERIVATION: ========== ADDRESS DERIVATION DEBUG COMPLETE ==========");
-        
-        #Ok({
-          treasury_address = treasuryAddress;
-          provided_subaccount_address = providedSubaccountAddress;
-          derivation_path_info = derivationPathInfo;
-          address_match = addressMatch;
-        });
-        
-      } catch (e) {
-        let errorMsg = "Failed to derive addresses: " # Error.message(e);
-        D.print("❌ DEBUG_DERIVATION: " # errorMsg);
-        #Err(errorMsg);
-      };
-    };
+    
 
-    // Debug function to show the actual from address that will be used in transaction
-    public func debug_transaction_from_address(_caller: Principal, eth_tx: Service.EthTx) : async {#Ok: {transaction_from_address: Text; treasury_address: Text; addresses_match: Bool; raw_tx_preview: Text}; #Err: Text} {
-      D.print("🔍 DEBUG_TX_FROM: ========== CHECKING TRANSACTION FROM ADDRESS ==========");
-      
-      try {
-        // Get treasury address
-        let treasuryAddress = await* getEthereumAddress(null);
-        D.print("🔍 DEBUG_TX_FROM: Treasury address: " # treasuryAddress);
-        
-        // Get the address that will be used for the transaction
-        let transactionFromAddress = await* getEthereumAddress(eth_tx.subaccount);
-        D.print("🔍 DEBUG_TX_FROM: Transaction from address: " # transactionFromAddress);
-        
-        let addressesMatch = treasuryAddress == transactionFromAddress;
-        D.print("🔍 DEBUG_TX_FROM: Addresses match: " # Bool.toText(addressesMatch));
-        
-        // Create a preview of what the transaction would look like
-        let rpc_service = {
-          rpc_type = "custom";
-          canister_id = state.config.evm_rpc_canister_id;
-          custom_config = ?[("url", "http://127.0.0.1:8545")];
-        };
-        
-        let nonce = await* getNextNonce(eth_tx.chain.chain_id, transactionFromAddress, rpc_service);
-        
-        let rawTxPreview = "from=" # transactionFromAddress # 
-                          ", to=" # eth_tx.to # 
-                          ", value=" # Nat.toText(eth_tx.value) # 
-                          ", nonce=" # Nat.toText(nonce) # 
-                          ", gasLimit=" # Nat.toText(eth_tx.gasLimit) #
-                          ", maxFeePerGas=" # Nat.toText(eth_tx.maxFeePerGas) #
-                          ", data=" # debug_show(eth_tx.data);
-        
-        D.print("🔍 DEBUG_TX_FROM: Raw transaction preview: " # rawTxPreview);
-        D.print("🔍 DEBUG_TX_FROM: ========== TRANSACTION FROM ADDRESS CHECK COMPLETE ==========");
-        
-        #Ok({
-          transaction_from_address = transactionFromAddress;
-          treasury_address = treasuryAddress;
-          addresses_match = addressesMatch;
-          raw_tx_preview = rawTxPreview;
-        });
-        
-      } catch (e) {
-        let errorMsg = "Failed to check transaction from address: " # Error.message(e);
-        D.print("❌ DEBUG_TX_FROM: " # errorMsg);
-        #Err(errorMsg);
-      };
-    };
+    
 
-    // Debug function to check what the ERC20 transfer ABI should be
-    public func debug_get_erc20_transfer_abi(_caller: Principal, to_address: Text, amount: Nat) : {abi_description: Text; function_selector: Text; encoded_data: Text} {
-      D.print("🔍 DEBUG_ABI: Getting ERC20 transfer ABI information");
-      D.print("🔍 DEBUG_ABI: To address: " # to_address);
-      D.print("🔍 DEBUG_ABI: Amount: " # Nat.toText(amount));
-      
-      // ERC20 transfer function: transfer(address,uint256)
-      let abiDescription = "function transfer(address to, uint256 amount) returns (bool)";
-      let functionSelector = "0xa9059cbb"; // keccak256("transfer(address,uint256)")[0:4]
-      
-      // Encode the parameters (simplified - this is what the data should look like)
-      // address parameter (32 bytes, left-padded)
-      let addressParam = if (Text.startsWith(to_address, #text("0x"))) {
-        Text.trimStart(to_address, #text("0x"));
-      } else {
-        to_address;
-      };
-      let paddedAddress = "000000000000000000000000" # addressParam;
-      
-      // amount parameter (32 bytes, big-endian)
-      let amountHex = Nat.toText(amount); // This is simplified - should be proper hex conversion
-      let paddedAmount = "000000000000000000000000000000000000000000000000000000000000" # amountHex;
-      
-      let encodedData = functionSelector # paddedAddress # paddedAmount;
-      
-      D.print("🔍 DEBUG_ABI: Function selector: " # functionSelector);
-      D.print("🔍 DEBUG_ABI: Encoded data: " # encodedData);
-      
-      {
-        abi_description = abiDescription;
-        function_selector = functionSelector;
-        encoded_data = encodedData;
-      };
-    };
-
+    
     // ===== END COMPREHENSIVE DEBUGGING FUNCTIONS =====
 
     private func onProposalExecute(choice: ?MigrationTypes.Current.VoteChoice, proposal: ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>) : async* Result.Result<(), Text> {
       // Store the old proposal state for index updates
       let oldProposal = ?proposal;
       
-      D.print("🏛️  PROPOSAL_EXECUTE: Starting proposal execution for ID: " # Nat.toText(proposal.id));
+      D.print("🏛️  PROPOSAL_EXECUTE: ========== STARTING PROPOSAL EXECUTION ==========");
+      D.print("🏛️  PROPOSAL_EXECUTE: Proposal ID: " # Nat.toText(proposal.id));
       D.print("🏛️  PROPOSAL_EXECUTE: Winning choice: " # debug_show(choice));
       D.print("🏛️  PROPOSAL_EXECUTE: Proposal status: " # debug_show(proposal.status));
+      D.print("🏛️  PROPOSAL_EXECUTE: Proposal content: " # debug_show(proposal.content));
       
-      let result = switch(choice) {
-        case(?#Yes) {
-          // Proposal passed, execute the action
-          D.print("🚀 EXEC: Proposal passed, executing action...");
-          switch(proposal.content.action) {
-            case(#Motion(_text)) {
-              D.print("🚀 EXEC: Motion action - execution complete");
-              #ok(); // Motion executed
-            };
-            case(#EthTransaction(eth_tx)) {
-              D.print("🚀 EXEC: Ethereum transaction action - starting execution...");
-              D.print("🚀 EXEC: Transaction to: " # eth_tx.to);
-              D.print("🚀 EXEC: Transaction value: " # Nat.toText(eth_tx.value));
-              D.print("🚀 EXEC: Transaction data length: " # Nat.toText(eth_tx.data.size()) # " " # debug_show(eth_tx.data));
-              D.print("🚀 EXEC: Transaction gas limit: " # Nat.toText(eth_tx.gasLimit));
-              D.print("🚀 EXEC: Transaction max fee per gas: " # Nat.toText(eth_tx.maxFeePerGas));
-              D.print("🚀 EXEC: Transaction max priority fee per gas: " # Nat.toText(eth_tx.maxPriorityFeePerGas));
-              D.print("🚀 EXEC: Transaction subaccount: " # debug_show(eth_tx.subaccount));
-              D.print("🚀 EXEC: Transaction chain ID: " # Nat.toText(eth_tx.chain.chain_id));
-              D.print("🚀 EXEC: Transaction configured EVM RPC canister: " # Principal.toText(state.config.evm_rpc_canister_id));
-              D.print("🚀 EXEC: Transaction nonce: " # debug_show(eth_tx.nonce));
-              D.print("🚀 EXEC: Transaction signature: " # debug_show(eth_tx.signature));
-
-              let ethResult = await icrc149_send_eth_tx(
-                proposal.proposerId,
-                {
-                  chain = eth_tx.chain;
-                  data = eth_tx.data;
-                  signature = eth_tx.signature;
-                  nonce = eth_tx.nonce;
-                  to = eth_tx.to;
-                  value = eth_tx.value;
-                  subaccount = eth_tx.subaccount;
-                  maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
-                  maxFeePerGas = eth_tx.maxFeePerGas;
-                  gasLimit = eth_tx.gasLimit;
-                }
-              );
-              D.print("🚀 EXEC: icrc149_send_eth_tx returned: " # debug_show(ethResult));
-              switch(ethResult) {
-                case(#Ok(txHash)) {
-                  D.print("🚀 EXEC: Transaction successful with hash: " # txHash);
-                  #ok();
-                };
-                case(#Err(err)) {
-                  D.print("🚀 EXEC: Transaction failed with error: " # err);
-                  #err(err);
-                };
+      // Check if this proposal is already being executed
+      switch (BTree.get(executingProposals, Nat.compare, proposal.id)) {
+        case (?true) {
+          D.print("🔒 PROPOSAL_EXECUTE: ERROR - Proposal " # Nat.toText(proposal.id) # " is already being executed, blocking concurrent attempt");
+          return #err("Proposal is already being executed");
+        };
+        case (_) {
+          // Mark this proposal as executing
+          ignore BTree.insert(executingProposals, Nat.compare, proposal.id, true);
+          D.print("🔒 PROPOSAL_EXECUTE: SUCCESS - Marked proposal " # Nat.toText(proposal.id) # " as executing");
+        };
+      };
+      
+      // Execute with try/catch to ensure lock cleanup on error
+      D.print("🚀 PROPOSAL_EXECUTE: Starting execution logic...");
+      let result = try {
+        switch(choice) {
+          case(?#Yes) {
+            // Proposal passed, execute the action
+            D.print("🚀 EXEC: Proposal passed with YES vote, executing action...");
+            switch(proposal.content.action) {
+              case(#Motion(_text)) {
+                D.print("🚀 EXEC: Motion action - execution complete");
+                #ok(); // Motion executed
               };
-            };
-            case(#ICPCall(call)) {
-              // Call the ICP canister method
-              let result = try{
-                switch(call.best_effort_timeout) {
-                  case(?timeout) {
-                    await (with timeout=timeout; cycles = call.cycles) ICPCall.call(call.canister, call.method, call.args);
+              case(#EthTransaction(eth_tx)) {
+                D.print("🚀 EXEC: Ethereum transaction action - starting execution...");
+                D.print("🚀 EXEC: Transaction to: " # eth_tx.to);
+                D.print("🚀 EXEC: Transaction value: " # Nat.toText(eth_tx.value));
+                D.print("🚀 EXEC: Transaction data length: " # Nat.toText(eth_tx.data.size()) # " " # debug_show(eth_tx.data));
+                D.print("🚀 EXEC: Transaction gas limit: " # Nat.toText(eth_tx.gasLimit));
+                D.print("🚀 EXEC: Transaction max fee per gas: " # Nat.toText(eth_tx.maxFeePerGas));
+                D.print("🚀 EXEC: Transaction max priority fee per gas: " # Nat.toText(eth_tx.maxPriorityFeePerGas));
+                D.print("🚀 EXEC: Transaction subaccount: " # debug_show(eth_tx.subaccount));
+                D.print("🚀 EXEC: Transaction chain ID: " # Nat.toText(eth_tx.chain.chain_id));
+                D.print("🚀 EXEC: Transaction configured EVM RPC canister: " # Principal.toText(state.config.evm_rpc_canister_id));
+                D.print("🚀 EXEC: Transaction nonce: " # debug_show(eth_tx.nonce));
+                D.print("🚀 EXEC: Transaction signature: " # debug_show(eth_tx.signature));
+
+                D.print("🚀 EXEC: Adding Ethereum transaction to queue...");
+                ignore addTransactionToQueue<system>(proposal.id, eth_tx);
+                D.print("🚀 EXEC: ✅ Transaction added to queue successfully");
+                
+                // CRITICAL: End proposal immediately after queuing
+                // This prevents duplicate execution on canister restart
+                D.print("🚀 EXEC: Ending proposal " # Nat.toText(proposal.id) # " to prevent duplicates");
+                let endResult = await* getProposalEngine().endProposal(proposal.id);
+                D.print("🚀 EXEC: Proposal end result: " # debug_show(endResult));
+                
+                // CRITICAL: Save the updated proposal state to stable storage
+                // This ensures the proposal status persists across canister restarts
+                saveProposalEngineState();
+                D.print("🚀 EXEC: Saved proposal engine state to stable storage");
+                
+                #ok();
+              };
+              case(#ICPCall(call)) {
+                D.print("🚀 EXEC: ICP call action - starting execution...");
+                D.print("🚀 EXEC: ICP call canister: " # Principal.toText(call.canister));
+                D.print("🚀 EXEC: ICP call method: " # call.method);
+                D.print("🚀 EXEC: ICP call cycles: " # Nat.toText(call.cycles));
+                
+                // Call the ICP canister method
+                let icpResult = try{
+                  switch(call.best_effort_timeout) {
+                    case(?timeout) {
+                      await (with timeout=timeout; cycles = call.cycles) ICPCall.call(call.canister, call.method, call.args);
+                    };
+                    case(null) {
+                      await (with cycles = call.cycles) ICPCall.call(call.canister, call.method, call.args);
+                    };
                   };
-                  case(null) {
-                    await (with cycles = call.cycles) ICPCall.call(call.canister, call.method, call.args);
-                  };
+                  
+                } catch(e){
+                  let errorMsg = "ICP call failed: " # Error.message(e);
+                  D.print("❌ EXEC: " # errorMsg);
+                  call.result := ?#Err(errorMsg);
+                  // Still need to end the proposal even on failure
+                  D.print("🚀 EXEC: Ending proposal " # Nat.toText(proposal.id) # " after ICP call failure");
+                  let endResult = await* getProposalEngine().endProposal(proposal.id);
+                  D.print("🚀 EXEC: Proposal end result: " # debug_show(endResult));
+                  saveProposalEngineState();
+                  return #err(errorMsg);
                 };
                 
-              } catch(e){
-                call.result := ?#Err("ICP call failed: " # Error.message(e));
-                return #err("ICP call failed: " # Error.message(e));
+                call.result := ?#Ok(icpResult);
+                D.print("✅ EXEC: ICP call completed successfully");
+                
+                // CRITICAL: End proposal after successful ICP call
+                // This prevents duplicate execution on canister restart
+                D.print("🚀 EXEC: Ending proposal " # Nat.toText(proposal.id) # " after successful ICP call");
+                let endResult = await* getProposalEngine().endProposal(proposal.id);
+                D.print("🚀 EXEC: Proposal end result: " # debug_show(endResult));
+                
+                // CRITICAL: Save the updated proposal state to stable storage
+                // This ensures the proposal status persists across canister restarts
+                saveProposalEngineState();
+                D.print("🚀 EXEC: Saved proposal engine state to stable storage");
+                
+                #ok();
               };
-              call.result := ?#Ok(result);
-              return #ok();
             };
           };
+          case(?#No or ?#Abstain or null) {
+            D.print("🚀 EXEC: Proposal " # Nat.toText(proposal.id) # " rejected, abstained, or no majority - marking as complete");
+            // Proposal rejected or no majority
+            #ok();
+          };
         };
-        case(?#No or ?#Abstain or null) {
-          D.print("Proposal " # Nat.toText(proposal.id) # " rejected or no majority.");
-          // Proposal rejected or no majority
-          #ok();
-        };
+      } catch (e) {
+        // Clean up execution lock on error
+        let deleteResult = BTree.delete(executingProposals, Nat.compare, proposal.id);
+        D.print("🔓 PROPOSAL_EXECUTE: ❌ EXCEPTION CAUGHT - Removed execution lock for proposal " # Nat.toText(proposal.id) # " due to error: " # Error.message(e));
+        D.print("🔓 PROPOSAL_EXECUTE: Lock deletion result: " # debug_show(deleteResult));
+        return #err("Proposal execution failed: " # Error.message(e));
       };
       
+      D.print("🚀 PROPOSAL_EXECUTE: Execution completed, result: " # debug_show(result));
+      
       // Update indexes after execution status change
-      switch(engineRef){
-        case(?engine) {
-          // Update indexes with the new proposal state
-          updateProposalIndexes(proposal.id, oldProposal, proposal, proposal.content);
-        };
-        case(null) {
-          D.trap("Proposal engine not initialized");
-        };
-      };
+      D.print("🏛️  PROPOSAL_EXECUTE: Updating proposal indexes...");
+      // Update indexes with the new proposal state
+      updateProposalIndexes(proposal.id, oldProposal, proposal, proposal.content);
+      D.print("🏛️  PROPOSAL_EXECUTE: ✅ Proposal indexes updated successfully");
+      
+      // Remove execution lock now that execution is complete
+      D.print("🔓 PROPOSAL_EXECUTE: Removing execution lock for proposal " # Nat.toText(proposal.id) # "...");
+      let deleteResult = BTree.delete(executingProposals, Nat.compare, proposal.id);
+      D.print("🔓 PROPOSAL_EXECUTE: ✅ Execution lock removed - deletion result: " # debug_show(deleteResult));
+      
+      D.print("🏛️  PROPOSAL_EXECUTE: ========== PROPOSAL EXECUTION COMPLETE ==========");
+      D.print("🏛️  PROPOSAL_EXECUTE: Final result: " # debug_show(result));
       
       result;
     };
@@ -1667,12 +1540,23 @@ module {
 
     private var engineRef : ?ExtendedProposalEngine.ProposalEngine<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice> = null;
 
-    // Initialize the proposal engine with dynamic duration from config
-    let proposalEngine = do {
+    // Proposal engine will be initialized after function definitions
+    private var proposalEngine : ?ExtendedProposalEngine.ProposalEngine<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice> = null;
+
+    // Helper function to get the proposal engine safely
+    private func getProposalEngine() : ExtendedProposalEngine.ProposalEngine<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice> {
+      switch(proposalEngine) {
+        case(?engine) engine;
+        case(null) D.trap("Proposal engine not initialized");
+      };
+    };
+
+    // Helper function to reinitialize proposal engine with new duration
+    private func reinitializeProposalEngine<system>() {
         // Update proposal duration based on config
         let updatedEngineData = {
             state.proposalEngine with
-            proposalDuration = ?#days(state.config.proposal_duration_days);
+            proposalDuration = ?#nanoseconds(state.config.proposal_duration_days);
         };
         
         let eng = ExtendedProposalEngine.ProposalEngine<system, MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>(
@@ -1683,7 +1567,7 @@ module {
         hashVoteChoice,
       );
       engineRef := ?eng;
-      eng;
+      proposalEngine := ?eng;
     };
 
     ///////////
@@ -1691,6 +1575,15 @@ module {
     //////////
 
     // Translation functions between ExtendedProposalEngine types and Service types
+    private func translateProposalStatusToService(engineStatus: ExtendedProposalEngine.ProposalStatus<MigrationTypes.Current.VoteChoice>) : { #open; #executing; #executed; #failed } {
+      switch(engineStatus) {
+        case(#open) #open;
+        case(#executing(_)) #executing;
+        case(#executed(_)) #executed;
+        case(#failedToExecute(_)) #failed;
+      };
+    };
+
     private func translateProposalToService(engineProposal: ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>) : Service.Proposal {
       {
         id = engineProposal.id;
@@ -1703,6 +1596,7 @@ module {
           case(null) Int.abs(engineProposal.timeStart) + (7 * 24 * 60 * 60 * 1_000_000_000); // Default 7 days
         };
         metadata = engineProposal.content.metadata;
+        status = translateProposalStatusToService(engineProposal.status);
       };
     };
 
@@ -1842,6 +1736,43 @@ module {
       };
       
       state.config.default_snapshot_contract := normalizedAddress;
+      #Ok(());
+    };
+
+    // Admin function to update proposal duration in nanoseconds
+    public func icrc149_update_proposal_duration<system>(_caller: Principal, duration_nanoseconds: Nat) : {#Ok: (); #Err: Text} {
+      if (not BTree.has(state.config.admin_principals, Principal.compare, _caller)) {
+        return #Err("Unauthorized: caller is not an admin");
+      };
+      
+      // Validate duration (must be positive and reasonable)
+      if (duration_nanoseconds == 0) {
+        return #Err("Duration must be positive");
+      };
+      
+      // Check maximum duration (365 days in nanoseconds)
+      let nanoseconds_per_day : Nat = 86_400_000_000_000;
+      let max_duration_nanoseconds : Nat = 365 * nanoseconds_per_day;
+      if (duration_nanoseconds > max_duration_nanoseconds) {
+        return #Err("Duration cannot exceed 365 days");
+      };
+      
+      // Store nanoseconds directly for precision
+      state.config.proposal_duration_days := duration_nanoseconds;
+      
+      // Update the stored proposal engine data for next restart
+      state.proposalEngine := {
+        state.proposalEngine with
+        proposalDuration = ?#nanoseconds(duration_nanoseconds);
+      };
+      
+      // Reinitialize the proposal engine immediately with the new duration
+      reinitializeProposalEngine<system>();
+      
+      let duration_days_display = duration_nanoseconds / nanoseconds_per_day;
+      D.print("📅 ADMIN: Updated proposal duration to " # Nat.toText(duration_nanoseconds) # " nanoseconds (" # Nat.toText(duration_days_display) # " days)");
+      D.print("✅ New duration is now active for all future proposals");
+      
       #Ok(());
     };
 
@@ -2711,7 +2642,7 @@ module {
                     return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
                 };
                 
-                switch (hexStringToBlob(block.stateRoot)) {
+                switch (Utils.hexStringToBlob(block.stateRoot)) {
                     case (#ok(state_root_blob)) {
                         D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
                         
@@ -2766,14 +2697,14 @@ module {
         D.print("🏁 PROPOSAL_CREATE: Contract address: " # snapshot_contract_address);
 
         // Create a dynamic proposal with total supply as the total voting power
-        let result = await* proposalEngine.createProposal<system>(
+        let result = await* getProposalEngine().createProposal<system>(
             caller, 
             content, 
             [], // No initial members - they will be added as they vote
             #dynamic({ totalVotingPower = null })
         );
         
-        D.print("🏁 PROPOSAL_CREATE: proposalEngine.createProposal call completed");
+        D.print("🏁 PROPOSAL_CREATE: getProposalEngine().createProposal call completed");
         
         switch(result) {
             case(#ok(proposal_id)) {
@@ -2789,7 +2720,7 @@ module {
                 ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
                 
                 // Add proposal to indexes for efficient filtering
-                switch(proposalEngine.getProposal(proposal_id)) {
+                switch(getProposalEngine().getProposal(proposal_id)) {
                     case (?proposal) {
                         addProposalToIndexes(proposal_id, proposal, content);
                     };
@@ -2823,7 +2754,7 @@ module {
       
       // Get current proposal state before voting
       D.print("🗳️  VOTE_STEP_1: Getting current proposal state...");
-      let oldProposal = proposalEngine.getProposal(vote_args.proposal_id);
+      let oldProposal = getProposalEngine().getProposal(vote_args.proposal_id);
       D.print("🗳️  VOTE_STEP_1: Retrieved proposal state: " # (switch(oldProposal) { case(?_) "exists"; case(null) "not found"; }));
       
       // Verify SIWE first
@@ -2896,23 +2827,23 @@ module {
 
           // Try to add the member to the proposal (in case it's a real-time proposal)
           D.print("🗳️  VOTE_STEP_6: Adding member to proposal...");
-          let result2 = proposalEngine.addMember(vote_args.proposal_id, member);
+          let result2 = getProposalEngine().addMember(vote_args.proposal_id, member);
           D.print("🗳️  VOTE_STEP_6: Member addition completed");
 
           D.print("result of add member" # debug_show(result2));
 
           // Cast the vote using the Ethereum-derived Principal
           D.print("🗳️  VOTE_STEP_7: Casting vote with choice..." # debug_show(vote_args.choice));
-          D.print("🗳️  VOTE_STEP_7: About to call proposalEngine.vote() with voter principal...");
+          D.print("🗳️  VOTE_STEP_7: About to call getProposalEngine().vote() with voter principal...");
 
-          let result = await* proposalEngine.vote(vote_args.proposal_id, voterPrincipal, vote_args.choice);
-          D.print("🗳️  VOTE_STEP_7: proposalEngine.vote() returned" # debug_show(result));
+          let result = await* getProposalEngine().vote(vote_args.proposal_id, voterPrincipal, vote_args.choice);
+          D.print("🗳️  VOTE_STEP_7: getProposalEngine().vote() returned" # debug_show(result));
           
           switch(result) {
             case(#ok(_)) {
               D.print("🗳️  VOTE_STEP_8: Vote cast successfully, checking for proposal status changes...");
               // Check if proposal status changed after voting
-              switch(proposalEngine.getProposal(vote_args.proposal_id)) {
+              switch(getProposalEngine().getProposal(vote_args.proposal_id)) {
                 case (?newProposal) {
                   D.print("🗳️  VOTE_STEP_8: Updating proposal indexes...");
                   D.print("🗳️  VOTE_STEP_8: Old proposal state: " # debug_show(oldProposal));
@@ -2962,7 +2893,7 @@ module {
       D.print("Tallying votes for proposal ID: " # Nat.toText(proposal_id));
       
       // Get the proposal to check its status
-      let ?proposal = proposalEngine.getProposal(proposal_id) else {
+      let ?proposal = getProposalEngine().getProposal(proposal_id) else {
         return {
           yes = 0;
           no = 0;
@@ -2980,7 +2911,7 @@ module {
         case(#failedToExecute(_)) false;
       };
       
-      let summary = proposalEngine.buildVotingSummary(proposal_id);
+      let summary = getProposalEngine().buildVotingSummary(proposal_id);
       
       D.print("📊 Vote summary - Total voting power: " # Nat.toText(summary.totalVotingPower));
       D.print("📊 Vote summary - Undecided voting power: " # Nat.toText(summary.undecidedVotingPower));
@@ -3030,13 +2961,39 @@ module {
 
 
     private func saveProposalEngineState() {
-      state.proposalEngine := proposalEngine.toStableData();
-      //storageChanged(#v0_1_0(#data(state)));
+      switch(proposalEngine) {
+        case(?engine) {
+          state.proposalEngine := engine.toStableData();
+          //storageChanged(#v0_1_0(#data(state)));
+        };
+        case(null) {
+          D.print("⚠️  SAVE: Proposal engine not initialized, cannot save state");
+        };
+      };
+    };
+
+    // Initialize the proposal engine after all function definitions
+    proposalEngine := do {
+        // Update proposal duration based on config
+        let updatedEngineData = {
+            state.proposalEngine with
+            proposalDuration = ?#nanoseconds(state.config.proposal_duration_days);
+        };
+        
+        let eng = ExtendedProposalEngine.ProposalEngine<system, MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>(
+        updatedEngineData,
+        onProposalExecute,
+        onProposalValidate,
+        equalVoteChoice,
+        hashVoteChoice,
+      );
+      engineRef := ?eng;
+      ?eng;
     };
 
     // Service-compatible helper functions that translate types
     public func icrc149_get_proposal_service(id: Nat) : ?Service.Proposal {
-      switch(proposalEngine.getProposal(id)) {
+      switch(getProposalEngine().getProposal(id)) {
         case (?proposal) {
           ?translateProposalToService(proposal)
         };
@@ -3147,7 +3104,7 @@ module {
       
       // Convert proposal IDs to Service.ProposalWithTally objects (including tally data)
       let proposals = Array.mapFilter<Nat, Service.ProposalWithTally>(paginatedIds, func(id) {
-        switch(proposalEngine.getProposal(id)) {
+        switch(getProposalEngine().getProposal(id)) {
           case (?proposal) {
             let serviceProposal = translateProposalToService(proposal);
             let tally = icrc149_tally_votes(id);
@@ -3159,6 +3116,7 @@ module {
               snapshot = serviceProposal.snapshot;
               deadline = serviceProposal.deadline;
               metadata = serviceProposal.metadata;
+              status = serviceProposal.status;
               tally = tally;
             };
           };
@@ -3207,20 +3165,20 @@ module {
       let offset = switch(start) { case (?s) s; case (null) 0; };
       let count = switch(limit) { case (?l) l; case (null) 10; };
       
-      let result = proposalEngine.getProposals(count, offset);
+      let result = getProposalEngine().getProposals(count, offset);
       Array.map<ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>, Service.Proposal>(result.data, translateProposalToService)
     };    // Raw helper functions (for debugging/advanced use)
     public func icrc149_get_proposal_raw(proposal_id: Nat) : ?ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice> {
-      proposalEngine.getProposal(proposal_id);
+      getProposalEngine().getProposal(proposal_id);
     };
 
     public func icrc149_get_proposals_raw(count: Nat, offset: Nat) : ExtendedProposalEngine.PagedResult<ExtendedProposalEngine.Proposal<MigrationTypes.Current.ProposalContent, MigrationTypes.Current.VoteChoice>> {
-      proposalEngine.getProposals(count, offset);
+      getProposalEngine().getProposals(count, offset);
     };
 
     // Execute proposal
     public func icrc149_execute_proposal(_caller: Principal, proposal_id: Nat) : async {#Ok: Text; #Err: Text} {
-      let ?proposal = proposalEngine.getProposal(proposal_id) else return #Err("Proposal not found");
+      let ?proposal = getProposalEngine().getProposal(proposal_id) else return #Err("Proposal not found");
       let oldProposal = ?proposal;
 
       D.print("Executing proposal " # Nat.toText(proposal_id) # " with status: " # debug_show(proposal.status));
@@ -3229,14 +3187,14 @@ module {
       switch(proposal.status) {
         case(#open) {
           // Try to end the proposal first
-          let end_result = await* proposalEngine.endProposal(proposal_id);
+          let end_result = await* getProposalEngine().endProposal(proposal_id);
           Debug.print("Proposal end result: " # debug_show(end_result));
           switch(end_result) {
             case(#ok(_)) {
               // Proposal ended successfully, update indexes with new status
 
               D.print("Proposal ended successfully, updating indexes...");
-              switch(proposalEngine.getProposal(proposal_id)) {
+              switch(getProposalEngine().getProposal(proposal_id)) {
                 case (?newProposal) {
                   D.print("Executing proposal new status" # Nat.toText(proposal_id) # " with status: " # debug_show(proposal.status));
                   updateProposalIndexes(proposal_id, oldProposal, newProposal, newProposal.content);
@@ -3272,8 +3230,67 @@ module {
       #Ok(());
     };
 
+    // Admin function to manually fix stuck proposals
+    public func icrc149_admin_fix_stuck_proposal(_caller: Principal, proposal_id: Nat) : async {#Ok: Text; #Err: Text} {
+      if (not BTree.has(state.config.admin_principals, Principal.compare, _caller)) {
+        return #Err("Unauthorized: caller is not an admin");
+      };
+      
+      D.print("🔧 ADMIN_FIX: Attempting to fix stuck proposal " # Nat.toText(proposal_id));
+      
+      let ?proposal = getProposalEngine().getProposal(proposal_id) else {
+        return #Err("Proposal not found");
+      };
+      
+      D.print("🔧 ADMIN_FIX: Current proposal status: " # debug_show(proposal.status));
+      
+      // Check if proposal is stuck in executing state
+      switch(proposal.status) {
+        case(#executing(_)) {
+          D.print("🔧 ADMIN_FIX: Proposal is stuck in executing state, attempting to force end...");
+          
+          // Check if transaction was already processed
+          var transactionCompleted = false;
+          for ((seq, processedTx) in BTree.entries(processedTransactions)) {
+            if (processedTx.proposal_id == proposal_id) {
+              D.print("🔧 ADMIN_FIX: Found completed transaction for proposal: " # debug_show(processedTx.status) # ", Hash: " # debug_show(processedTx.transaction_hash));
+              transactionCompleted := true;
+            };
+          };
+          
+          if (transactionCompleted) {
+            D.print("🔧 ADMIN_FIX: Transaction completed, forcing proposal to executed state...");
+            // Try to force end the proposal
+            let endResult = await* getProposalEngine().endProposal(proposal_id);
+            D.print("🔧 ADMIN_FIX: Force-end result: " # debug_show(endResult));
+            
+            // Clean up any execution locks
+            ignore BTree.delete(executingProposals, Nat.compare, proposal_id);
+            D.print("🔧 ADMIN_FIX: Cleaned up execution lock");
+            
+            // Save state
+            saveProposalEngineState();
+            D.print("🔧 ADMIN_FIX: Saved proposal engine state");
+            
+            #Ok("Proposal " # Nat.toText(proposal_id) # " has been fixed - transaction was completed and proposal marked as executed");
+          } else {
+            #Err("Proposal is executing but no completed transaction found. Manual intervention required.");
+          };
+        };
+        case(#executed(_)) {
+          #Ok("Proposal " # Nat.toText(proposal_id) # " is already in executed state - no fix needed");
+        };
+        case(#open) {
+          #Err("Proposal " # Nat.toText(proposal_id) # " is still open, not stuck");
+        };
+        case(#failedToExecute(_)) {
+          #Err("Proposal " # Nat.toText(proposal_id) # " failed to execute, not stuck in executing state");
+        };
+      };
+    };
+
     public func icrc149_health_check() : Text {
-      let proposal_count = proposalEngine.getProposals(1000, 0).totalCount;
+      let proposal_count = getProposalEngine().getProposals(1000, 0).totalCount;
       let snapshot_contracts_count = BTree.size(state.config.snapshot_contracts);
       let execution_contracts_count = BTree.size(state.config.execution_contracts);
       "EvmDaoBridge is healthy - Proposals: " # Nat.toText(proposal_count) # 
@@ -3413,7 +3430,7 @@ module {
         D.print("🔍 USER_VOTE: Converted address " # request.user_address # " to Principal " # Principal.toText(voterPrincipal));
         
         // Look up the vote using the proposal engine's getVote function
-        let vote = switch(proposalEngine.getVote(request.proposal_id, voterPrincipal)) {
+        let vote = switch(getProposalEngine().getVote(request.proposal_id, voterPrincipal)) {
           case (?vote) {
             D.print("✅ USER_VOTE: Found vote for user");
             // Convert the vote choice to service format - vote.choice is already ?TChoice
@@ -3473,6 +3490,536 @@ module {
       };
     };
 
+    // Process next transaction in the queue (one at a time)
+    public func processTransactionQueue() : async {#Ok: Text; #Err: Text} {
+      D.print("🚀 QUEUE_PROCESSOR: Starting queue processing...");
+      
+      // Check if already processing (simple flag check)
+      if (isProcessingQueue) {
+        D.print("🚀 QUEUE_PROCESSOR: Already processing queue, skipping");
+        return #Err("Queue processor already running");
+      };
+      
+      // Set processing flag
+      isProcessingQueue := true;
+      D.print("🚀 QUEUE_PROCESSOR: Set processing flag to true");
+      
+      try {
+        // Get next queued transaction
+        switch (getNextQueuedTransaction()) {
+          case (null) {
+            D.print("🚀 QUEUE_PROCESSOR: No transactions in queue");
+            isProcessingQueue := false;
+            #Err("No transactions in queue");
+          };
+          case (?(sequenceId, queuedTransaction)) {
+            D.print("🚀 QUEUE_PROCESSOR: Found transaction at sequence " # Nat.toText(sequenceId));
+            D.print("🚀 QUEUE_PROCESSOR: Proposal ID: " # Nat.toText(queuedTransaction.proposal_id));
+            D.print("🚀 QUEUE_PROCESSOR: Queued at: " # Int.toText(queuedTransaction.queued_at));
+            
+            // Process the transaction directly (similar to icrc149_send_eth_tx logic)
+            try {
+              // Get the Ethereum address for this subaccount
+              D.print("🚀 QUEUE_PROCESSOR: Getting Ethereum address for subaccount...");
+              let ethAddress = await* getEthereumAddress(queuedTransaction.eth_tx.subaccount);
+              D.print("🚀 QUEUE_PROCESSOR: Ethereum address: " # ethAddress);
+              
+              // Configure RPC service
+              let rpc_service = {
+                rpc_type = switch (queuedTransaction.eth_tx.chain.chain_id) {
+                  case (1) "mainnet";
+                  case (5) "goerli";
+                  case (11155111) "sepolia";
+                  case (_) "custom";
+                };
+                canister_id = state.config.evm_rpc_canister_id;
+                custom_config = null;
+              };
+              
+              // Create derivation path
+              let derivationPath = switch (queuedTransaction.eth_tx.subaccount) {
+                case (?blob) [blob];
+                case (null) [];
+              };
+              
+              // Execute the transaction
+              let result = await* executeEthereumTransaction(
+                queuedTransaction.eth_tx,
+                rpc_service,
+                ethAddress,
+                derivationPath
+              );
+              
+              D.print("🚀 QUEUE_PROCESSOR: Transaction execution result: " # debug_show(result));
+              
+              // Remove from queue regardless of success/failure
+              let removed = removeTransactionFromQueue(sequenceId);
+              D.print("🚀 QUEUE_PROCESSOR: Removed from queue: " # debug_show(removed));
+              
+              // Clear processing flag
+              isProcessingQueue := false;
+              D.print("🚀 QUEUE_PROCESSOR: Cleared processing flag");
+              
+              result;
+            } catch (e) {
+              D.print("🚀 QUEUE_PROCESSOR: Transaction execution failed: " # Error.message(e));
+              // Remove from queue even on failure
+              let removed = removeTransactionFromQueue(sequenceId);
+              D.print("🚀 QUEUE_PROCESSOR: Removed failed transaction from queue: " # debug_show(removed));
+              
+              // Clear processing flag
+              isProcessingQueue := false;
+              #Err("Transaction execution failed: " # Error.message(e));
+            };
+          };
+        };
+      } catch (e) {
+        D.print("🚀 QUEUE_PROCESSOR: Exception during processing: " # Error.message(e));
+        isProcessingQueue := false;
+        #Err("Queue processing failed: " # Error.message(e));
+      };
+    };
+
+    // Get queue status for debugging and monitoring
+    public func getQueueStatus() : {
+      queueSize: Nat;
+      processedSize: Nat;
+      isProcessing: Bool;
+      nextSequenceId: Nat;
+      lastProcessedSequence: Nat;
+      pendingTransactions: Nat;
+      processingTransactions: Nat;
+      completedTransactions: Nat;
+      failedTransactions: Nat;
+      timerRunning: Bool;
+    } {
+      var pending = 0;
+      var processing = 0;
+      var completed = 0;
+      var failed = 0;
+      
+      // Count active queue transactions
+      for ((_, queueEntry) in BTree.entries(transactionQueue)) {
+        switch (queueEntry.status) {
+          case (#pending) pending += 1;
+          case (#processing) processing += 1;
+          case (#completed) completed += 1;
+          case (#failed) failed += 1;
+        };
+      };
+      
+      // Count processed transactions
+      for ((_, queueEntry) in BTree.entries(processedTransactions)) {
+        switch (queueEntry.status) {
+          case (#completed) completed += 1;
+          case (#failed) failed += 1;
+          case (_) {}; // Ignore other statuses in processed
+        };
+      };
+      
+      {
+        queueSize = BTree.size(transactionQueue);
+        processedSize = BTree.size(processedTransactions);
+        isProcessing = isProcessingQueue;
+        nextSequenceId = queueSequence;
+        lastProcessedSequence = lastProcessedSequence;
+        pendingTransactions = pending;
+        processingTransactions = processing;
+        completedTransactions = completed;
+        failedTransactions = failed;
+        timerRunning = switch (queueProcessingTimer) {
+          case (?_) true;
+          case (null) false;
+        };
+      }
+    };
+    
+    // Public function to manually process next queued transaction (for testing/debugging)
+    public func processNextTransaction() : async {#Ok: Text; #Err: Text} {
+      try {
+        let result = await* processNextQueuedTransaction();
+        switch (result) {
+          case (#ok(txHash)) #Ok(txHash);
+          case (#err(errorMsg)) #Err(errorMsg);
+        };
+      } catch (e) {
+        #Err("Failed to process transaction: " # Error.message(e));
+      };
+    };
+    
+    // Get detailed information about queue transactions
+    public func getQueueTransactions(limit: ?Nat) : [{
+      sequenceId: Nat;
+      proposalId: Nat;
+      status: {#pending; #processing; #completed; #failed};
+      processingAttempts: Nat;
+      queuedAt: Int;
+      lastAttemptAt: ?Int;
+      errorMessage: ?Text;
+      transactionHash: ?Text;
+    }] {
+      let maxLimit = switch (limit) {
+        case (?l) l;
+        case (null) 100; // Default limit
+      };
+      
+      var results: [{
+        sequenceId: Nat;
+        proposalId: Nat;
+        status: {#pending; #processing; #completed; #failed};
+        processingAttempts: Nat;
+        queuedAt: Int;
+        lastAttemptAt: ?Int;
+        errorMessage: ?Text;
+        transactionHash: ?Text;
+      }] = [];
+      
+      var count = 0;
+      for ((seqId, queueEntry) in BTree.entries(transactionQueue)) {
+        if (count >= maxLimit) {
+          return results;
+        };
+        
+        let status = switch (queueEntry.status) {
+          case (#pending) #pending;
+          case (#processing) #processing;
+          case (#completed) #completed;
+          case (#failed) #failed;
+        };
+        
+        results := Array.append(results, [{
+          sequenceId = seqId;
+          proposalId = queueEntry.proposal_id;
+          status = status;
+          processingAttempts = queueEntry.processing_attempts;
+          queuedAt = queueEntry.queued_at;
+          lastAttemptAt = queueEntry.last_attempt_at;
+          errorMessage = queueEntry.error_message;
+          transactionHash = queueEntry.transaction_hash;
+        }]);
+        
+        count += 1;
+      };
+      
+      results;
+    };
+    
+    // Get processed transactions (completed/failed)
+    public func getProcessedTransactions(limit: ?Nat) : [{
+      sequenceId: Nat;
+      proposalId: Nat;
+      status: {#completed; #failed};
+      processingAttempts: Nat;
+      queuedAt: Int;
+      lastAttemptAt: ?Int;
+      errorMessage: ?Text;
+      transactionHash: ?Text;
+    }] {
+      let maxLimit = switch (limit) {
+        case (?l) l;
+        case (null) 100; // Default limit
+      };
+      
+      var results: [{
+        sequenceId: Nat;
+        proposalId: Nat;
+        status: {#completed; #failed};
+        processingAttempts: Nat;
+        queuedAt: Int;
+        lastAttemptAt: ?Int;
+        errorMessage: ?Text;
+        transactionHash: ?Text;
+      }] = [];
+      
+      var count = 0;
+      for ((seqId, queueEntry) in BTree.entries(processedTransactions)) {
+        if (count >= maxLimit) {
+          return results;
+        };
+        
+        let status = switch (queueEntry.status) {
+          case (#completed) #completed;
+          case (#failed) #failed;
+          case (_) #failed; // Default fallback, shouldn't happen in processed
+        };
+        
+        results := Array.append(results, [{
+          sequenceId = seqId;
+          proposalId = queueEntry.proposal_id;
+          status = status;
+          processingAttempts = queueEntry.processing_attempts;
+          queuedAt = queueEntry.queued_at;
+          lastAttemptAt = queueEntry.last_attempt_at;
+          errorMessage = queueEntry.error_message;
+          transactionHash = queueEntry.transaction_hash;
+        }]);
+        
+        count += 1;
+      };
+      
+      results;
+    };
+    
+    // Look up a specific transaction by sequence ID (checks both queue and processed)
+    public func getTransactionBySequenceId(sequenceId: Nat) : ?{
+      sequenceId: Nat;
+      proposalId: Nat;
+      status: {#pending; #processing; #completed; #failed};
+      processingAttempts: Nat;
+      queuedAt: Int;
+      lastAttemptAt: ?Int;
+      errorMessage: ?Text;
+      transactionHash: ?Text;
+      location: {#queue; #processed};
+    } {
+      // First check active queue
+      switch (BTree.get(transactionQueue, Nat.compare, sequenceId)) {
+        case (?queueEntry) {
+          let status = switch (queueEntry.status) {
+            case (#pending) #pending;
+            case (#processing) #processing;
+            case (#completed) #completed;
+            case (#failed) #failed;
+          };
+          
+          ?{
+            sequenceId = sequenceId;
+            proposalId = queueEntry.proposal_id;
+            status = status;
+            processingAttempts = queueEntry.processing_attempts;
+            queuedAt = queueEntry.queued_at;
+            lastAttemptAt = queueEntry.last_attempt_at;
+            errorMessage = queueEntry.error_message;
+            transactionHash = queueEntry.transaction_hash;
+            location = #queue;
+          };
+        };
+        case (null) {
+          // Check processed transactions
+          switch (BTree.get(processedTransactions, Nat.compare, sequenceId)) {
+            case (?queueEntry) {
+              let status = switch (queueEntry.status) {
+                case (#completed) #completed;
+                case (#failed) #failed;
+                case (_) #failed; // Default fallback
+              };
+              
+              ?{
+                sequenceId = sequenceId;
+                proposalId = queueEntry.proposal_id;
+                status = status;
+                processingAttempts = queueEntry.processing_attempts;
+                queuedAt = queueEntry.queued_at;
+                lastAttemptAt = queueEntry.last_attempt_at;
+                errorMessage = queueEntry.error_message;
+                transactionHash = queueEntry.transaction_hash;
+                location = #processed;
+              };
+            };
+            case (null) null;
+          };
+        };
+      };
+    };
+    
+    // Look up transactions by proposal ID (checks both queue and processed)
+    public func getTransactionsByProposalId(proposalId: Nat) : [{
+      sequenceId: Nat;
+      proposalId: Nat;
+      status: {#pending; #processing; #completed; #failed};
+      processingAttempts: Nat;
+      queuedAt: Int;
+      lastAttemptAt: ?Int;
+      errorMessage: ?Text;
+      transactionHash: ?Text;
+      location: {#queue; #processed};
+    }] {
+      var results: [{
+        sequenceId: Nat;
+        proposalId: Nat;
+        status: {#pending; #processing; #completed; #failed};
+        processingAttempts: Nat;
+        queuedAt: Int;
+        lastAttemptAt: ?Int;
+        errorMessage: ?Text;
+        transactionHash: ?Text;
+        location: {#queue; #processed};
+      }] = [];
+      
+      // Check active queue
+      for ((seqId, queueEntry) in BTree.entries(transactionQueue)) {
+        if (queueEntry.proposal_id == proposalId) {
+          let status = switch (queueEntry.status) {
+            case (#pending) #pending;
+            case (#processing) #processing;
+            case (#completed) #completed;
+            case (#failed) #failed;
+          };
+          
+          results := Array.append(results, [{
+            sequenceId = seqId;
+            proposalId = queueEntry.proposal_id;
+            status = status;
+            processingAttempts = queueEntry.processing_attempts;
+            queuedAt = queueEntry.queued_at;
+            lastAttemptAt = queueEntry.last_attempt_at;
+            errorMessage = queueEntry.error_message;
+            transactionHash = queueEntry.transaction_hash;
+            location = #queue;
+          }]);
+        };
+      };
+      
+      // Check processed transactions
+      for ((seqId, queueEntry) in BTree.entries(processedTransactions)) {
+        if (queueEntry.proposal_id == proposalId) {
+          let status = switch (queueEntry.status) {
+            case (#completed) #completed;
+            case (#failed) #failed;
+            case (_) #failed; // Default fallback
+          };
+          
+          results := Array.append(results, [{
+            sequenceId = seqId;
+            proposalId = queueEntry.proposal_id;
+            status = status;
+            processingAttempts = queueEntry.processing_attempts;
+            queuedAt = queueEntry.queued_at;
+            lastAttemptAt = queueEntry.last_attempt_at;
+            errorMessage = queueEntry.error_message;
+            transactionHash = queueEntry.transaction_hash;
+            location = #processed;
+          }]);
+        };
+      };
+      
+      results;
+    };
+    
+    // Public function to manually trigger queue processing
+    public func processQueue() : async {#Ok: Text; #Err: Text} {
+      D.print("🔄 MANUAL_QUEUE: Manual queue processing triggered");
+      
+      switch (getNextQueuedTransaction()) {
+        case (null) {
+          D.print("🔄 MANUAL_QUEUE: No pending transactions");
+          #Ok("No pending transactions in queue");
+        };
+        case (?_) {
+          try {
+            let result = await* processNextQueuedTransaction();
+            switch (result) {
+              case (#ok(txHash)) {
+                D.print("🔄 MANUAL_QUEUE: Processing successful: " # txHash);
+                // Schedule next processing if there are more items
+                scheduleNextQueueProcessing<system>();
+                #Ok("Transaction processed successfully: " # txHash);
+              };
+              case (#err(error)) {
+                D.print("🔄 MANUAL_QUEUE: Processing failed: " # error);
+                // Schedule next processing even on failure
+                scheduleNextQueueProcessing<system>();
+                #Err("Transaction processing failed: " # error);
+              };
+            };
+          } catch (e) {
+            let errorMsg = "Manual queue processing exception: " # Error.message(e);
+            D.print("❌ MANUAL_QUEUE: " # errorMsg);
+            // Schedule next processing even on exception
+            scheduleNextQueueProcessing<system>();
+            #Err(errorMsg);
+          };
+        };
+      };
+    };
+    
+    // Initialize queue processing on canister restart
+    // This checks for any pending transactions and starts the timer if needed
+    private func initializeQueueProcessing<system>() : () {
+      D.print("🔄 QUEUE_INIT: Initializing queue processing on canister start...");
+      
+      var pendingCount = 0;
+      var processingCount = 0;
+      
+      // Check for transactions that were left in "processing" state due to restart
+      // Convert them back to "pending" so they can be retried
+      for ((seqId, queueEntry) in BTree.entries(transactionQueue)) {
+        switch (queueEntry.status) {
+          case (#pending) {
+            pendingCount += 1;
+          };
+          case (#processing) {
+            D.print("🔄 QUEUE_INIT: Found transaction stuck in processing state (seq: " # Nat.toText(seqId) # "), resetting to pending");
+            queueEntry.status := #pending;
+            queueEntry.last_attempt_at := null;
+            pendingCount += 1;
+            processingCount += 1;
+          };
+          case (#completed or #failed) {
+            // These are fine, keep them as-is
+          };
+        };
+      };
+      
+      D.print("🔄 QUEUE_INIT: Found " # Nat.toText(pendingCount) # " pending transactions");
+      D.print("🔄 QUEUE_INIT: Reset " # Nat.toText(processingCount) # " stuck processing transactions to pending");
+      D.print("🔄 QUEUE_INIT: Last processed sequence: " # Nat.toText(lastProcessedSequence));
+      
+      if (pendingCount > 0) {
+        D.print("🔄 QUEUE_INIT: Starting queue processing for " # Nat.toText(pendingCount) # " pending transactions");
+        startQueueProcessingTimer<system>();
+      } else {
+        D.print("🔄 QUEUE_INIT: No pending transactions, queue processing not started");
+      };
+    };
+
+    // Initialize queue processing after startup
+    initializeQueueProcessing<system>();
+
+    // Debug function to check queue and processed transactions status
+    public func debug_queue_status() : {
+      queue_size: Nat;
+      processed_size: Nat;
+      last_processed_sequence: Nat;
+      queue_entries: [(Nat, {proposal_id: Nat; status: Text; hash: ?Text})];
+      processed_entries: [(Nat, {proposal_id: Nat; status: Text; hash: ?Text})];
+    } {
+      let queueEntries = Array.map<(Nat, QueuedTransaction), (Nat, {proposal_id: Nat; status: Text; hash: ?Text})>(
+        BTree.toArray(transactionQueue),
+        func((seq, entry)) = (seq, {
+          proposal_id = entry.proposal_id;
+          status = switch(entry.status) {
+            case(#pending) "pending";
+            case(#processing) "processing";
+            case(#completed) "completed";
+            case(#failed) "failed";
+          };
+          hash = entry.transaction_hash;
+        })
+      );
+      
+      let processedEntries = Array.map<(Nat, QueuedTransaction), (Nat, {proposal_id: Nat; status: Text; hash: ?Text})>(
+        BTree.toArray(processedTransactions),
+        func((seq, entry)) = (seq, {
+          proposal_id = entry.proposal_id;
+          status = switch(entry.status) {
+            case(#pending) "pending";
+            case(#processing) "processing";
+            case(#completed) "completed";
+            case(#failed) "failed";
+          };
+          hash = entry.transaction_hash;
+        })
+      );
+      
+      {
+        queue_size = BTree.size(transactionQueue);
+        processed_size = BTree.size(processedTransactions);
+        last_processed_sequence = lastProcessedSequence;
+        queue_entries = queueEntries;
+        processed_entries = processedEntries;
+      };
+    };
 
   };
 

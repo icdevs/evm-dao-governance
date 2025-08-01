@@ -1,4 +1,4 @@
-import { idlFactory as evmDaoBridgeIdl } from './src/declarations/main/main.did.js';
+import { idlFactory as evmDaoBridgeIdl } from '../src/declarations/main/main.did.js';
 import { Actor, HttpAgent } from '@dfinity/agent';
 
 // Test to verify the fixed witness validation using stored canister state

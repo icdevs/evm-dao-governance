@@ -162,6 +162,12 @@ module {
     snapshot: ?ProposalSnapshot;  // Include full snapshot data instead of just ID
     deadline: Nat;
     metadata: ?Text;
+    status: {
+      #open;
+      #executing;
+      #executed;
+      #failed;
+    };
   };
 
   // Enhanced proposal type that includes user vote information
@@ -223,6 +229,12 @@ module {
     snapshot: ?ProposalSnapshot;
     deadline: Nat;
     metadata: ?Text;
+    status: {
+      #open;
+      #executing;
+      #executed;
+      #failed;
+    };
     tally: TallyResult;
   };
 

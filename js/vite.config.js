@@ -1,13 +1,18 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 
 export default defineConfig({
+  root: '.',
   server: {
     port: 3005,
-    open: true
+    open: '/index.html'
   },
   build: {
     target: 'es2020',
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html')
+      },
       external: [],
       output: {
         format: 'es'
@@ -20,7 +25,5 @@ export default defineConfig({
   optimizeDeps: {
     include: ['@dfinity/agent', '@dfinity/candid', '@dfinity/identity', '@dfinity/principal', 'ethers']
   },
-  // Only include the js directory files, exclude test directories
-  root: '.',
-  publicDir: 'public'
+  publicDir: false
 })

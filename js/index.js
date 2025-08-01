@@ -48,10 +48,12 @@ window.updateChainId = updateChainId;
 window.loadProposals = loadProposals;
 window.discoverStorageSlot = discoverStorageSlot;
 window.castVote = castVote;
-window.endVote = endVote;
 window.loadVoteTally = loadVoteTally;
 window.changePage = changePage;
 window.changeProposalsPerPage = changeProposalsPerPage;
+window.onCanisterIdChange = onCanisterIdChange;
+window.refreshBalances = refreshBalances;
+window.copyAddress = copyAddress;
 
 async function initializeApp() {
     try {
@@ -87,6 +89,24 @@ async function initializeApp() {
             }
         } else {
             showStatus('MetaMask not detected. Please install MetaMask to use this interface.', 'error');
+        }
+        
+        // Add event listener for canister ID changes
+        const canisterIdInput = document.getElementById('canisterId');
+        if (canisterIdInput) {
+            canisterIdInput.addEventListener('input', onCanisterIdChange);
+            canisterIdInput.addEventListener('paste', onCanisterIdChange);
+        }
+        
+        // Add event listeners for balance section buttons
+        const refreshBalancesBtn = document.getElementById('refreshBalancesBtn');
+        if (refreshBalancesBtn) {
+            refreshBalancesBtn.addEventListener('click', refreshBalances);
+        }
+        
+        const copyAddressBtn = document.getElementById('copyAddressBtn');
+        if (copyAddressBtn) {
+            copyAddressBtn.addEventListener('click', copyAddress);
         }
         
         updateUI();
@@ -168,6 +188,26 @@ function updateChainId() {
         select.classList.remove('hidden');
         input.value = select.value;
     }
+}
+
+function onCanisterIdChange() {
+    // Clear the existing agent and actor when canister ID changes
+    dfxAgent = null;
+    canisterActor = null;
+    
+    // Clear any existing proposals data since it's no longer valid
+    allProposals = [];
+    totalProposals = 0;
+    currentPage = 1;
+    currentUserVotingData = null;
+    
+    // Clear the proposals container
+    const container = document.getElementById('proposalsContainer');
+    if (container) {
+        container.innerHTML = '<div class="status info">Canister ID changed. Click "Load Proposals" to connect to the new canister.</div>';
+    }
+    
+    showStatus('🔄 Canister ID changed - agent reset. Please load proposals again.', 'info');
 }
 
 async function initializeDfxAgent() {
@@ -402,6 +442,23 @@ async function getUserTokenBalance(contractAddress, userAddress) {
     }
 }
 
+// Helper function to extract status string from Motoko variant object
+function getProposalStatusString(statusObject) {
+    if (typeof statusObject === 'string') {
+        return statusObject; // Already a string
+    }
+    
+    if (typeof statusObject === 'object' && statusObject !== null) {
+        // Handle Motoko variant objects like {open: null}, {executed: null}, etc.
+        const keys = Object.keys(statusObject);
+        if (keys.length > 0) {
+            return keys[0]; // Return the variant key (e.g., 'open', 'executed', 'executing', 'failed')
+        }
+    }
+    
+    return 'unknown'; // Fallback
+}
+
 function renderProposals(proposals, userVotingData) {
     const container = document.getElementById('proposalsContainer');
     
@@ -416,9 +473,29 @@ function renderProposals(proposals, userVotingData) {
         
         const hasVoted = userVotingData.existingVotes.has(proposal.id);
         const userVote = userVotingData.existingVotes.get(proposal.id);
-        const isActive = Number(proposal.deadline) > Date.now() * 1_000_000; // Convert ms to nanoseconds
-        const isPastDeadline = Number(proposal.deadline) <= Date.now() * 1_000_000;
+        // Use BigInt for precise nanosecond comparison
+        const currentTimeNanos = BigInt(Date.now()) * 1_000_000n; // Convert ms to nanoseconds
+        const proposalDeadline = BigInt(proposal.deadline);
+        const isActive = proposalDeadline > currentTimeNanos;
+        const isPastDeadline = proposalDeadline <= currentTimeNanos;
+        
+        // Debug logging for the first proposal to help troubleshoot
+        if (proposal.id === proposals[0].id) {
+            console.log(`🕐 Debug timing for proposal ${proposal.id}:`);
+            console.log(`   Current time (ms): ${Date.now()}`);
+            console.log(`   Current time (nanos): ${currentTimeNanos.toString()}`);
+            console.log(`   Proposal deadline (nanos): ${proposalDeadline.toString()}`);
+            console.log(`   Time difference (nanos): ${(proposalDeadline - currentTimeNanos).toString()}`);
+            console.log(`   Time difference (minutes): ${Number(proposalDeadline - currentTimeNanos) / (60 * 1_000_000_000)}`);
+            console.log(`   Is active: ${isActive}`);
+            console.log(`   Deadline as date: ${new Date(Number(BigInt(proposal.deadline) / 1_000_000n)).toLocaleString()}`);
+            console.log(`   Current time as date: ${new Date(Date.now()).toLocaleString()}`);
+        }
+        
         const userBalance = Number(userVotingData.balance);
+        
+        // Extract status string from Motoko variant object
+        const statusString = getProposalStatusString(proposal.status);
         
         // Determine action type for display
         let actionType = 'Unknown';
@@ -448,8 +525,8 @@ function renderProposals(proposals, userVotingData) {
                 </div>
                 
                 <div class="proposal-details">
-                    <p><strong>Created:</strong> ${new Date(Number(proposal.created_at) / 1_000_000).toLocaleString()}</p>
-                    <p><strong>Deadline:</strong> ${new Date(Number(proposal.deadline) / 1_000_000).toLocaleString()}</p>
+                    <p><strong>Created:</strong> ${new Date(Number(BigInt(proposal.created_at) / 1_000_000n)).toLocaleString()}</p>
+                    <p><strong>Deadline:</strong> ${new Date(Number(BigInt(proposal.deadline) / 1_000_000n)).toLocaleString()}</p>
                     ${proposal.snapshot && proposal.snapshot[0] ? `<p><strong>Snapshot Block:</strong> ${Number(proposal.snapshot[0].block_number)}</p>` : ''}
                     <p><strong>Your Balance:</strong> ${ethers.formatEther(userBalance.toString())} tokens</p>
                     ${hasVoted ? `<p><strong>Your Vote:</strong> ${userVote}</p>` : ''}
@@ -483,7 +560,7 @@ function renderProposals(proposals, userVotingData) {
                         </div>
                         
                         <div class="tally-result">
-                            <strong>Status:</strong> <span class="${proposal.tally.result.includes('in progress') || proposal.tally.result === 'Active' ? 'status-active' : (proposal.tally.result === 'Passed' ? 'status-passed' : 'status-failed')}">${proposal.tally.result}</span>
+                            <strong>Status:</strong> <span class="${statusString === 'open' ? 'status-active' : (statusString === 'executed' ? 'status-passed' : (statusString === 'executing' ? 'status-active' : 'status-failed'))}">${statusString === 'open' ? 'Active' : (statusString === 'executed' ? 'Executed' : (statusString === 'executing' ? 'Executing' : (statusString === 'failed' ? 'Failed' : statusString)))}</span>
                         </div>
                     </div>
                 </div>
@@ -502,11 +579,21 @@ function renderProposals(proposals, userVotingData) {
                     </div>
                 ` : ''}
                 
-                ${isPastDeadline ? `
-                    <div class="vote-buttons">
-                        <button class="btn-warning" onclick="endVote(${proposal.id})">
-                            Execute Proposal
-                        </button>
+                ${statusString === 'executed' ? `
+                    <div class="status success">
+                        ✅ Proposal has been executed
+                    </div>
+                ` : ''}
+                
+                ${statusString === 'executing' ? `
+                    <div class="status info">
+                        ⏳ Proposal is currently being executed
+                    </div>
+                ` : ''}
+                
+                ${statusString === 'failed' ? `
+                    <div class="status error">
+                        ❌ Proposal execution failed
                     </div>
                 ` : ''}
                 
@@ -787,29 +874,6 @@ async function castVote(proposalId, choice) {
     }
 }
 
-async function endVote(proposalId) {
-    try {
-        if (!canisterActor) {
-            await initializeDfxAgent();
-        }
-        
-        showStatus(`🔄 Executing proposal ${proposalId}...`, 'info');
-        
-        const result = await canisterActor.icrc149_execute_proposal(BigInt(proposalId));
-        
-        if ('Ok' in result) {
-            showStatus(`✅ Proposal ${proposalId} executed successfully`, 'success');
-            await loadProposals();
-        } else {
-            throw new Error(`Execution failed: ${result.Err}`);
-        }
-        
-    } catch (error) {
-        console.error('Proposal execution error:', error);
-        showStatus('Failed to execute proposal: ' + error.message, 'error');
-    }
-}
-
 async function generateSIWEProof(proposalId, choice, contractAddress) {
     try {
         const signer = await metamaskProvider.getSigner();
@@ -984,11 +1048,21 @@ async function updateCanisterStorageSlot(chainId, contractAddress, slot) {
     try {
         showStatus('📡 Updating canister configuration...', 'info');
         
+        // Get the current EVM RPC canister ID from governance config
+        const govConfig = await canisterActor.icrc149_governance_config();
+        const evmRpcCanisterId = govConfig.evm_rpc_canister_id;
+        
         const config = {
             contract_address: contractAddress,
+            contract_type: { ERC20: null }, // Add the required contract_type field
             chain: { 
                 chain_id: BigInt(chainId), 
                 network_name: CHAIN_CONFIGS[chainId]?.name || 'Unknown' 
+            },
+            rpc_service: {
+                rpc_type: "custom",
+                canister_id: evmRpcCanisterId, // Use the EVM RPC canister ID from config
+                custom_config: [["url", "http://127.0.0.1:8545"]]
             },
             balance_storage_slot: BigInt(slot),
             enabled: true
@@ -1035,6 +1109,152 @@ function updateUI() {
     }
 }
 
+// DAO Balance Functions
+async function getCanisterEthereumAddress() {
+    try {
+        if (!canisterActor) {
+            await initializeDfxAgent();
+        }
+        
+        // Get the canister's default Ethereum address from the default subaccount
+        // Pass empty array [] instead of null for optional Blob parameter in Candid
+        const result = await canisterActor.icrc149_get_ethereum_address([]);
+        
+        // The icrc149_get_ethereum_address function returns the address directly, not wrapped in Ok/Err
+        return result;
+    } catch (error) {
+        console.error('Failed to get canister Ethereum address:', error);
+        throw error;
+    }
+}
+
+async function checkEthBalance(address, chainId) {
+    try {
+        const chainConfig = CHAIN_CONFIGS[chainId];
+        if (!chainConfig) {
+            throw new Error(`Unknown chain ID: ${chainId}`);
+        }
+        
+        const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+        const balance = await provider.getBalance(address);
+        return ethers.formatEther(balance);
+    } catch (error) {
+        console.error('Failed to check ETH balance:', error);
+        throw error;
+    }
+}
+
+async function checkTokenBalance(address, contractAddress, chainId) {
+    try {
+        if (!contractAddress || contractAddress === '0x...' || contractAddress.length !== 42) {
+            return 'N/A';
+        }
+        
+        const chainConfig = CHAIN_CONFIGS[chainId];
+        if (!chainConfig) {
+            throw new Error(`Unknown chain ID: ${chainId}`);
+        }
+        
+        const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+        
+        // ERC20 ABI for balanceOf function
+        const erc20Abi = [
+            "function balanceOf(address owner) view returns (uint256)",
+            "function decimals() view returns (uint8)",
+            "function symbol() view returns (string)"
+        ];
+        
+        const contract = new ethers.Contract(contractAddress, erc20Abi, provider);
+        const [balance, decimals, symbol] = await Promise.all([
+            contract.balanceOf(address),
+            contract.decimals(),
+            contract.symbol()
+        ]);
+        
+        const formattedBalance = ethers.formatUnits(balance, decimals);
+        return `${formattedBalance} ${symbol}`;
+    } catch (error) {
+        console.error('Failed to check token balance:', error);
+        return 'Error';
+    }
+}
+
+async function refreshBalances() {
+    const loadingSpinner = document.getElementById('balanceLoadingSpinner');
+    const refreshBtn = document.getElementById('refreshBalancesBtn');
+    const canisterAddressSpan = document.getElementById('canisterAddress');
+    const ethBalanceSpan = document.getElementById('ethBalance');
+    const tokenBalanceSpan = document.getElementById('tokenBalance');
+    
+    try {
+        // Show loading state
+        loadingSpinner.classList.remove('hidden');
+        refreshBtn.disabled = true;
+        
+        // Get chain ID and contract address from form
+        const chainIdSelect = document.getElementById('chainIdSelect');
+        const chainIdInput = document.getElementById('chainIdInput');
+        const contractAddressInput = document.getElementById('contractAddress');
+        
+        let chainId;
+        if (chainIdSelect.value === 'custom') {
+            chainId = parseInt(chainIdInput.value);
+        } else {
+            chainId = parseInt(chainIdSelect.value);
+        }
+        
+        const contractAddress = contractAddressInput.value.trim();
+        
+        if (!chainId || isNaN(chainId)) {
+            throw new Error('Please select a valid chain ID');
+        }
+        
+        // Get canister Ethereum address
+        showStatus('🔍 Getting canister Ethereum address...', 'info');
+        const canisterAddress = await getCanisterEthereumAddress();
+        canisterAddressSpan.textContent = canisterAddress;
+        
+        // Check ETH balance
+        showStatus('💰 Checking native ETH balance...', 'info');
+        const ethBalance = await checkEthBalance(canisterAddress, chainId);
+        const chainConfig = CHAIN_CONFIGS[chainId];
+        ethBalanceSpan.textContent = `${ethBalance} ${chainConfig?.symbol || 'ETH'}`;
+        
+        // Check token balance
+        showStatus('🪙 Checking token balance...', 'info');
+        const tokenBalance = await checkTokenBalance(canisterAddress, contractAddress, chainId);
+        tokenBalanceSpan.textContent = tokenBalance;
+        
+        showStatus('✅ Balance information updated successfully', 'success');
+        
+    } catch (error) {
+        console.error('Failed to refresh balances:', error);
+        showStatus(`❌ Failed to refresh balances: ${error.message}`, 'error');
+        
+        // Reset displays on error
+        canisterAddressSpan.textContent = 'Error';
+        ethBalanceSpan.textContent = 'Error';
+        tokenBalanceSpan.textContent = 'Error';
+    } finally {
+        // Hide loading state
+        loadingSpinner.classList.add('hidden');
+        refreshBtn.disabled = false;
+    }
+}
+
+function copyAddress() {
+    const addressSpan = document.getElementById('canisterAddress');
+    const address = addressSpan.textContent;
+    
+    if (address && address !== '-' && address !== 'Error') {
+        navigator.clipboard.writeText(address).then(() => {
+            showStatus('📋 Address copied to clipboard', 'success');
+        }).catch(() => {
+            showStatus('❌ Failed to copy address', 'error');
+        });
+    }
+}
+
 function showStatus(message, type) {
     const container = document.getElementById('statusMessages');
     const statusDiv = document.createElement('div');
@@ -1052,8 +1272,8 @@ function showStatus(message, type) {
         }, 5000);
     }
     
-    // Scroll to show the message
-    statusDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Removed automatic scroll behavior to prevent unwanted scrolling when loading proposals
+    // statusDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 console.log('✅ Real canister interface loaded successfully');

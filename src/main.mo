@@ -13,18 +13,18 @@ import EvmDaoBridge ".";
 import Service "./service";
 
 // ICRC-149 EVM DAO Bridge Canister exposing the full public API contract
-shared (deployer) actor class EvmDaoBridgeCanister<system>(
+ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
     args:?{
         evmdaobridgeArgs: ?EvmDaoBridge.InitArgs;
         ttArgs: ?TT.InitArgList;
     }
 ) = this {
-    let thisPrincipal = Principal.fromActor(this);
+    transient let thisPrincipal = Principal.fromActor(this);
     stable var _owner = deployer.caller;
 
-    let initManager = ClassPlus.ClassPlusInitializationManager(_owner, thisPrincipal, true);
-    let evmdaobridgeInitArgs = do ? { args!.evmdaobridgeArgs! };
-    let ttInitArgs : ?TT.InitArgList = do ? { args!.ttArgs! };
+    transient let initManager = ClassPlus.ClassPlusInitializationManager(_owner, thisPrincipal, true);
+    transient let evmdaobridgeInitArgs = do ? { args!.evmdaobridgeArgs! };
+    transient let ttInitArgs : ?TT.InitArgList = do ? { args!.ttArgs! };
 
     stable var icrc10 = ICRC10.initCollection();
 
@@ -40,7 +40,7 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
 
     stable var tt_migration_state: TT.State = TT.Migration.migration.initialState;
 
-    let tt = TT.Init<system>({
+    transient let tt = TT.Init<system>({
         manager = initManager;
         initialState = tt_migration_state;
         args = ttInitArgs;
@@ -62,7 +62,7 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
     });
 
     stable var localLog_migration_state: Log.State = Log.initialState();
-    let localLog = Log.Init<system>({
+    transient let localLog = Log.Init<system>({
         args = ?{
             min_level = ?#Debug;
             bufferSize = ?5000;
@@ -82,11 +82,11 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
         };
     });
 
-    let _d = localLog().log_debug;
+    transient let _d = localLog().log_debug;
 
     stable var evmdaobridge_migration_state: EvmDaoBridge.State = EvmDaoBridge.initialState();
 
-    let evmdaobridge = EvmDaoBridge.Init<system>({
+    transient let evmdaobridge = EvmDaoBridge.Init<system>({
         manager = initManager;
         initialState = evmdaobridge_migration_state;
         args = evmdaobridgeInitArgs;
@@ -248,16 +248,7 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
       evmdaobridge.icrc149_get_proposal_with_user_vote(proposal_id, user_address);
     };
 
-    // ETH Integration
-    public shared(msg) func icrc149_send_eth_tx(eth_tx: Service.EthTx) : async {#Ok: Text; #Err: Text} {
-      D.print("Sending ETH transaction");
-        await evmdaobridge.icrc149_send_eth_tx(msg.caller, eth_tx);
-    };
 
-    public query func icrc149_get_eth_tx_status(tx_hash: Text) : async Text {
-        D.print("Getting ETH transaction status for hash: " # tx_hash);
-        evmdaobridge.icrc149_get_eth_tx_status(tx_hash);
-    };
 
     // Admin
     public shared(msg) func icrc149_set_controller(new_controller: Principal) : async {#Ok: (); #Err: Text} {
@@ -307,10 +298,34 @@ shared (deployer) actor class EvmDaoBridgeCanister<system>(
         evmdaobridge.icrc149_set_default_snapshot_contract(msg.caller, contract_address);
     };
 
+    // Admin function to update proposal duration in nanoseconds
+    public shared(msg) func icrc149_update_proposal_duration(duration_nanoseconds: Nat) : async {#Ok: (); #Err: Text} {
+        D.print("Admin: Updating proposal duration to " # Nat.toText(duration_nanoseconds) # " nanoseconds");
+        evmdaobridge.icrc149_update_proposal_duration<system>(msg.caller, duration_nanoseconds);
+    };
+
     // Test function for parallel RPC calls
     public shared(msg) func test_parallel_rpc_calls(rpc_canister_id: Principal) : async {#Ok: (Nat, Nat, Nat); #Err: Text} {
         D.print("Test: Starting parallel RPC calls test");
         await evmdaobridge.test_parallel_rpc_calls(msg.caller, rpc_canister_id);
+    };
+
+    // Admin function to manually fix stuck proposals
+    public shared(msg) func icrc149_admin_fix_stuck_proposal(proposal_id: Nat) : async {#Ok: Text; #Err: Text} {
+        D.print("Admin: Attempting to fix stuck proposal " # Nat.toText(proposal_id));
+        await evmdaobridge.icrc149_admin_fix_stuck_proposal(msg.caller, proposal_id);
+    };
+
+    // Debug function to check queue status
+    public query func debug_queue_status() : async {
+      queue_size: Nat;
+      processed_size: Nat;
+      last_processed_sequence: Nat;
+      queue_entries: [(Nat, {proposal_id: Nat; status: Text; hash: ?Text})];
+      processed_entries: [(Nat, {proposal_id: Nat; status: Text; hash: ?Text})];
+    } {
+        D.print("Debug: Getting queue status");
+        evmdaobridge.debug_queue_status();
     };
 
     //------------------- SAMPLE FUNCTION -------------------//

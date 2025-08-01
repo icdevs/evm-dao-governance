@@ -1,308 +1,375 @@
-# Reproducible builds template
+# EVM DAO Bridge - ICRC-149 Implementation
 
-This repository is a template for all canister repositories that want to support reproducible builds.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Motoko](https://img.shields.io/badge/language-Motoko-blue.svg)](https://github.com/dfinity/motoko)
+[![Internet Computer](https://img.shields.io/badge/platform-Internet%20Computer-red.svg)](https://internetcomputer.org/)
 
-The setup ensures that the same source code always generates the same Wasm module, with a consistent module hash.
-This allows users to verify the canisters that they interact with.
-To do so, the user clones the repo, runs the reproducible build process and compares the resulting Wasm module hash
-against the module hash of the deployed canister which is always publicly visible. 
+A comprehensive Motoko implementation of the ICRC-149 Ethereum DAO Bridge standard for the Internet Computer, enabling cryptographic proofs of Ethereum token-holder balances for IC-side governance voting.
 
-The repository is designed for a single canister per repository.
+## 🌟 Overview
 
-## How It Works
+This project bridges Ethereum-based DAO governance with the Internet Computer ecosystem. It allows Ethereum token holders to participate in governance decisions on the IC by providing cryptographic proofs of their token balances at specific block heights, without needing to transfer tokens to the IC.
 
-We use docker to guarantee a consistent build environment.
-This allows to reproduce the exact same Wasm module even on different machine architectures.
+### Key Features
 
-The repository is used by three different roles in the following ways:
+- **🔗 Multi-Contract Governance**: Support for multiple Ethereum contracts (ERC-20, ERC-721) within a single DAO
+- **📊 Cryptographic Proof Voting**: Vote using Merkle proofs of Ethereum token balances
+- **🔐 SIWE Authentication**: Sign-In With Ethereum (EIP-4361) for secure identity binding  
+- **🏛️ Proposal Management**: Create, vote on, and execute governance proposals
+- **⚡ ChainFusion Ready**: Built for IC's native Ethereum integration
+- **🛡️ Admin Controls**: Configurable contract approvals and method permissions
+- **📈 Vote Tallying**: Real-time vote counting with quorum tracking
+- **🔄 Migration Support**: Version-safe state upgrades with class-plus pattern
 
-* Developer: uses this repo as a template for the canister repo, then develops the canister as usual.
+## 🏗️ Architecture
 
-* Deployer: runs the reproducible build in the canister repo, then deploys the resulting Wasm module.
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Frontend JS   │    │  IC Canister     │    │   Ethereum      │
+│                 │    │  (Motoko)        │    │   Network       │
+├─────────────────┤    ├──────────────────┤    ├─────────────────┤
+│ • MetaMask      │◄──►│ • ICRC-149 API   │◄──►│ • ERC-20/721    │
+│ • SIWE Signing  │    │ • Proof Verify   │    │ • State Proofs  │
+│ • Merkle Proof  │    │ • Vote Tallying  │    │ • Block Headers │
+│ • Balance Check │    │ • Proposal Mgmt  │    │ • RPC Services  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
 
-* Verifier: runs the reproducible build in the canister repo, then compares the resulting module hash against the deployed canister.
+## 🚀 Quick Start
 
-The repository is structured to make verification as easy possible.
-For example:
+### Prerequisites
 
-* have minimal requirements (only docker)
-* be easy to use (run a single command)
-* be fast
+- [DFX](https://internetcomputer.org/docs/current/developer-docs/setup/install/) 0.15.0+
+- [Mops](https://mops.one/) package manager
+- [Node.js](https://nodejs.org/) 18+
+- [Vessel](https://github.com/dfinity/vessel) (alternative package manager)
 
-## Prerequisites
+### Installation
 
-### Docker
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/icdevs/evm-dao-governance.git
+   cd evm-dao-governance
+   ```
 
-The verifier and deployer need `docker` installed and running.
-The developer does not necessarily need `docker`.
+2. **Install dependencies**
+   ```bash
+   # Install Motoko dependencies
+   mops install
+   
+   # Install Node.js dependencies for frontend
+   npm install
+   ```
 
-On Mac, it is recommended to install `colima` from https://github.com/abiosoft/colima.
-When using `colima` it is ok to use value `host` in the `--arch`.
-This is also the default so the `--arch` option can be omitted.
+3. **Start local development**
+   ```bash
+   # Start local IC replica
+   dfx start --background
+   
+   # Deploy the canister
+   dfx deploy
+   ```
 
-### dfx
+### Basic Usage
 
-The deployer and developer need `dfx`, the verifier does _not_.
-The deployer uses `dfx` for its deployment commands, not for building.
-The developer uses `dfx` normally as in the usual development cycle.
+```typescript
+// Deploy with initial configuration
+const initArgs = {
+  evmdaobridgeArgs: {
+    snapshot_contracts: [{
+      contract_address: "0x1234567890123456789012345678901234567890",
+      chain: { chain_id: 1, network_name: "mainnet" },
+      rpc_service: { rpc_type: "mainnet", canister_id: Principal.fromText("...") },
+      balance_storage_slot: 1,
+      contract_type: { ERC20: null },
+      enabled: true
+    }],
+    execution_contracts: [],
+    approved_icp_methods: [],
+    admin_principals: [Principal.fromText("...")]
+  }
+};
 
-### Non-requirements
+// Create a proposal
+const proposal = await canister.icrc149_create_proposal({
+  action: { Motion: "Increase protocol rewards by 10%" },
+  metadata: "Community proposal for reward adjustment",
+  snapshot_contract: "0x1234567890123456789012345678901234567890"
+});
 
-Notably, the verifier does _not_ need dfx, moc or mops installed.
-Everything needed is contained in the docker image.
-Similarly, the deployer does not need moc or mops.
+// Vote with proof
+const voteResult = await canister.icrc149_vote_proposal({
+  proposal_id: 1,
+  voter: "0xabcdef...",
+  choice: { Yes: null },
+  siwe: { message: "...", signature: "..." },
+  witness: { address: "0x...", proof: [...], leaf: "0x...", root: "0x..." }
+});
+```
 
-## Usage by verifier
+## 🔧 Development
 
-Clone the canister repo:
+### Building
 
 ```bash
-git clone git@github.com:research-ag/motoko-build-template.git
-cd motoko-build-template
+# Build the canister
+./build.sh
+
+# Or use dfx
+dfx build
+
+# Build with compression
+compress=yes ./build.sh
 ```
 
-In practice, replace `motoko-build-template` with the actual canister repo (which is built on the template).
+### Testing
 
-### Fast verification
+```bash
+# Run Motoko tests
+dfx test
 
-```
-docker-compose run --rm wasm
-```
+# Run integration tests with Ethereum simulation
+npm run test:integration:anvil
 
-The fast verification pulls a base docker image from a registry and then builds a project-specific Docker image on top of it.
-
-The output when run in the main branch of this repo is
-```
-79b15176dc613860f35867828f40e7d6db884c25a5cfd0004f49c3b4b0b3fd5c  out/out_Linux_x86_64.wasm
-```
-This is the hash that needs to be compared against the module hash of the deployed canister.
-
-The base docker image is optimized for size and is 76 MB large.
-
-Fast verification from scratch, i.e. including downloading the base image, takes less than 10 seconds when run on this repo
-(with an empty actor).
-
-### Compare module hash
-
-The module hash of a deployed canister can be obtained by dfx with:
-
-```
-dfx canister --ic info <canister id>
+# Run specific test suites
+npm run test:witness
+npm run test:snapshot
 ```
 
-or can be seen on the dashboard https://dashboard.internetcomputer.org/canister/<canister id>.
+### Local Ethereum Development
 
-### Re-verification
+```bash
+# Start local Ethereum node (Anvil)
+npm run anvil
 
-If any verification has been run before and the source code has been modified since then,
-for example by checking out a new commit, then:
+# Deploy test contracts
+npm run deploy:anvil
 
-```
-docker-compose run --rm --build wasm
-```
-
-As a rule, each time the source code, the did file (did/service.did) or the dependencies (mops.toml) get modified
-we have to add the `--build` option to the next run.
-
-### Full verification
-
-```
-docker-compose build base
-docker-compose run --rm --build wasm
+# Run tests against local network
+npm run test:anvil
 ```
 
-Full verification builds the base image locally so that we are not trusting the registry.
-The above command sequence works in all cases - it does not matter if fast verification has been run before or not.
+## 📖 API Reference
 
-Full verification from scratch takes less than 20 seconds when run on this repo
-(with an empty actor).
+### Core ICRC-149 Functions
 
-### Fast verification again
+#### Governance Configuration
+- `icrc149_governance_config()` - Get complete governance setup
+- `icrc149_get_snapshot_contracts()` - List approved snapshot contracts
+- `icrc149_get_execution_contracts()` - List approved execution contracts
+- `icrc149_get_approved_icp_methods()` - List approved ICP methods
 
-If after full verification we want to try fast verification again then:
+#### Admin Functions (Admin Only)
+- `icrc149_update_snapshot_contract_config(address, config)` - Manage snapshot contracts
+- `icrc149_update_execution_contract_config(address, config)` - Manage execution contracts
+- `icrc149_update_icp_method_config(canister, method, config)` - Manage ICP method permissions
+- `icrc149_update_admin_principal(principal, is_admin)` - Manage admin access
 
-```
-docker-compose pull base
-docker-compose run --rm --build wasm
-```
+#### Proposal Management
+- `icrc149_create_proposal(proposal_args)` - Create new governance proposal
+- `icrc149_get_proposals(prev, take, filters)` - Query proposals with pagination
+- `icrc149_vote_proposal(vote_args)` - Submit vote with cryptographic proof
+- `icrc149_execute_proposal(proposal_id)` - Execute approved proposals
 
-This pulls the base image from the registry.
+#### Authentication & Verification
+- `icrc149_verify_siwe(siwe_proof)` - Verify Sign-In With Ethereum message
+- `icrc149_verify_witness(witness, proposal_id)` - Verify Merkle proof against stored state
+- `icrc149_proposal_snapshot(proposal_id)` - Get snapshot data for specific proposal
 
-## Usage by deployer
+### Frontend Integration
 
-Clone the repo and run any verification like the verifier.
-The generated Wasm module is available in the file `out/out_Linux_x86_64.wasm`.
+The project includes a comprehensive JavaScript interface:
 
-### First deployment
+```html
+<!-- Include the voting interface -->
+<script src="./icrc149-voting-interface.js"></script>
 
-Create and install the canister with:
+<script>
+// Initialize with canister details
+const voting = new ICRC149VotingInterface({
+  canisterId: "rdmx6-jaaaa-aaaaa-aaadq-cai",
+  host: "http://localhost:4943"
+});
 
-```
-dfx canister --ic create empty
-dfx canister --ic install empty --wasm out/out_Linux_x86_64.wasm
-```
-
-Here, `empty` is a canister alias defined in `dfx.json` of the template repo.
-In practice, it has to be replaced with the canister alias of the real repo. 
-
-### Reinstall
-
-```
-dfx canister --ic install empty --wasm out/out_Linux_x86_64.wasm --mode reinstall
-```
-
-### Upgrade
-
-```
-dfx canister --ic install empty --wasm out/out_Linux_x86_64.wasm --mode upgrade -y
-```
-
-Note that checking backwards compatibility of the canister's public API or the canister's stable variables is not possible.
-Normally, dfx offers such a check but it can only work if the old and new canister versions were both built with dfx.
-This is not the case because we use the reproducible build process. 
-Hence, we supress the backwards compatibility check with the `-y` option.
-
-## Usage by developer
-
-* Create a fresh canister repository using `motoko-build-template` as the template.
-* Develop with the normal development cycle:
-  * Add and change the canister source code
-  * Use mops.toml as usual
-  * Use dfx to build, test and deploy locally
-
-The top-level actor code should be in `src/main.mo`.
-
-A `mops.lock` file is not needed.
-
-Note that mops.toml needs a non-empty `[dependencies]` section, otherwise mops-cli will fail. 
-
-### Public did file
-
-For a public service canister it is recommended to embed a hand-crafted `did` file into the Wasm module instead of the auto-generated one.
-The hand-crafted file can be better structured, more verbose and have better type names.  
-
-Place the `did` file to be embedded into the Wasm module in `did/service.did`.
-
-### Moc arguments
-
-Arguments to `moc` such as specifiying the gc strategy (e.g. `--compacting-gc`, etc.) have to be placed in the `MOC_GC_FLAGS` variable in `build.sh`.
-
-### Enable compression
-
-Large Wasm modules need to be compressed before they can be installed.
-To enable compression of the Wasm module change the line 
-
-```
-compress : no
-```
-in `docker-compose.yml` to
-```
-compress : yes
-```
-This will affect the Wasm module hash.
-
-### Choose initial toolchain
-
-When creating a fresh canister repository 
-from `motoko-build-template`
-then it only has the `main` branch.
-This branch is set up for the latest available `moc` version and 
-an `ic-wasm` version that was available at the time when the `moc` version was released.
-
-To start with an older `moc` version we have to clone `motoko-build-template` the repo instead of using it as a template.
-Then we can checkout older tags and continue from there.
-Tags are in the form `moc-x.y.z`.
-
-### Upgrade toolchain
-
-Suppose we have an active canister repo and want to upgrade to a newer `moc` version.
-Then we go to the branch of `motoko-build-template` that we want to upgrade to (usually `main`).
-We open the file `docker-compose.yml` and copy the top section into our `docker-compose.yml`.
-The top section looks for example like this:
-
-```
-x-base-image:
-  versions:
-    moc: &moc 0.14.3 
-    ic-wasm: &ic_wasm 0.9.3
-    mops-cli: &mops-cli 0.2.0
-  name: &base_name "ghcr.io/research-ag/motoko-build:moc-0.14.3"
+// Create and submit vote
+const result = await voting.createAndSubmitVote(
+  proposalId,
+  voteChoice,
+  contractAddress,
+  userAddress
+);
+</script>
 ```
 
-### Custom toolchain
+## 🔐 Security Model
 
-If needed then we can choose any custom combination of toolchain versions.
-In this case, we edit the top section in our `docker-compose.yml` for example like this:
+### Storage Slot Validation
+The `balance_storage_slot` field in `SnapshotContractConfig` is critical for security:
+
+```motoko
+// Example: Most ERC-20 tokens store balances at slot 1
+let config : SnapshotContractConfig = {
+  contract_address = "0x...";
+  balance_storage_slot = 1; // Keccak256(address || 1) for most ERC-20s
+  // ... other fields
+};
+```
+
+### Access Control
+- **Admin Principals**: Only configured admins can modify governance settings
+- **Proposal Creation**: Open to all users (can be restricted via governance)
+- **Voting**: Requires valid SIWE signature + Merkle proof of token balance
+- **Execution**: Automatic when proposals meet threshold and deadline
+
+### Cryptographic Verification
+- **SIWE Messages**: EIP-4361 compliant signature verification
+- **Merkle Proofs**: Ethereum state trie proof validation
+- **Block Finality**: Uses finalized block headers for snapshot security
+
+## 🛠️ Configuration
+
+### Environment Variables
+
+```bash
+# Development
+export DFX_NETWORK=local
+export DFX_VERSION=0.15.0
+
+# Production
+export DFX_NETWORK=ic
+export CANISTER_ID=your-canister-id
+```
+
+### Governance Settings
+
+```motoko
+// Configure in initialization args
+let governance_config = {
+  proposal_duration_nanoseconds = 345_600_000_000_000; // 4 days
+  voting_threshold = #percent({ percent = 50; quorum = ?25 });
+  default_snapshot_contract = ?"0x...";
+  evm_rpc_canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai");
+};
+```
+
+## 🧪 Testing Strategy
+
+### Unit Tests
+- **Motoko Tests**: Core logic validation (`test/*.test.mo`)
+- **JavaScript Tests**: Frontend integration (`js/*.test.ts`)
+
+### Integration Tests
+- **Ethereum Simulation**: Using Anvil local network
+- **End-to-End**: Full voting workflow with MetaMask
+- **Proof Verification**: Merkle proof generation and validation
+
+### Security Testing
+- **Access Control**: Admin function restrictions
+- **Proof Validation**: Invalid proof rejection
+- **Replay Protection**: SIWE nonce validation
+
+## 📁 Project Structure
 
 ```
-x-base-image:
-  versions:
-    moc: &moc <some version>
-    ic-wasm: &ic_wasm <some version>
-    mops-cli: &mops-cli <some version>
-  name: &base_name "local/base-image"
+├── src/                          # Motoko source code
+│   ├── lib.mo                   # Main ICRC-149 implementation
+│   ├── main.mo                  # Canister actor (example)
+│   ├── service.mo               # Type definitions
+│   ├── WitnessValidator.mo      # Merkle proof verification
+│   ├── EVMRPCService.mo         # EVM RPC integration
+│   └── migrations/              # Version migration support
+├── js/                          # Frontend JavaScript
+│   ├── icrc149-voting-interface.js  # Main voting interface
+│   ├── metamask-balance-proof.ts    # Proof generation
+│   └── dao-voting-interface.html    # Demo interface
+├── test/                        # Test files
+├── scripts/                     # Deployment scripts
+├── did/                         # Candid interface files
+└── docs/                        # Documentation
 ```
 
-We should also edit the `README` and tell the verifier that fast verification is not available for this repo.
-The verifier has to build the base image locally.
+## 🤝 Contributing
 
-### Advanced modifications
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-Advanced users can modify `Dockerfile`, `Dockerfile.base`, `docker-compose.yml` and `build.sh` to their liking.
-For example, `build.sh` always builds the canister from `src/main.mo`.
-This can be changed inside the build script. 
+### Development Workflow
 
-## Building natively
+1. **Fork** the repository
+2. **Create** a feature branch
+3. **Make** your changes with tests
+4. **Run** the test suite
+5. **Submit** a pull request
 
-We can also build the Wasm module natively by running `./build.sh` directly on our host system.
-In this case, docker is not used.
+### Code Standards
 
-We need to have `moc`, `ic-wasm` and `mops-cli` installed on our system to do this.
-`dfx` is not required.
-Note that the build script will use the `moc` and `ic-wasm` versions that are in the path,
-not the ones defined in the `[toolchain]` section in `mops.toml`.
+- **Motoko**: Follow official style guidelines
+- **TypeScript**: Use strict mode with proper typing
+- **Testing**: Maintain >80% test coverage
+- **Documentation**: Update docs for API changes
 
-The resulting Wasm module hash will depend on our machine architecture and on the `moc` and `ic-wasm` versions in the path. 
-If we are on linux and have everything configured correctly we may be able to get the reproducible module hash like this (without docker).
+## 📚 Resources
 
-It is recommended that the developer at least tries the `./build.sh` script natively to double-check that everything compiles successfully.
+### Standards & Specifications
+- [ICRC-149 Specification](icrc149.md) - Complete standard definition
+- [ICRC-10](https://github.com/dfinity/ICRC-1/tree/main/standards/ICRC-10) - Base standard support
+- [EIP-4361 SIWE](https://eips.ethereum.org/EIPS/eip-4361) - Sign-In With Ethereum
 
-## Base images
+### Documentation
+- [API Documentation](ICRC149_README.md) - Detailed API reference
+- [Integration Guide](js/METAMASK_INTEGRATION.md) - Frontend integration
+- [Security Analysis](js/storage-slot-security-analysis.js) - Security considerations
 
-The following base images are available in the registry at `ghcr.io/research-ag/motoko-build:<tag>`:
+### Examples
+- [Simple Voting Interface](js/simple-voting-interface.html) - Basic voting demo
+- [DAO Voting Interface](js/dao-voting-interface.html) - Full-featured interface
+- [MetaMask Examples](js/metamask-examples.ts) - Integration examples
 
-|tag|moc|ic-wasm|
-|---|---|---|
-|0.13.3|0.13.3|0.9.0|
-|0.13.4|0.13.4|0.9.1|
-|0.13.5|0.13.5|0.9.3|
-|0.13.6|0.13.6|0.9.3|
-|0.13.7|0.13.7|0.9.3|
-|0.14.0|0.14.0|0.9.3|
-|0.14.1|0.14.1|0.9.3|
-|0.14.2|0.14.2|0.9.3|
-|0.14.3|0.14.3|0.9.3|
+## 📋 Roadmap
 
-## Test vectors
+### Current Status ✅
+- [x] Core ICRC-149 implementation
+- [x] Multi-contract governance support
+- [x] SIWE authentication framework
+- [x] Vote tallying and proposal management
+- [x] Frontend JavaScript integration
+- [x] Test suite with Ethereum simulation
 
-The following Wasm module hashes are obtained from the empty canister in this template repo.
+### In Progress 🚧
+- [ ] Real Merkle proof verification
+- [ ] ChainFusion EVM RPC integration
+- [ ] Enhanced access controls
+- [ ] Production security hardening
 
-|branch|module hash linux|module hash mac M1|
-|---|---|---|
-|moc-0.12.0|9da2f91a4a9cb95796d2b738c63e7e08380f2edc816db6748c91fc35695fe68f|2dfaa3c6ea7bc3c5de359b453fa0f8eff353fce958f93f5cf29bcf9f3a7a9b71|
-|moc-0.12.1|471f2bc87d184015fc8bac16a4498ead5d179aaa2a3795f61ed6930dca1d832d|7aead023e5ae47038526780c26ea02b31b90499c1a56326663fa896d5e4eabc7|
-|moc-0.13.0|19c0da72160081fa3db9001af4c35b0767c3868258c36f33b81aee6490e3d7bd|cef0a797b45efa3dfd215a7377feb237d034eb68cbda7fcf215ed4ef98dd4538|
-|moc-0.13.1|177fc526f183fb7e9865c4b18fb6a138170e7ef9f71bec19a99294dc234e4ac0|aea582bbaa9506f569c3efcc63a72b430c2227da6adeca1a2907c7c57b4c9f7a|
-|moc-0.13.2|b3bd66219746c04502070ff81cabe45d6f6c425963da98d9e4510a6cb037892b|89fc3271c8019dbcc590abc04ff9cbb58202714385a1bd2116bd67c836828267|
-|moc-0.13.3|6c17cb5f5f5bb8f2d09452632b76dbf3be0fd76047d0b6f87f6460c7f88812d6|6ee64b25649168acd4adb6f790dcd949e44270703636677fce1a2997d90994f0|
-|moc-0.13.4|4838b9b9fe14b71e816ad83aef9f2ff9b07fd0459949622e08f3a3908958148a|4838b9b9fe14b71e816ad83aef9f2ff9b07fd0459949622e08f3a3908958148a|
-|moc-0.13.5|530ff303b84308e6a447a832922c9a8fc9acaf4cb2fe6aa5296efc578e4a4bc4|530ff303b84308e6a447a832922c9a8fc9acaf4cb2fe6aa5296efc578e4a4bc4|
-|moc-0.13.6|33c7cc22a07d063de2e72114768490365f48edaec9cfc44ee52152fe5e484bc6|33c7cc22a07d063de2e72114768490365f48edaec9cfc44ee52152fe5e484bc6|
-|moc-0.13.7|6d9e15e286fee479f51eeb31f69c8d41c00701b05d797ed16d61ce719f5b9b24|6d9e15e286fee479f51eeb31f69c8d41c00701b05d797ed16d61ce719f5b9b24|
-|moc-0.14.0|1340745f595db5923b6819cb8223880ecb9e7d05b811aec01c46b3c4050a6c77|1340745f595db5923b6819cb8223880ecb9e7d05b811aec01c46b3c4050a6c77|
-|moc-0.14.1|31c9552d1f5c97d211579e71e20e34b0454692c1c80ecc352e7f361423c3024a|31c9552d1f5c97d211579e71e20e34b0454692c1c80ecc352e7f361423c3024a|
-|moc-0.14.2|beee32d5e9a8afaf5152ea1321bf9c291698ec3152abe11f75de31e9ba448cad|beee32d5e9a8afaf5152ea1321bf9c291698ec3152abe11f75de31e9ba448cad|
-|moc-0.14.3|79b15176dc613860f35867828f40e7d6db884c25a5cfd0004f49c3b4b0b3fd5c|79b15176dc613860f35867828f40e7d6db884c25a5cfd0004f49c3b4b0b3fd5c|
+### Future Plans 🔮
+- [ ] Mobile wallet support
+- [ ] Cross-chain governance (Polygon, BSC)
+- [ ] Advanced voting strategies
+- [ ] Governance analytics dashboard
 
-We notice that since moc 0.13.4 the hashes for Linux and Mac M1 are identical. 
+## ⚠️ Disclaimer
 
+**This is a reference implementation for development and testing purposes.**
+
+For production deployment, ensure you implement:
+- Real cryptographic verification of SIWE signatures
+- Proper Merkle proof validation against Ethereum state
+- Storage slot validation for security
+- Comprehensive access controls
+- Integration with IC's ChainFusion for Ethereum interaction
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [ICDevs](https://icdevs.org/) - Funding and development support
+- [DFINITY Foundation](https://dfinity.org/) - Internet Computer platform
+- [Motoko Community](https://github.com/dfinity/motoko) - Language and ecosystem
+- [Ethereum Community](https://ethereum.org/) - Standards and tooling
+
+---
+
+**Built with ❤️ for the Internet Computer ecosystem**
+
+For questions, support, or collaboration opportunities, please reach out through [GitHub Issues](https://github.com/icdevs/evm-dao-governance/issues) or the [IC Developer Forum](https://forum.dfinity.org/).

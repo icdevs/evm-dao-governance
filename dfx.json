@@ -8,6 +8,16 @@
      "evm_rpc": {
       "id": "7hfb6-caaaa-aaaar-qadga-cai",
       "type": "pull"
+    },
+    "frontend": {
+      
+      "source": [
+        "js/dist"
+      ],
+      "type": "assets",
+      "declarations": {
+        "output": "js/declarations"
+      }
     }
 
   },

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICRC149 DAO Voting Interface - Real Canister</title>
+    <title>EthDAOs</title>
     <style>
         * {
             box-sizing: border-box;
@@ -471,6 +471,82 @@
                 min-width: 35px;
             }
         }
+        
+        /* Balance Section Styles */
+        .balance-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .balance-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .balance-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        
+        .balance-item label {
+            font-weight: 600;
+            color: #495057;
+            min-width: 150px;
+        }
+        
+        .address-display {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #667eea;
+            max-width: 200px;
+            word-break: break-all;
+            margin-right: 10px;
+        }
+        
+        .balance-display {
+            font-weight: 700;
+            color: #28a745;
+            font-size: 1.1em;
+        }
+        
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 0.8em;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-small:hover {
+            background: #5a67d8;
+        }
+        
+        #refreshBalancesBtn {
+            margin-top: 15px;
+            padding: 8px 16px;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .balance-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+            
+            .address-display {
+                max-width: 100%;
+                margin-right: 0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -495,7 +571,7 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="canisterId">DAO Canister ID</label>
-                        <input type="text" id="canisterId" placeholder="uxrrr-q7777-77774-qaaaq-cai" value="uxrrr-q7777-77774-qaaaq-cai" maxlength="64">
+                        <input type="text" id="canisterId" placeholder="u6s2n-gx777-77774-qaaba-cai" value="u6s2n-gx777-77774-qaaba-cai" maxlength="64" oninput="onCanisterIdChange()">
                     </div>
                     <div class="form-group">
                         <label for="environment">Environment</label>
@@ -543,7 +619,31 @@
                 </div>
             </div>
             
-            <!-- Proposals Section -->
+            <!-- DAO Balance Section -->
+            <div class="section">
+                <h2>💰 DAO Canister Balance</h2>
+                <div id="balanceContainer">
+                    <div class="balance-info">
+                        <div class="balance-item">
+                            <label>Canister Ethereum Address:</label>
+                            <span id="canisterAddress" class="address-display">-</span>
+                            <button id="copyAddressBtn" class="btn-small" title="Copy address">📋</button>
+                        </div>
+                        <div class="balance-item">
+                            <label>Native ETH Balance:</label>
+                            <span id="ethBalance" class="balance-display">-</span>
+                        </div>
+                        <div class="balance-item">
+                            <label>Token Balance:</label>
+                            <span id="tokenBalance" class="balance-display">-</span>
+                        </div>
+                        <button id="refreshBalancesBtn" class="btn-small">
+                            <span class="loading hidden" id="balanceLoadingSpinner"></span>
+                            🔄 Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>            <!-- Proposals Section -->
             <div class="section">
                 <h2>📋 Proposals</h2>
                 <div id="proposalsContainer">
@@ -558,6 +658,6 @@
         </div>
     </div>
 
-    <script type="module" src="./real-canister-interface.js"></script>
+    <script type="module" src="./index.js"></script>
 </body>
 </html>

@@ -7,12 +7,19 @@ set -e
 
 # Configuration
 YOUR_METAMASK_ADDRESS="0x4A7C969110f7358bF334b49A2FF1a2585ac372B8"
+# Additional addresses to fund with tokens
+ADDITIONAL_ADDRESSES=(
+    "0x148311C647Ec8a584D896c04f6492b5D9Cb3a9B0"
+    "0x36311a95623ddf14De0c7C07250de259E118Cc2e"
+    "0x2BBd20672EAE1dE51fA49088b7bc1D421b7b3FEC"
+)
 ANVIL_DEPLOYER_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"  # First Anvil account
 INITIAL_SUPPLY="1000000000000000000000000"  # 1M tokens (18 decimals)
-TRANSFER_AMOUNT="100000000000000000000"     # 100 tokens to your address
+TRANSFER_AMOUNT="100000000000000000000"     # 100 tokens to each address
 
-echo "🏗️  Setting up governance token for your MetaMask address..."
-echo "📍 Your MetaMask address: $YOUR_METAMASK_ADDRESS"
+echo "🏗️  Setting up governance token for multiple addresses..."
+echo "📍 Primary MetaMask address: $YOUR_METAMASK_ADDRESS"
+echo "📍 Additional addresses: ${ADDITIONAL_ADDRESSES[*]}"
 
 # Check if Anvil is running
 if ! curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' http://127.0.0.1:8545 > /dev/null; then
@@ -23,13 +30,14 @@ fi
 
 echo "✅ Anvil is running"
 
-# Check if we have the sample tokens directory
-if [ ! -d "sample-tokens" ]; then
+# Check if we have the sample tokens directory (look in parent directory since script is in scripts/)
+if [ ! -d "../sample-tokens" ]; then
     echo "📦 Sample tokens directory not found. Creating simple deployment script..."
     
     # Create a simple Solidity contract deployment using forge/cast
     cat > deploy_token.js << EOF
-const { ethers } = require('ethers');
+import { ethers } from 'ethers';
+import { execSync } from 'child_process';
 
 async function deployToken() {
     // Connect to Anvil
@@ -55,23 +63,66 @@ async function deployToken() {
     const contractAddress = await contract.getAddress();
     console.log('✅ GovernanceToken deployed at:', contractAddress);
     
-    // Transfer tokens to your MetaMask address
-    console.log('💸 Transferring $TRANSFER_AMOUNT tokens to $YOUR_METAMASK_ADDRESS...');
-    const transferTx = await contract.transfer('$YOUR_METAMASK_ADDRESS', '$TRANSFER_AMOUNT');
-    await transferTx.wait();
+    // Fund all addresses with tokens
+    const allAddresses = ['$YOUR_METAMASK_ADDRESS', '${ADDITIONAL_ADDRESSES[0]}', '${ADDITIONAL_ADDRESSES[1]}', '${ADDITIONAL_ADDRESSES[2]}'];
     
-    console.log('✅ Transfer complete!');
-    console.log('📍 Contract Address:', contractAddress);
-    console.log('💰 Your token balance: 100 GOV tokens');
+    for (const address of allAddresses) {
+        console.log(\`💸 Transferring $TRANSFER_AMOUNT tokens to \${address}...\`);
+        const transferTx = await contract.transfer(address, '$TRANSFER_AMOUNT');
+        await transferTx.wait();
+        console.log(\`✅ Transfer to \${address} complete!\`);
+    }
+    
+    console.log('✅ All user address transfers complete!');
+    
+    // Get canister Ethereum address and fund it
+    console.log('🏦 Getting canister Ethereum address...');
+    try {
+        const canisterResult = execSync('dfx canister call --network local main icrc149_get_eth_address "(null)"', 
+            { encoding: 'utf8', stdio: 'pipe' });
+        
+        const addressMatch = canisterResult.match(/opt\\s+"([^"]+)"/);
+        if (addressMatch && addressMatch[1]) {
+            const canisterAddress = addressMatch[1];
+            console.log('✅ Canister Ethereum address:', canisterAddress);
+            
+            // Fund canister with governance tokens (100 tokens)
+            const canisterTokenAmount = '100000000000000000000'; // 100 tokens
+            console.log(\`� Transferring \${ethers.formatEther(canisterTokenAmount)} tokens to canister...\`);
+            const canisterTokenTx = await contract.transfer(canisterAddress, canisterTokenAmount);
+            await canisterTokenTx.wait();
+            console.log('✅ Canister token transfer complete!');
+            
+            // Fund canister with Ether (1 ETH)
+            const canisterEtherAmount = '1000000000000000000'; // 1 ETH
+            console.log(\`💸 Transferring \${ethers.formatEther(canisterEtherAmount)} ETH to canister...\`);
+            const canisterEtherTx = await deployer.sendTransaction({
+                to: canisterAddress,
+                value: canisterEtherAmount
+            });
+            await canisterEtherTx.wait();
+            console.log('✅ Canister Ether transfer complete!');
+            
+            // Check canister balances
+            const canisterTokenBalance = await contract.balanceOf(canisterAddress);
+            const canisterEtherBalance = await provider.getBalance(canisterAddress);
+            console.log(\`💰 Canister now has \${ethers.formatEther(canisterTokenBalance)} tokens and \${ethers.formatEther(canisterEtherBalance)} ETH\`);
+        } else {
+            console.log('⚠️  Could not parse canister address, skipping canister funding');
+        }
+    } catch (error) {
+        console.log('⚠️  Could not get or fund canister address:', error.message);
+    }
+    
+    console.log('�📍 Contract Address:', contractAddress);
+    console.log('💰 Each user address now has 100 GOV tokens');
+    console.log('💰 Canister has 100 GOV tokens and 1 ETH for transactions');
     
     return contractAddress;
 }
 
-if (require.main === module) {
-    deployToken().catch(console.error);
-}
-
-module.exports = { deployToken };
+// Run the deployment
+deployToken().catch(console.error);
 EOF
 
     # Install ethers if needed (assuming Node.js is available)
@@ -86,15 +137,19 @@ EOF
         echo "❌ Node.js/npm not available. Please install Node.js to deploy tokens."
         echo "📋 Manual deployment steps:"
         echo "1. Deploy an ERC20 token contract to Anvil"
-        echo "2. Transfer some tokens to $YOUR_METAMASK_ADDRESS"
+        echo "2. Transfer some tokens to all addresses:"
+        echo "   - $YOUR_METAMASK_ADDRESS"
+        for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
+            echo "   - $addr"
+        done
         echo "3. Note the contract address for use in proposals"
     fi
     
 else
     echo "📦 Found sample-tokens directory. Using existing setup..."
     
-    # Navigate to sample tokens and deploy
-    cd sample-tokens
+    # Navigate to sample tokens (go up one directory first since we're in scripts/)
+    cd ../sample-tokens
     
     # Check if this is a Hardhat project
     if [ -f "package.json" ]; then
@@ -104,12 +159,22 @@ else
         echo "🚀 Deploying governance token..."
         npx hardhat run scripts/deploy.js --network localhost
         
-        echo "💸 Funding your MetaMask address..."
+        echo "💸 Funding multiple addresses and canister..."
         # This would require a custom script to transfer tokens
-        echo "⚠️  Manual step: Transfer some governance tokens to $YOUR_METAMASK_ADDRESS"
+        echo "⚠️  Manual step: Transfer some governance tokens to all addresses:"
+        echo "   - $YOUR_METAMASK_ADDRESS"
+        for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
+            echo "   - $addr"
+        done
+        echo "   - Canister Ethereum address (get with: dfx canister call main icrc149_get_eth_address '(null)')"
     else
         echo "❌ Sample tokens project structure not recognized"
-        echo "📋 Please manually deploy governance tokens and fund $YOUR_METAMASK_ADDRESS"
+        echo "📋 Please manually deploy governance tokens and fund all addresses:"
+        echo "   - $YOUR_METAMASK_ADDRESS"
+        for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
+            echo "   - $addr"
+        done
+        echo "   - Canister Ethereum address (get with: dfx canister call main icrc149_get_eth_address '(null)')"
     fi
 fi
 
@@ -119,6 +184,11 @@ echo ""
 echo "📋 Next steps:"
 echo "1. Make sure your MetaMask is connected to localhost:8545"
 echo "2. Add the governance token to MetaMask using the contract address above"
-echo "3. Verify you have governance tokens in your MetaMask wallet"
-echo "4. Use the web interface or run ./create_proposal.sh to create proposals"
-echo "5. Vote on proposals using your MetaMask address"
+echo "3. Verify you have governance tokens in all MetaMask wallets:"
+echo "   - $YOUR_METAMASK_ADDRESS"
+for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
+    echo "   - $addr"
+done
+echo "4. Verify the canister has funds for executing transactions"
+echo "5. Use the web interface or run ./create_proposal.sh to create proposals"
+echo "6. Vote on proposals using any of the funded addresses"

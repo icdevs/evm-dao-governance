@@ -31,7 +31,7 @@ module {
     execution_contracts: [ExecutionContractConfig];
     approved_icp_methods: [ICPMethodConfig];
     admin_principals: [Principal];
-    proposal_duration_days: ?Nat;
+    proposal_duration_nanoseconds: ?Nat; // Proposal duration in nanoseconds for precision
   };
 
   // Configuration for approved snapshot contracts (ERC-20/721 tokens for voter eligibility)
@@ -97,7 +97,7 @@ module {
     var approved_icp_methods: BTree.BTree<Text, ICPMethodConfig>; // "canister_id:method" -> config
     var admin_principals: BTree.BTree<Principal, Bool>; // admin principals set
     var default_snapshot_contract: ?Text; // default snapshot contract address
-    var proposal_duration_days: Nat; // Default proposal duration in days (default: 4)
+    var proposal_duration_days: Nat; // Duration in nanoseconds (kept field name for migration compatibility)
     var evm_rpc_canister_id: Principal; // Configurable EVM RPC canister ID (defaults to mainnet)
   };
   
@@ -107,7 +107,7 @@ module {
     approved_icp_methods: [(Text, ICPMethodConfig)];
     admin_principals: [Principal];
     default_snapshot_contract: ?Text;
-    proposal_duration_days: Nat;
+    proposal_duration_days: Nat; // Duration in nanoseconds (kept field name for migration compatibility)
     evm_rpc_canister_id: Principal;
   };
 
