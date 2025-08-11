@@ -1,18 +1,9 @@
 {
   "canisters": {
-    "um5iw-rqaaa-aaaaq-qaaba-cai": {
-      "name": "cycles-ledger",
-      "wasm_hash": "d2aacbd214f20d752fd1696c2e36d7eceaafe07b932b3ae9e7e5564d1bda0178",
-      "wasm_hash_download": "d2aacbd214f20d752fd1696c2e36d7eceaafe07b932b3ae9e7e5564d1bda0178",
-      "init_guide": "Set max_blocks_per_request in Init record",
-      "init_arg": "(variant{Init=record{max_blocks_per_request=1000}})",
-      "candid_args": "(LedgerArgs)",
-      "gzip": true
-    },
     "7hfb6-caaaa-aaaar-qadga-cai": {
       "name": "evm_rpc",
-      "wasm_hash": "636442e4349a007316dcc1452d9a256d22203186181d2534f33bd264162305b3",
-      "wasm_hash_download": "636442e4349a007316dcc1452d9a256d22203186181d2534f33bd264162305b3",
+      "wasm_hash": "53ff4625ad3990f22ab8ee1cee85b6ab43cb623e0ca28d3162c41cfac55bd1a6",
+      "wasm_hash_download": "53ff4625ad3990f22ab8ee1cee85b6ab43cb623e0ca28d3162c41cfac55bd1a6",
       "init_guide": "https://internetcomputer.org/docs/current/developer-docs/multi-chain/ethereum/evm-rpc/evm-rpc-canister",
       "init_arg": null,
       "candid_args": "(InstallArgs)",

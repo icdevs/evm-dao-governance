@@ -5,12 +5,14 @@
       "type": "motoko",
       "gzip": true
     },
-     "evm_rpc": {
+    "evm_rpc": {
       "id": "7hfb6-caaaa-aaaar-qadga-cai",
       "type": "pull"
     },
     "frontend": {
-      
+      "dependencies": [
+        "main"
+      ],
       "source": [
         "js/dist"
       ],
@@ -19,7 +21,6 @@
         "output": "js/declarations"
       }
     }
-
   },
   "defaults": {
     "build": {
