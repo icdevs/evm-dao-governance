@@ -200,6 +200,7 @@ module {
 
   // Using ProposalEngine types (Boolean voting)
   public type Proposal = ProposalEngine.Proposal<ProposalContent, VoteChoice>;
+  public type ProposalData = ProposalEngine.ProposalData<ProposalContent, VoteChoice>;
   public type ProposalShared = Proposal;
 
   public type Member = {

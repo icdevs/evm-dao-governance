@@ -24,13 +24,14 @@ import Array "mo:base/Array";
 import ICPCall "mo:base/ExperimentalInternetComputer";
 import Error "mo:base/Error";
 import Cycles "mo:base/ExperimentalCycles";
-import Hex "mo:encoding/Hex";
 import SHA3 "mo:sha3";
 import SHA256 "mo:sha2/Sha256";
 import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
 import Debug "mo:base/Debug";
 import Utils "Utils";
+import BaseX "mo:base-x-encoder";
+import Order "mo:base/Order";
 
 // EVM Transaction Libraries
 import EVMAddress "mo:evm-txs/Address";
@@ -1026,7 +1027,7 @@ module {
           maxFeePerGas = Nat64.fromNat(eth_tx.maxFeePerGas);
           to = eth_tx.to;
           value = eth_tx.value;
-          data = "0x" # Hex.encode(Blob.toArray(eth_tx.data));
+          data = BaseX.toHex(eth_tx.data.vals(), { isUpper = true; prefix = #single("0x") });
           accessList = [] : [(Text, [Text])];
           r = "0x00";
           s = "0x00";
@@ -1064,7 +1065,7 @@ module {
         );
 
         let rawTxHex = switch (signedTx) {
-          case (#ok((_, txBytes))) Hex.encode(txBytes);
+          case (#ok((_, txBytes))) BaseX.toHex(txBytes.vals(), { isUpper = true; prefix = #none });
           case (#err(err)) return #Err("Failed to serialize transaction: " # err);
         };
 
@@ -1206,21 +1207,15 @@ module {
       };
     };
 
-    private func equalVoteChoice(a : MigrationTypes.Current.VoteChoice, b : MigrationTypes.Current.VoteChoice) : Bool {
-      switch (a, b) {
-        case (#Yes, #Yes) true;
-        case (#No, #No) true;
-        case (#Abstain, #Abstain) true;
-        case (_, _) false;
+    private func compareVoteChoice(a : MigrationTypes.Current.VoteChoice, b : MigrationTypes.Current.VoteChoice) : Order.Order {
+      func toNat(a : MigrationTypes.Current.VoteChoice) : Nat {
+        switch (a) {
+          case (#Yes) 1;
+          case (#No) 2;
+          case (#Abstain) 3;
+        };
       };
-    };
-
-    private func hashVoteChoice(choice : MigrationTypes.Current.VoteChoice) : Nat32 {
-      switch (choice) {
-        case (#Yes) 1;
-        case (#No) 2;
-        case (#Abstain) 3;
-      };
+      Nat.compare(toNat(a), toNat(b));
     };
 
     // ===== INDEX MANAGEMENT FUNCTIONS =====
@@ -1578,8 +1573,7 @@ module {
         updatedEngineData,
         onProposalExecute,
         onProposalValidate,
-        equalVoteChoice,
-        hashVoteChoice,
+        compareVoteChoice,
       );
       engineRef := ?eng;
       proposalEngine := ?eng;
@@ -2344,7 +2338,7 @@ module {
       let addressBytes = Array.subArray(hashArray, hashArray.size() - 20, 20);
 
       // Convert to hex string with 0x prefix
-      "0x" # Hex.encode(addressBytes);
+      BaseX.toHex(addressBytes.vals(), { isUpper = true; prefix = #single("0x") });
     };
 
     // Helper function to normalize Ethereum addresses for comparison
@@ -3083,8 +3077,7 @@ module {
         updatedEngineData,
         onProposalExecute,
         onProposalValidate,
-        equalVoteChoice,
-        hashVoteChoice,
+        compareVoteChoice,
       );
       engineRef := ?eng;
       ?eng;
