@@ -56,7 +56,7 @@ const mockERC20ABI = [
   "function decimals() view returns (uint8)"
 ];
 
-const MAIN_WASM_PATH = `${process.cwd()}/.dfx/local/canisters/main/main.wasm`;
+const MAIN_WASM_PATH = `${process.cwd()}/.dfx/local/canisters/main/main.wasm.gz`;
 const EVM_RPC_WASM_PATH = `${process.cwd()}/evm_rpc/evm_rpc.wasm.gz`;
 
 describe("EVMDAOBridge Snapshot Integration Tests", () => {

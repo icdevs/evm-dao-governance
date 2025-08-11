@@ -19,6 +19,36 @@ import type { _SERVICE as mainService } from "../../src/declarations/main/main.d
 
 export const WASM_PATH = ".dfx/local/canisters/main/main.wasm.gz";
 
+// Helper function to create SIWE message for proposal creation
+function createSIWEMessageForProposal(address: string, contractAddress: string, chainId: number = 31337): string {
+  const message = `example.com wants you to sign in with your Ethereum account:
+${address}
+
+Create proposal for contract ${contractAddress}
+
+URI: https://example.com
+Version: 1
+Chain ID: ${chainId}
+Nonce: abc123
+Issued At: ${new Date().toISOString()}`;
+
+  return message;
+}
+
+// Helper function to create SIWE proof for proposal creation (matching working pattern from voting-integration.test.ts)
+function createSIWEProofForProposal(address: string, contractAddress: string, chainId: number = 31337) {
+  const message = createSIWEMessageForProposal(address, contractAddress, chainId);
+  
+  // Mock signature (64 bytes + recovery id) - matching the working pattern
+  const mockSignature = new Array(65).fill(0x00);
+  mockSignature[64] = 0x1c; // recovery id that matches working tests
+  
+  return {
+    message,
+    signature: mockSignature
+  };
+}
+
 let replacer = (_key: any, value: any) => typeof value === "bigint" ? value.toString() + "n" : value;
 export const sub_WASM_PATH = process.env['SUB_WASM_PATH'] || WASM_PATH; 
 
@@ -137,6 +167,8 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     );
 
     // Create a proposal which should trigger snapshot taking
+    const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
+    
     const createProposalRequest = {
       action: { Motion: "Test proposal for snapshot" },
       metadata: ["Test proposal metadata"] as [] | [string], // Fix metadata type
@@ -144,7 +176,8 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
         { id: alice.getPrincipal(), votingPower: 1000n }, // Using bigint
         { id: bob.getPrincipal(), votingPower: 500n }     // Using bigint
       ],
-      snapshot_contract: [MOCK_ERC20_CONTRACT] as [] | [string] // Fix snapshot_contract type
+      snapshot_contract: [MOCK_ERC20_CONTRACT] as [] | [string], // Fix snapshot_contract type
+      siwe: createSIWEProofForProposal(testAddress, MOCK_ERC20_CONTRACT, 31337)
     };
 
     const proposalResult = await main_fixture.actor.icrc149_create_proposal(createProposalRequest);
@@ -218,18 +251,22 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     expect(contracts).toHaveLength(3); // Includes default contract plus our 2
     
     // Test creating proposals with different snapshot contracts
+    const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
+    
     const proposal1Request = {
       action: { Motion: "Proposal 1" },
       metadata: ["Proposal 1 metadata"] as [] | [string],
       members: [{ id: alice.getPrincipal(), votingPower: 1000n }],
-      snapshot_contract: [contract1] as [] | [string]
+      snapshot_contract: [contract1] as [] | [string],
+      siwe: createSIWEProofForProposal(testAddress, contract1, 31337)
     };
 
     const proposal2Request = {
       action: { Motion: "Proposal 2" },
       metadata: ["Proposal 2 metadata"] as [] | [string],
       members: [{ id: bob.getPrincipal(), votingPower: 500n }],
-      snapshot_contract: [contract2] as [] | [string]
+      snapshot_contract: [contract2] as [] | [string],
+      siwe: createSIWEProofForProposal(testAddress, contract2, 31337)
     };
 
     const result1 = await main_fixture.actor.icrc149_create_proposal(proposal1Request);
@@ -307,11 +344,14 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     await main_fixture.actor.icrc149_update_snapshot_contract_config(contractAddress, [enabledConfig]);
 
     // Verify it works for proposals
+    const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
+    
     const workingProposal = {
       action: { Motion: "Should work" },
       metadata: [] as [] | [string],
       members: [{ id: alice.getPrincipal(), votingPower: 1000n }],
-      snapshot_contract: [contractAddress] as [] | [string]
+      snapshot_contract: [contractAddress] as [] | [string],
+      siwe: createSIWEProofForProposal(testAddress, contractAddress, 31337)
     };
 
     const workingResult = await main_fixture.actor.icrc149_create_proposal(workingProposal);
@@ -326,7 +366,8 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
       action: { Motion: "Should fail" },
       metadata: [] as [] | [string],
       members: [{ id: alice.getPrincipal(), votingPower: 1000n }],
-      snapshot_contract: [contractAddress] as [] | [string]
+      snapshot_contract: [contractAddress] as [] | [string],
+      siwe: createSIWEProofForProposal(testAddress, contractAddress, 31337)
     };
 
     const failingResult = await main_fixture.actor.icrc149_create_proposal(failingProposal);
@@ -378,11 +419,14 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     expect(contracts).toHaveLength(1); // Only default contract remains
 
     // Try to create proposal with removed contract
+    const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
+    
     const proposalRequest = {
       action: { Motion: "Should fail" },
       metadata: [] as [] | [string],
       members: [{ id: alice.getPrincipal(), votingPower: 1000n }],
-      snapshot_contract: [contractAddress] as [] | [string]
+      snapshot_contract: [contractAddress] as [] | [string],
+      siwe: createSIWEProofForProposal(testAddress, contractAddress, 31337)
     };
 
     const result = await main_fixture.actor.icrc149_create_proposal(proposalRequest);

@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { createSIWEProofForProposal, siweProofToCandid, createTransferData } from './siwe-utils.js';
 
 // Load the GovernanceToken contract artifact (same as the test uses)
 const governanceTokenPath = path.join(process.cwd(), 'sample-tokens/packages/hardhat/artifacts/contracts/MockTokens.sol/GovernanceToken.json');
@@ -441,37 +442,16 @@ async function main() {
         const signer = new ethers.Wallet(CONFIG.SIGNER_PRIVATE_KEY, provider);
         console.log("🔑 Using signer address:", signer.address);
 
-        // Get current time in nanoseconds (simulating canister time)
-        const currentTimeMs = Date.now();
-        const currentTimeNanos = BigInt(currentTimeMs) * 1_000_000n;
-        const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
-
-        const currentTimeISO = new Date(Number(currentTimeNanos / 1_000_000n)).toISOString();
-        const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
-
-        // Create SIWE message for proposal creation
-        const siweMessage = `example.com wants you to sign in with your Ethereum account:
-${signer.address}
-
-Create proposal for contract ${CONFIG.GOVERNANCE_TOKEN_ADDRESS}
-
-URI: https://example.com
-Version: 1
-Chain ID: ${CONFIG.CHAIN_ID}
-Nonce: ${expirationTimeNanos}
-Issued At Nanos: ${currentTimeNanos}
-Issued At: ${currentTimeISO}
-Expiration Nanos: ${expirationTimeNanos}
-Expiration Time: ${expirationTimeISO}`;
+        // Create SIWE proof using utility function
+        const siweProof = await createSIWEProofForProposal(
+            signer,
+            CONFIG.GOVERNANCE_TOKEN_ADDRESS,
+            CONFIG.CHAIN_ID
+        );
 
         console.log("📝 SIWE Message:");
-        console.log(siweMessage);
+        console.log(siweProof.message);
         console.log("");
-
-        // Sign the SIWE message
-        console.log("✍️  Signing SIWE message...");
-        const signature = await signer.signMessage(siweMessage);
-        const signatureBytes = ethers.getBytes(signature);
         console.log("✅ SIWE signature created");
 
         // Create ERC20 transfer data
@@ -499,10 +479,7 @@ Expiration Time: ${expirationTimeISO}`;
                 }
             },
             metadata: `Send 1 governance token to ${CONFIG.YOUR_ADDRESS} [Test Proposal - ${durationText}]`, // Single string, not array
-            siwe: {
-                message: siweMessage,
-                signature: Array.from(signatureBytes) // Convert to array for Candid
-            },
+            siwe: siweProofToCandid(siweProof), // Use utility to convert to Candid format
             snapshot_contract: CONFIG.GOVERNANCE_TOKEN_ADDRESS // Single string, not array
         };
 
@@ -560,19 +537,6 @@ Expiration Time: ${expirationTimeISO}`;
         console.error("💥 Error:", error.message);
         process.exit(1);
     }
-}
-
-function createTransferData(recipient, amount) {
-    // ERC20 transfer function signature: transfer(address,uint256)
-    const transferSig = "0xa9059cbb";
-    
-    // Remove 0x prefix and pad recipient address to 32 bytes
-    const paddedRecipient = recipient.slice(2).toLowerCase().padStart(64, '0');
-    
-    // Convert amount to hex and pad to 32 bytes
-    const amountHex = BigInt(amount).toString(16).padStart(64, '0');
-    
-    return transferSig + paddedRecipient + amountHex;
 }
 
 function convertToCandid(proposal) {

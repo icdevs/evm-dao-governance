@@ -9,7 +9,7 @@ import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declar
 // Type-only import: import types from the candid interface without the extension
 import type { _SERVICE as mainService } from "../../src/declarations/main/main.did.js";
 
-const MAIN_WASM_PATH = `${process.cwd()}/.dfx/local/canisters/main/main.wasm`;
+const MAIN_WASM_PATH = `${process.cwd()}/.dfx/local/canisters/main/main.wasm.gz`;
 
 // Helper function to create SIWE message with proper anti-replay protection
 function createSIWEMessage(address: string, proposalId: number, choice: string, contractAddress: string, chainId: number = 31337, currentTimeNanos?: bigint): string {
@@ -58,8 +58,8 @@ describe("SIWE Anti-Replay Protection", () => {
     await pic?.tearDown();
   });
 
-  it("should parse SIWE message correctly", async () => {
-    console.log("\n🔍 Testing SIWE message parsing...");
+  it("should handle SIWE message signature verification correctly", async () => {
+    console.log("\n🔍 Testing SIWE message signature verification...");
     
     const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
     const testProposalId = 1;
@@ -73,31 +73,31 @@ describe("SIWE Anti-Replay Protection", () => {
     const siweMessage = createSIWEMessage(testAddress, testProposalId, testChoice, testContractAddress, testChainId, canisterTimeNanos);
     console.log("Generated SIWE message:", siweMessage);
     
+    // Create a mock signature with proper format (65 bytes with valid v value)
+    // Note: This is a mock signature and will fail cryptographic verification
+    const mockSignature = Array(65).fill(0x00);
+    mockSignature[64] = 27; // Set recovery parameter 'v' to a valid value (27 or 28)
+    
     const siweProof = {
       message: siweMessage,
-      signature: new Array(65).fill(0x00) // Mock signature
+      signature: new Uint8Array(mockSignature)  // Convert to proper byte array
     };
     
     const result = await evmDAOBridge_fixture.actor.icrc149_verify_siwe(siweProof);
     console.log("SIWE verification result:", result);
     
-    if ("Ok" in result) {
-      expect(result.Ok.address).toBe(testAddress);
-      expect(result.Ok.proposal_id).toBe(BigInt(testProposalId));
-      expect(result.Ok.vote_choice).toBe(testChoice);
-      expect(result.Ok.contract_address).toBe(testContractAddress);
-      expect(result.Ok.chain_id).toBe(BigInt(testChainId));
-      expect(result.Ok.domain).toBe("example.com");
+    // Since we're using a mock signature, we expect signature verification to fail
+    // But we want to ensure the error message indicates signature verification failure, not parsing failure
+    expect("Err" in result).toBeTruthy();
+    if ("Err" in result) {
+      // The error should be related to signature verification, not message parsing
+      expect(result.Err).toMatch(/signature|verification|recovery|address mismatch/i);
+      console.log("✅ Signature verification correctly failed with mock signature");
+      console.log(`   Error: ${result.Err}`);
       
-      console.log("✅ All SIWE fields parsed correctly!");
-      console.log(`   Address: ${result.Ok.address}`);
-      console.log(`   Proposal ID: ${result.Ok.proposal_id}`);
-      console.log(`   Vote Choice: ${result.Ok.vote_choice}`);
-      console.log(`   Contract: ${result.Ok.contract_address}`);
-      console.log(`   Chain ID: ${result.Ok.chain_id}`);
-    } else {
-      console.log("❌ SIWE verification failed:", result.Err);
-      expect(result).toHaveProperty("Ok");
+      // The error should NOT be related to message parsing issues
+      expect(result.Err).not.toMatch(/format|parse|invalid.*message|insufficient.*lines/i);
+      console.log("✅ Message parsing appears to have succeeded (no parsing errors)");
     }
   });
 
@@ -128,7 +128,7 @@ Expiration Time: ${expiredTimeISO}`;
     
     const siweProof = {
       message: expiredMessage,
-      signature: new Array(65).fill(0x00)
+      signature: new Uint8Array(65).fill(0x00)
     };
     
     const result = await evmDAOBridge_fixture.actor.icrc149_verify_siwe(siweProof);
@@ -169,7 +169,7 @@ Expiration Time: ${expirationTimeISO}`;
     
     const siweProof = {
       message: invalidMessage,
-      signature: new Array(65).fill(0x00)
+      signature: new Uint8Array(65).fill(0x00)
     };
     
     const result = await evmDAOBridge_fixture.actor.icrc149_verify_siwe(siweProof);

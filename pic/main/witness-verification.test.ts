@@ -140,7 +140,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
       // Set up the canister with proper initialization arguments
       fixture = await pic.setupCanister<EvmDaoBridgeCanister>({
         sender: admin.getPrincipal(),
-        wasm: `${process.cwd()}/.dfx/local/canisters/main/main.wasm`,
+        wasm: `${process.cwd()}/.dfx/local/canisters/main/main.wasm.gz`,
         arg: IDL.encode([], []),
         idlFactory: idlFactory,
       }) as any; // Use 'as any' to avoid type error on assignment
