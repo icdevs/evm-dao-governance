@@ -1,7 +1,7 @@
 {
   "canisters": {
-    "main": {
-      "main": "./src/main.mo",
+    "backend": {
+      "main": "./src/backend/main.mo",
       "type": "motoko",
       "gzip": true
     },
@@ -11,15 +11,21 @@
     },
     "frontend": {
       "dependencies": [
-        "main"
+        "backend"
       ],
       "source": [
-        "js/dist"
+        "src/frontend/dist"
       ],
-      "type": "assets",
-      "declarations": {
-        "output": "js/declarations"
-      }
+      "type": "assets"
+    },
+    "frontend_old": {
+      "dependencies": [
+        "backend"
+      ],
+      "source": [
+        "src/frontend_old/dist"
+      ],
+      "type": "assets"
     }
   },
   "defaults": {

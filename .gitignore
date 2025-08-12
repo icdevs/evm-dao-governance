@@ -3,4 +3,6 @@ package-lock.json
 .mops/
 .dfx/
 node_modules
-js/dist/
+src/frontend/dist/
+src/frontend_old/dist/
+.svelte-kit/

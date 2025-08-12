@@ -120,12 +120,12 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
     // Set up ethers provider for Anvil
     provider = new JsonRpcProvider("http://127.0.0.1:8545");
-    
+
     // Wait for Anvil to start with better retry logic
     let connected = false;
     let attempts = 0;
     const maxAttempts = 20; // 20 seconds max wait
-    
+
     while (!connected && attempts < maxAttempts) {
       try {
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second between attempts
@@ -144,22 +144,22 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
     // Deploy a mock ERC20 token for testing
     const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
     const signer = new ethers.Wallet(privateKey, provider);
-    
+
     // Simple ERC20 contract bytecode with constructor setting total supply
     const mockERC20Bytecode = "0x608060405234801561001057600080fd5b50336000908152602081905260409020678ac7230489e800009055610241806100396000396000f3fe608060405234801561001057600080fd5b50600436106100415760003560e01c806318160ddd1461004657806370a08231146100645780636aa3f44a14610094575b600080fd5b61004e6100aa565b60405161005b91906101df565b60405180910390f35b610084610074366004610183565b60006020819052908152604090205481565b60405190815260200161005b565b6100846100a2366004610183565b6000602081905290815260409020549056";
-    
+
     const deployTx = await signer.sendTransaction({
       data: mockERC20Bytecode,
     });
     const receipt = await deployTx.wait();
-    
+
     if (!receipt || !receipt.contractAddress) {
       throw new Error("Failed to deploy mock ERC20 contract");
     }
-    
+
     mockTokenAddress = receipt.contractAddress;
     mockToken = new Contract(mockTokenAddress, mockERC20ABI, signer);
-    
+
     console.log("Mock ERC20 deployed at:", mockTokenAddress);
 
     // Set up PocketIC
@@ -174,7 +174,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       sender: admin.getPrincipal(),
       idlFactory: evmRpcIDLFactory,
       wasm: EVM_RPC_WASM_PATH,
-      arg: IDL.encode(evmRpcInit({IDL}), [{
+      arg: IDL.encode(evmRpcInit({ IDL }), [{
         demo: [],
         manageApiKeys: [[admin.getPrincipal()]],
         logFilter: [{ ShowAll: null }]
@@ -192,7 +192,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       sender: admin.getPrincipal(),
       idlFactory: mainIDLFactory,
       wasm: MAIN_WASM_PATH,
-      arg: IDL.encode(mainInit({IDL}), [[]]), // Empty initialization following working pattern
+      arg: IDL.encode(mainInit({ IDL }), [[]]), // Empty initialization following working pattern
     });
 
     await pic.tick(5);
@@ -203,14 +203,14 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
     // Now configure the snapshot contract after deployment
     const snapshotContractConfig = {
       contract_address: mockTokenAddress.toLowerCase(), // Use lowercase for consistency
-      chain: { chain_id: 31337n, network_name: "anvil" }, 
+      chain: { chain_id: 31337n, network_name: "anvil" },
       rpc_service: {
         rpc_type: "custom",
         canister_id: evmRpc_fixture.canisterId,
         custom_config: [[["url", "http://127.0.0.1:8545"]]] as [] | [[string, string][]]
       },
       contract_type: { ERC20: null },
-      balance_storage_slot: 0n, 
+      balance_storage_slot: 0n,
       enabled: true
     };
 
@@ -221,7 +221,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
     );
 
     console.log("Update result:", updateResult);
-    
+
     // Check if the update was successful
     if ('Err' in updateResult) {
       throw new Error(`Failed to update snapshot contract config: ${updateResult.Err}`);
@@ -241,7 +241,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
         anvilProcess.kill('SIGTERM');
         // Give it a moment to terminate gracefully
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         // Force kill if still running
         if (!anvilProcess.killed) {
           anvilProcess.kill('SIGKILL');
@@ -251,14 +251,14 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
         console.warn("Error terminating Anvil process:", error);
       }
     }
-    
+
     // Clean up any remaining processes
     try {
       killExistingProcesses();
     } catch (error) {
       console.warn("Error in cleanup:", error);
     }
-    
+
     // Clean up PocketIC
     if (pic) {
       try {
@@ -271,22 +271,22 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should setup snapshot contracts correctly", async () => {
     evmDAOBridge_fixture.actor.setIdentity(admin);
-    
+
     // Get governance config to verify snapshot contracts are set up
     const config = await evmDAOBridge_fixture.actor.icrc149_governance_config();
-    
-    console.log("Governance config:", JSON.stringify(config, (key, value) => 
+
+    console.log("Governance config:", JSON.stringify(config, (key, value) =>
       typeof value === 'bigint' ? value.toString() : value, 2));
-    
+
     // The configuration should now include our mock token contract
     expect(config.snapshot_contracts).toBeDefined();
     expect(config.snapshot_contracts.length).toBeGreaterThanOrEqual(1);
 
     // Find our contract in the list (it should be there along with the default one)
-    const ourContract = config.snapshot_contracts.find(([addr, _]) => 
+    const ourContract = config.snapshot_contracts.find(([addr, _]) =>
       addr.toLowerCase() === mockTokenAddress.toLowerCase()
     );
-    
+
     expect(ourContract).toBeDefined();
     const [contractAddr, contractConfig] = ourContract!;
     expect(contractAddr.toLowerCase()).toBe(mockTokenAddress.toLowerCase());
@@ -297,18 +297,18 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should create a proposal and generate snapshot automatically", async () => {
     evmDAOBridge_fixture.actor.setIdentity(admin);
-    
+
     // Ensure our snapshot contract is properly configured for this test
     const snapshotContractConfig = {
       contract_address: mockTokenAddress.toLowerCase(),
-      chain: { chain_id: 31337n, network_name: "anvil" }, 
+      chain: { chain_id: 31337n, network_name: "anvil" },
       rpc_service: {
         rpc_type: "custom",
         canister_id: evmRpc_fixture.canisterId,
         custom_config: [[["url", "http://127.0.0.1:8545"]]] as [] | [[string, string][]]
       },
       contract_type: { ERC20: null },
-      balance_storage_slot: 0n, 
+      balance_storage_slot: 0n,
       enabled: true
     };
 
@@ -317,11 +317,11 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       mockTokenAddress.toLowerCase(),
       [snapshotContractConfig]
     );
-    
+
     if ('Err' in configResult) {
       console.log("Config error:", configResult.Err);
     }
-    
+
     // Create a simple motion proposal with the mock token as snapshot contract
     const proposalArgs = {
       action: { Motion: "Test motion to verify snapshot functionality" },
@@ -332,22 +332,22 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
     console.log("Creating proposal with snapshot...");
     const createResult = await evmDAOBridge_fixture.actor.icrc149_create_proposal(proposalArgs);
-    
+
     console.log("Create proposal result:", createResult);
-    
+
     if ('Err' in createResult) {
       throw new Error(`Failed to create proposal: ${createResult.Err}`);
     }
-    
+
     const proposalId = createResult.Ok;
     console.log("Created proposal with ID:", proposalId.toString());
 
     // Wait a moment for any async operations to complete
     await new Promise(resolve => setTimeout(resolve, twoSecondsInMs));
-    
+
     // Get the proposal snapshot
     const snapshot = await evmDAOBridge_fixture.actor.icrc149_proposal_snapshot(proposalId);
-    
+
     console.log("Generated snapshot:", {
       contract_address: snapshot.contract_address,
       chain_id: snapshot.chain.chain_id.toString(),
@@ -357,21 +357,21 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       total_supply: snapshot.total_supply.toString(),
       snapshot_time: snapshot.snapshot_time.toString()
     });
-    
+
     // Verify snapshot was created correctly
     expect(snapshot.contract_address).toBe(mockTokenAddress.toLowerCase());
     expect(snapshot.chain.chain_id).toBe(31337n);
     expect(snapshot.chain.network_name).toBe("anvil");
-    
+
     // Block number should be reasonable (greater than 0)
     expect(snapshot.block_number).toBeGreaterThan(0n);
-    
+
     // State root should be 32 bytes
     expect(snapshot.state_root.length).toBe(32);
-    
+
     // Total supply should be reasonable (we set it to 10000 tokens in our mock contract)
     expect(snapshot.total_supply).toBeGreaterThan(0n);
-    
+
     // Snapshot time should be a reasonable timestamp (PocketIC uses fixed 2021 time)
     expect(snapshot.snapshot_time).toBeGreaterThan(0n); // Should be a positive timestamp
     expect(snapshot.snapshot_time).toBeLessThan(BigInt(Date.now() * 1000000 * 2)); // Should be reasonable (within 2x current time)
@@ -379,7 +379,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should validate snapshot contract configuration before creating proposals", async () => {
     evmDAOBridge_fixture.actor.setIdentity(admin);
-    
+
     // Try to create a proposal with an unapproved contract
     const invalidProposalArgs = {
       action: { Motion: "Test motion with invalid contract" },
@@ -389,9 +389,9 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
     };
 
     const result = await evmDAOBridge_fixture.actor.icrc149_create_proposal(invalidProposalArgs);
-    
+
     console.log("Invalid contract result:", result);
-    
+
     // Should fail with appropriate error
     expect('Err' in result).toBe(true);
     if ('Err' in result) {
@@ -401,7 +401,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should handle RPC errors gracefully during snapshot creation", async () => {
     evmDAOBridge_fixture.actor.setIdentity(admin);
-    
+
     // Add a snapshot contract with invalid RPC configuration
     const invalidRpcContractConfig = {
       contract_address: "0x" + "1".repeat(40),
@@ -421,9 +421,9 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       "0x" + "1".repeat(40),
       [invalidRpcContractConfig]
     );
-    
+
     console.log("Update contract config result:", updateResult);
-    
+
     if ('Err' in updateResult) {
       console.log("Failed to add invalid contract config (expected):", updateResult.Err);
       return; // This is expected behavior
@@ -439,15 +439,15 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
     // This should either fail or create a proposal with fallback values
     const createResult = await evmDAOBridge_fixture.actor.icrc149_create_proposal(proposalArgs);
-    
+
     console.log("Create proposal with invalid RPC result:", createResult);
-    
+
     // The implementation should handle RPC errors gracefully
     // Either by failing with a clear error message or using fallback values
     if ('Ok' in createResult) {
       console.log("Proposal created with fallback values (graceful handling)");
       const proposalId = createResult.Ok;
-      
+
       // Check that snapshot has fallback values
       const snapshot = await evmDAOBridge_fixture.actor.icrc149_proposal_snapshot(proposalId);
       console.log("Snapshot with fallback values:", {
@@ -461,7 +461,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should retrieve snapshot contracts list", async () => {
     evmDAOBridge_fixture.actor.setIdentity(admin);
-    
+
     // Ensure our snapshot contract is configured for this test
     const snapshotContractConfig = {
       contract_address: mockTokenAddress.toLowerCase(),
@@ -481,33 +481,33 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       mockTokenAddress.toLowerCase(),
       [snapshotContractConfig]
     );
-    
+
     if ('Err' in configResult) {
       console.log("Config error in retrieve test:", configResult.Err);
     }
-    
+
     const contracts = await evmDAOBridge_fixture.actor.icrc149_get_snapshot_contracts();
-    
+
     console.log("Retrieved snapshot contracts:", contracts.map(([addr, config]) => ({
       address: addr,
       enabled: config.enabled,
       contract_type: config.contract_type
     })));
-    
+
     expect(contracts).toBeDefined();
     expect(Array.isArray(contracts)).toBe(true);
     expect(contracts.length).toBeGreaterThanOrEqual(1);
-    
+
     // Find our mock token contract (search case-insensitive)
-    const mockContract = contracts.find(([addr, _]) => 
+    const mockContract = contracts.find(([addr, _]) =>
       addr.toLowerCase() === mockTokenAddress.toLowerCase()
     );
-    
+
     console.log("Looking for contract:", mockTokenAddress.toLowerCase());
     console.log("Found contract:", mockContract ? mockContract[0] : "not found");
-    
+
     expect(mockContract).toBeDefined();
-    
+
     if (mockContract) {
       const [_, config] = mockContract;
       expect(config.enabled).toBe(true);
@@ -517,7 +517,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should allow admin to update snapshot contract configuration", async () => {
     evmDAOBridge_fixture.actor.setIdentity(admin);
-    
+
     // Update the existing contract to disabled
     const updatedConfig = {
       contract_address: mockTokenAddress,
@@ -536,9 +536,9 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       mockTokenAddress.toLowerCase(),
       [updatedConfig]
     );
-    
+
     console.log("Update config result:", updateResult);
-    
+
     if ('Err' in updateResult) {
       throw new Error(`Failed to update config: ${updateResult.Err}`);
     }
@@ -546,7 +546,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
     // Verify the update
     const contracts = await evmDAOBridge_fixture.actor.icrc149_get_snapshot_contracts();
     const updatedContract = contracts.find(([addr, _]) => addr === mockTokenAddress.toLowerCase());
-    
+
     expect(updatedContract).toBeDefined();
     if (updatedContract) {
       const [_, config] = updatedContract;
@@ -562,7 +562,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
     };
 
     const createResult = await evmDAOBridge_fixture.actor.icrc149_create_proposal(proposalArgs);
-    
+
     // Should fail because contract is disabled
     expect('Err' in createResult).toBe(true);
     if ('Err' in createResult) {
@@ -572,7 +572,7 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
 
   it("should prevent non-admin from updating snapshot contracts", async () => {
     evmDAOBridge_fixture.actor.setIdentity(alice); // Non-admin user
-    
+
     const newConfig = {
       contract_address: "0x" + "2".repeat(40),
       chain: { chain_id: 31337n, network_name: "anvil" },
@@ -590,9 +590,9 @@ describe("EVMDAOBridge Snapshot Integration Tests", () => {
       "0x" + "2".repeat(40),
       [newConfig]
     );
-    
+
     console.log("Non-admin update result:", updateResult);
-    
+
     // Should fail with permission error
     expect('Err' in updateResult).toBe(true);
     if ('Err' in updateResult) {

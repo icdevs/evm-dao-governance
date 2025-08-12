@@ -3,7 +3,7 @@ import { HttpAgent, Actor } from '@dfinity/agent';
 import { IDL } from '@dfinity/candid';
 import { Principal } from '@dfinity/principal';
 import { ethers } from 'ethers';
-import { idlFactory } from '../src/declarations/main/main.did.js';
+import { idlFactory } from '../declarations/main/main.did.js';
 
 // Global state
 let metamaskProvider = null;

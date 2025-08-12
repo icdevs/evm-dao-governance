@@ -22,7 +22,7 @@ import type { _SERVICE as mainService } from "../../src/declarations/main/main.d
 export const WASM_PATH = ".dfx/local/canisters/main/main.wasm.gz";
 
 let replacer = (_key: any, value: any) => typeof value === "bigint" ? value.toString() + "n" : value;
-export const sub_WASM_PATH = process.env['SUB_WASM_PATH'] || WASM_PATH; 
+export const sub_WASM_PATH = process.env['SUB_WASM_PATH'] || WASM_PATH;
 
 let pic: PocketIc;
 let main_fixture: CanisterFixture<mainService>;
@@ -58,7 +58,7 @@ describe("EVMDAOBridge Voting Integration Tests", () => {
 
   beforeEach(async () => {
     killExistingProcesses();
-    
+
     // Start local Ethereum node for testing
     const targetDir = '../../../../../ICDevs/projects/icrc99-orchestrator/sample-nfts';
     try {
@@ -94,7 +94,7 @@ describe("EVMDAOBridge Voting Integration Tests", () => {
       sender: admin.getPrincipal(),
       idlFactory: mainIDLFactory,
       wasm: sub_WASM_PATH,
-      arg: IDL.encode(mainInit({IDL}), [[]]),
+      arg: IDL.encode(mainInit({ IDL }), [[]]),
     });
 
     await pic.tick(5);
@@ -221,10 +221,10 @@ Issued At: ${new Date().toISOString()}`;
       // Test SIWE verification
       const mockEthAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
       const siweProof = createMockSIWE(mockEthAddress, Number(proposalId));
-      
+
       const siweResult = await main_fixture.actor.icrc149_verify_siwe(siweProof);
       console.log("SIWE verification result:", siweResult);
-      
+
       // The current implementation returns a basic result, so we just check it doesn't error
       if ('Ok' in siweResult) {
         console.log("✅ SIWE verification working");
@@ -233,7 +233,7 @@ Issued At: ${new Date().toISOString()}`;
       // Test voting with witness proof
       const voterBalance = 1000n;
       const witness = createMockWitness(mockEthAddress, voterBalance);
-      
+
       const voteArgs = {
         voter: ethers.getBytes(mockEthAddress),
         siwe: siweProof,
@@ -247,14 +247,14 @@ Issued At: ${new Date().toISOString()}`;
       try {
         const voteResult = await main_fixture.actor.icrc149_vote_proposal(voteArgs);
         console.log("Vote result:", voteResult);
-        
+
         if ('Ok' in voteResult) {
           console.log("✅ Vote submitted successfully");
-          
+
           // Check vote tally
           const tallyResult = await main_fixture.actor.icrc149_tally_votes(proposalId);
           console.log("Vote tally:", tallyResult);
-          
+
           expect(tallyResult.total).toBeGreaterThan(0n);
           console.log("✅ Vote tally working");
         }
@@ -265,7 +265,7 @@ Issued At: ${new Date().toISOString()}`;
       // Test getting proposal details
       const retrievedProposal = await main_fixture.actor.icrc149_get_proposal(proposalId);
       console.log("Retrieved proposal:", retrievedProposal);
-      
+
       if (retrievedProposal && retrievedProposal.length > 0) {
         expect(retrievedProposal[0]).toBeDefined();
         console.log("✅ Proposal retrieval working");
@@ -278,7 +278,7 @@ Issued At: ${new Date().toISOString()}`;
         [] // filters
       );
       console.log("All proposals:", allProposals);
-      
+
       expect(allProposals.length).toBeGreaterThan(0);
       console.log("✅ Proposal listing working");
 
@@ -337,10 +337,10 @@ Issued At: ${new Date().toISOString()}`;
     };
 
     const result1 = await main_fixture.actor.icrc149_create_proposal(proposal1);
-    
+
     // Advance time to ensure different timestamps
     await pic.advanceTime(twoSecondsInMs);
-    
+
     const result2 = await main_fixture.actor.icrc149_create_proposal(proposal2);
 
     if ('Ok' in result1 && 'Ok' in result2) {
@@ -357,10 +357,10 @@ Issued At: ${new Date().toISOString()}`;
       // Both should use the same contract
       expect(snapshot1.contract_address).toBe(MOCK_ERC20_CONTRACT);
       expect(snapshot2.contract_address).toBe(MOCK_ERC20_CONTRACT);
-      
+
       // But should have different snapshot times
       expect(snapshot1.snapshot_time).not.toBe(snapshot2.snapshot_time);
-      
+
       // Both should have valid block numbers and state roots
       expect(snapshot1.block_number).toBeGreaterThan(0);
       expect(snapshot2.block_number).toBeGreaterThan(0);
@@ -372,7 +372,7 @@ Issued At: ${new Date().toISOString()}`;
       // Test getting all proposals
       const allProposals = await main_fixture.actor.icrc149_get_proposals([], [10n], []);
       expect(allProposals.length).toBeGreaterThanOrEqual(2);
-      
+
       console.log("✅ Multiple proposal retrieval working");
     } else {
       throw new Error("Failed to create proposals");
@@ -416,7 +416,7 @@ Issued At: ${new Date().toISOString()}`;
       "0x1111111111111111111111111111111111111111",
       [erc20Config]
     );
-    
+
     await main_fixture.actor.icrc149_update_snapshot_contract_config(
       "0x2222222222222222222222222222222222222222",
       [erc721Config]
@@ -427,7 +427,7 @@ Issued At: ${new Date().toISOString()}`;
     console.log("Configured contracts with storage slots:", contracts);
 
     expect(contracts).toHaveLength(3); // Includes the default 0x000... contract
-    
+
     // Find and verify each contract config (excluding the default contract)
     const erc20Found = contracts.find(([addr, _]) => addr === "0x1111111111111111111111111111111111111111");
     const erc721Found = contracts.find(([addr, _]) => addr === "0x2222222222222222222222222222222222222222");
@@ -440,7 +440,7 @@ Issued At: ${new Date().toISOString()}`;
     if (erc20Found && erc721Found) {
       expect(erc20Found[1].balance_storage_slot).toBe(0n);
       expect(erc721Found[1].balance_storage_slot).toBe(3n);
-      
+
       expect('ERC20' in erc20Found[1].contract_type).toBe(true);
       expect('ERC721' in erc721Found[1].contract_type).toBe(true);
     }
@@ -516,17 +516,17 @@ Issued At: ${new Date().toISOString()}`;
 
     if ('Ok' in proposalResult) {
       const proposalId = proposalResult.Ok;
-      
+
       // Get the proposal to verify it was created correctly
       const proposal = await main_fixture.actor.icrc149_get_proposal(proposalId);
       console.log("ETH transaction proposal:", proposal);
 
       if (proposal && proposal.length > 0) {
         console.log("✅ ETH transaction proposal created successfully");
-        
+
         // Note: Execution would require proper voting and approval process
         // This test just verifies the proposal can be created with ETH transaction action
-        
+
         try {
           // Test execution attempt (may not be fully implemented)
           const executionResult = await main_fixture.actor.icrc149_execute_proposal(proposalId);

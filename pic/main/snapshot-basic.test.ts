@@ -38,11 +38,11 @@ Issued At: ${new Date().toISOString()}`;
 // Helper function to create SIWE proof for proposal creation (matching working pattern from voting-integration.test.ts)
 function createSIWEProofForProposal(address: string, contractAddress: string, chainId: number = 31337) {
   const message = createSIWEMessageForProposal(address, contractAddress, chainId);
-  
+
   // Mock signature (64 bytes + recovery id) - matching the working pattern
   const mockSignature = new Array(65).fill(0x00);
   mockSignature[64] = 0x1c; // recovery id that matches working tests
-  
+
   return {
     message,
     signature: mockSignature
@@ -50,7 +50,7 @@ function createSIWEProofForProposal(address: string, contractAddress: string, ch
 }
 
 let replacer = (_key: any, value: any) => typeof value === "bigint" ? value.toString() + "n" : value;
-export const sub_WASM_PATH = process.env['SUB_WASM_PATH'] || WASM_PATH; 
+export const sub_WASM_PATH = process.env['SUB_WASM_PATH'] || WASM_PATH;
 
 let pic: PocketIc;
 let main_fixture: CanisterFixture<mainService>;
@@ -81,7 +81,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
       sender: admin.getPrincipal(),
       idlFactory: mainIDLFactory,
       wasm: sub_WASM_PATH,
-      arg: IDL.encode(mainInit({IDL}), [[]]),
+      arg: IDL.encode(mainInit({ IDL }), [[]]),
     });
 
     await pic.tick(5);
@@ -126,9 +126,9 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     // Verify the configuration was added
     const contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
     console.log("Configured snapshot contracts:", contracts);
-    
+
     expect(contracts).toHaveLength(2); // Includes default contract
-    
+
     // Find our contract in the list (may not be first due to default contract)
     const ourContract = contracts.find(([addr, _]) => addr === MOCK_ERC20_CONTRACT);
     expect(ourContract).toBeDefined();
@@ -168,7 +168,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
 
     // Create a proposal which should trigger snapshot taking
     const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
-    
+
     const createProposalRequest = {
       action: { Motion: "Test proposal for snapshot" },
       metadata: ["Test proposal metadata"] as [] | [string], // Fix metadata type
@@ -247,12 +247,12 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     // Verify both contracts are configured
     const contracts = await main_fixture.actor.icrc149_get_snapshot_contracts();
     console.log("All configured contracts:", contracts);
-    
+
     expect(contracts).toHaveLength(3); // Includes default contract plus our 2
-    
+
     // Test creating proposals with different snapshot contracts
     const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
-    
+
     const proposal1Request = {
       action: { Motion: "Proposal 1" },
       metadata: ["Proposal 1 metadata"] as [] | [string],
@@ -326,7 +326,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     main_fixture.actor.setIdentity(admin);
 
     const contractAddress = "0x3333333333333333333333333333333333333333";
-    
+
     // Add enabled contract
     const enabledConfig = {
       contract_address: contractAddress,
@@ -345,7 +345,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
 
     // Verify it works for proposals
     const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
-    
+
     const workingProposal = {
       action: { Motion: "Should work" },
       metadata: [] as [] | [string],
@@ -372,12 +372,12 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
 
     const failingResult = await main_fixture.actor.icrc149_create_proposal(failingProposal);
     console.log("Disabled contract result:", failingResult);
-    
+
     expect('Err' in failingResult && failingResult.Err.includes("not enabled")).toBe(true);
 
     // Re-enable and verify it works again
     await main_fixture.actor.icrc149_update_snapshot_contract_config(contractAddress, [enabledConfig]);
-    
+
     const reenableResult = await main_fixture.actor.icrc149_create_proposal(workingProposal);
     expect('Ok' in reenableResult).toBe(true);
 
@@ -390,7 +390,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     main_fixture.actor.setIdentity(admin);
 
     const contractAddress = "0x4444444444444444444444444444444444444444";
-    
+
     // Add a contract
     const config = {
       contract_address: contractAddress,
@@ -420,7 +420,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
 
     // Try to create proposal with removed contract
     const testAddress = "0x742d35cc6234c5a5c10b1c4f62e1fb4c5d0b94b9";
-    
+
     const proposalRequest = {
       action: { Motion: "Should fail" },
       metadata: [] as [] | [string],
@@ -443,7 +443,7 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     // Initially should have only the default contract
     const initialConfig = await main_fixture.actor.icrc149_governance_config();
     console.log("Initial governance config:", initialConfig);
-    
+
     expect(initialConfig.snapshot_contracts).toHaveLength(1); // Default contract
     expect(initialConfig.execution_contracts).toHaveLength(0);
     expect(initialConfig.approved_icp_methods).toHaveLength(0);
@@ -467,9 +467,9 @@ describe("EVMDAOBridge Snapshot Configuration Tests", () => {
     // Check updated configuration
     const updatedConfig = await main_fixture.actor.icrc149_governance_config();
     console.log("Updated governance config:", updatedConfig);
-    
+
     expect(updatedConfig.snapshot_contracts).toHaveLength(2); // Default + our contract
-    
+
     // Find our contract in the list
     const ourContract = updatedConfig.snapshot_contracts.find(([addr, _]) => addr === MOCK_ERC20_CONTRACT);
     expect(ourContract).toBeDefined();

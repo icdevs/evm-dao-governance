@@ -2,7 +2,7 @@ import { PocketIc, createIdentity } from "@dfinity/pic";
 import { Principal } from "@dfinity/principal";
 import { IDL } from "@dfinity/candid";
 import { idlFactory } from "../src/declarations/main/main.did.js";
-import type { EvmDaoBridgeCanister, Witness__1, WitnessResult } from "../src/declarations/main/main.did.d.ts";
+import type { EvmDaoBridgeCanister, Witness__1, WitnessResult } from "../src/declarations/main/main.did.js";
 
 const admin = createIdentity("admin");
 
@@ -25,13 +25,13 @@ describe('Fixed Witness Validation Tests', () => {
       });
 
       canister = fixture.actor;
-      
+
       // Set the identity to admin for all subsequent calls
       canister.setIdentity(admin);
-      
+
       // Add admin principal to the canister's admin list
       await canister.icrc149_update_admin_principal(admin.getPrincipal(), true);
-      
+
       console.log("✅ Canister deployed for fixed validation tests");
     } catch (error) {
       console.error("Failed to set up test environment:", error);
@@ -47,11 +47,11 @@ describe('Fixed Witness Validation Tests', () => {
     const contractAddress = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
     const chainId = 31337n;
     const networkName = "local";
-    
+
     beforeEach(async () => {
       // Set admin identity for each test
       canister.setIdentity(admin);
-      
+
       // Setup: Add approved contract configuration
       const contractConfig = {
         contract_address: contractAddress,
@@ -74,7 +74,7 @@ describe('Fixed Witness Validation Tests', () => {
           contractAddress,
           [contractConfig]
         );
-        
+
         if ('Err' in result) {
           console.log("⚠️  Could not add contract config:", result.Err);
         } else {
@@ -87,7 +87,7 @@ describe('Fixed Witness Validation Tests', () => {
 
     it('should validate witness against stored snapshot state (no circular validation)', async () => {
       console.log("🔧 Testing fixed witness validation with state-based validation...");
-      
+
       // Test data
       const proposalId1 = 123n;
       const proposalId2 = 456n;
@@ -95,7 +95,7 @@ describe('Fixed Witness Validation Tests', () => {
       const blockNumber2 = 2000n;
       const correctStateRoot = new Uint8Array(32).fill(0x42);
       const wrongStateRoot = new Uint8Array(32).fill(0x99);
-      
+
       // Add test snapshots with chain_id (corrected to use bigint)
       await canister.icrc149_add_test_snapshot(
         proposalId1,
@@ -105,7 +105,7 @@ describe('Fixed Witness Validation Tests', () => {
         chainId, // Use bigint directly
         networkName
       );
-      
+
       await canister.icrc149_add_test_snapshot(
         proposalId2,
         blockNumber2,
@@ -114,7 +114,7 @@ describe('Fixed Witness Validation Tests', () => {
         chainId, // Use bigint directly
         networkName
       );
-      
+
       console.log("✅ Test snapshots added successfully");
 
       // Helper function to create witness
@@ -124,14 +124,14 @@ describe('Fixed Witness Validation Tests', () => {
         for (let i = 0; i < 20; i++) {
           contractBytes[i] = parseInt(cleanAddr.substr(i * 2, 2), 16);
         }
-        
+
         // Convert storageValue bigint to Uint8Array
         const storageValueBytes = new Uint8Array(32);
         const storageValueHex = storageValue.toString(16).padStart(64, '0');
         for (let i = 0; i < 32; i++) {
           storageValueBytes[i] = parseInt(storageValueHex.substr(i * 2, 2), 16);
         }
-        
+
         return {
           blockHash: blockHash,
           blockNumber: blockNumber,
@@ -148,7 +148,7 @@ describe('Fixed Witness Validation Tests', () => {
       console.log("🧪 Test 1: Valid witness with matching state root and proposal ID");
       const validWitness1 = createTestWitness(blockNumber1, correctStateRoot, contractAddress);
       const result1 = await canister.icrc149_verify_witness(validWitness1, [proposalId1]);
-      
+
       expect('Ok' in result1).toBe(true);
       if ('Ok' in result1) {
         expect(result1.Ok.valid).toBe(true);
@@ -160,7 +160,7 @@ describe('Fixed Witness Validation Tests', () => {
       console.log("🧪 Test 2: Valid witness with block number lookup");
       const validWitness2 = createTestWitness(blockNumber1, correctStateRoot, contractAddress);
       const result2 = await canister.icrc149_verify_witness(validWitness2, []);
-      
+
       expect('Ok' in result2).toBe(true);
       if ('Ok' in result2) {
         expect(result2.Ok.valid).toBe(true);
@@ -171,7 +171,7 @@ describe('Fixed Witness Validation Tests', () => {
       console.log("🧪 Test 3: Invalid witness with wrong state root");
       const invalidWitness1 = createTestWitness(blockNumber1, wrongStateRoot, contractAddress);
       const result3 = await canister.icrc149_verify_witness(invalidWitness1, [proposalId1]);
-      
+
       expect('Err' in result3).toBe(true);
       if ('Err' in result3) {
         console.log(`✅ Correctly rejected wrong state root: ${result3.Err}`);
@@ -181,7 +181,7 @@ describe('Fixed Witness Validation Tests', () => {
       console.log("🧪 Test 4: Invalid proposal ID");
       const validWitness3 = createTestWitness(blockNumber1, correctStateRoot, contractAddress);
       const result4 = await canister.icrc149_verify_witness(validWitness3, [999n]);
-      
+
       expect('Err' in result4).toBe(true);
       if ('Err' in result4) {
         expect(result4.Err).toContain("No snapshot found for proposal");
@@ -192,7 +192,7 @@ describe('Fixed Witness Validation Tests', () => {
       console.log("🧪 Test 5: Invalid block number");
       const invalidWitness2 = createTestWitness(9999n, correctStateRoot, contractAddress);
       const result5 = await canister.icrc149_verify_witness(invalidWitness2, []);
-      
+
       expect('Err' in result5).toBe(true);
       if ('Err' in result5) {
         expect(result5.Err).toContain("No stored snapshot found for block number");
@@ -204,7 +204,7 @@ describe('Fixed Witness Validation Tests', () => {
       const unapprovedContract = "0x1111111111111111111111111111111111111111";
       const invalidWitness3 = createTestWitness(blockNumber1, correctStateRoot, unapprovedContract);
       const result6 = await canister.icrc149_verify_witness(invalidWitness3, [proposalId1]);
-      
+
       expect('Err' in result6).toBe(true);
       if ('Err' in result6) {
         expect(result6.Err).toContain("is not approved for snapshots");
@@ -221,12 +221,12 @@ describe('Fixed Witness Validation Tests', () => {
 
     it('should demonstrate security improvement over circular validation', async () => {
       console.log("🔐 Testing security improvement: stored state vs witness data");
-      
+
       const proposalId = 777n;
       const blockNumber = 3000n;
       const trustedStateRoot = new Uint8Array(32).fill(0xAA); // What's actually stored
       const maliciousStateRoot = new Uint8Array(32).fill(0xBB); // What attacker provides
-      
+
       // Add snapshot with trusted state root
       await canister.icrc149_add_test_snapshot(
         proposalId,
@@ -236,14 +236,14 @@ describe('Fixed Witness Validation Tests', () => {
         chainId, // Use bigint directly
         networkName
       );
-      
+
       // Create witness with malicious state root (different from stored)
       const contractBytes = new Uint8Array(20);
       const cleanAddr = contractAddress.slice(2);
       for (let i = 0; i < 20; i++) {
         contractBytes[i] = parseInt(cleanAddr.substr(i * 2, 2), 16);
       }
-      
+
       // Convert large balance to bytes
       const maliciousBalance = 1000000n;
       const maliciousBalanceBytes = new Uint8Array(32);
@@ -251,7 +251,7 @@ describe('Fixed Witness Validation Tests', () => {
       for (let i = 0; i < 32; i++) {
         maliciousBalanceBytes[i] = parseInt(balanceHex.substr(i * 2, 2), 16);
       }
-      
+
       const maliciousWitness: Witness__1 = {
         blockHash: maliciousStateRoot, // Attacker tries to use different state root
         blockNumber: blockNumber,
@@ -262,10 +262,10 @@ describe('Fixed Witness Validation Tests', () => {
         accountProof: [],
         storageProof: []
       };
-      
+
       // Validation should FAIL because witness.blockHash != stored.state_root
       const result = await canister.icrc149_verify_witness(maliciousWitness, [proposalId]);
-      
+
       expect('Err' in result).toBe(true);
       if ('Err' in result) {
         console.log("✅ SECURITY TEST PASSED: Malicious witness rejected");
