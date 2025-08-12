@@ -1,36 +1,54 @@
 import { browser } from '$app/environment';
-import { SiweMessage } from 'siwe';
-import { ethers } from 'ethers';
-import { setAuth, setAuthError, setConnecting, clearAuth } from './stores/auth.js';
+import { createWalletClient, custom } from 'viem';
+import { mainnet, hardhat } from 'viem/chains';
+import { siweManager } from './siwe-provider.js';
+import { setWalletConnected, setAuthError, setConnecting, clearAuth, setIcpIdentity } from './stores/auth.js';
 
-let provider = null;
-let signer = null;
+let walletClient = null;
+let currentAddress = null;
 
-// Initialize Ethereum provider
-export async function initializeEthereumProvider() {
+// Initialize wallet client
+export async function initializeWalletClient() {
     if (!browser || !window.ethereum) {
         throw new Error('MetaMask or compatible wallet not found');
     }
     
-    provider = new ethers.BrowserProvider(window.ethereum);
-    return provider;
+    // Determine the chain based on environment
+    const chain = window.location.hostname === 'localhost' ? hardhat : mainnet;
+    
+    walletClient = createWalletClient({
+        chain,
+        transport: custom(window.ethereum)
+    });
+    
+    // Set the wallet client in the SIWE manager
+    if (siweManager) {
+        siweManager.setWalletClient(walletClient);
+    }
+    
+    return walletClient;
 }
 
-// Connect wallet
+// Connect wallet (just wallet connection, not SIWE login)
 export async function connectWallet() {
     try {
         setConnecting(true);
         
-        if (!provider) {
-            await initializeEthereumProvider();
+        if (!walletClient) {
+            await initializeWalletClient();
         }
         
         // Request account access
-        await provider.send("eth_requestAccounts", []);
-        signer = await provider.getSigner();
-        const address = await signer.getAddress();
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
         
-        setAuth(address);
+        // Get the first account
+        const [address] = await walletClient.getAddresses();
+        if (!address) {
+            throw new Error('No accounts available');
+        }
+        
+        currentAddress = address;
+        setWalletConnected(address);
         return address;
     } catch (error) {
         console.error('Failed to connect wallet:', error);
@@ -39,120 +57,108 @@ export async function connectWallet() {
     }
 }
 
-// Disconnect wallet
+// Full SIWE login process (wallet connection + ICP identity)
+export async function loginWithSiwe() {
+    try {
+        // First ensure wallet is connected
+        if (!currentAddress) {
+            await connectWallet();
+        }
+        
+        if (!siweManager) {
+            throw new Error('SIWE manager not initialized');
+        }
+        
+        // Perform SIWE login to get ICP identity
+        const identity = await siweManager.login();
+        
+        if (identity) {
+            // Get the delegation chain from the SIWE state
+            const state = siweManager.siweStateStore?.getSnapshot?.()?.context;
+            setIcpIdentity(identity, state?.delegationChain);
+        }
+        
+        return identity;
+    } catch (error) {
+        console.error('SIWE login failed:', error);
+        setAuthError(error.message);
+        throw error;
+    }
+}
+
+// Disconnect wallet and clear SIWE session
 export function disconnectWallet() {
-    provider = null;
-    signer = null;
+    walletClient = null;
+    currentAddress = null;
+    
+    // Clear SIWE session
+    if (siweManager) {
+        siweManager.clear();
+    }
+    
     clearAuth();
-}
-
-// Create SIWE message and signature for proposal creation
-export async function createSiweProofForProposal(contractAddress, chainId = 31337) {
-    if (!signer) {
-        throw new Error('Wallet not connected');
-    }
-    
-    const address = await signer.getAddress();
-    const currentTime = Date.now();
-    const currentTimeNanos = BigInt(currentTime) * 1_000_000n;
-    const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
-    
-    const currentTimeISO = new Date(currentTime).toISOString();
-    const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
-    
-    const domain = window.location.host;
-    const origin = window.location.origin;
-    
-    const siweMessage = new SiweMessage({
-        domain: domain,
-        address: address,
-        statement: `Create proposal for contract ${contractAddress}`,
-        uri: origin,
-        version: '1',
-        chainId: chainId,
-        nonce: expirationTimeNanos.toString(),
-        issuedAt: currentTimeISO,
-        expirationTime: expirationTimeISO,
-        resources: [`contract:${contractAddress}`]
-    });
-    
-    const message = siweMessage.prepareMessage();
-    const signature = await signer.signMessage(message);
-    
-    return {
-        message: message,
-        signature: ethers.getBytes(signature)
-    };
-}
-
-// Create SIWE message for voting
-export async function createSiweProofForVoting(proposalId, choice, contractAddress, chainId = 31337) {
-    if (!signer) {
-        throw new Error('Wallet not connected');
-    }
-    
-    const address = await signer.getAddress();
-    const currentTime = Date.now();
-    const currentTimeNanos = BigInt(currentTime) * 1_000_000n;
-    const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
-    
-    const currentTimeISO = new Date(currentTime).toISOString();
-    const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
-    
-    const domain = window.location.host;
-    const origin = window.location.origin;
-    
-    const siweMessage = new SiweMessage({
-        domain: domain,
-        address: address,
-        statement: `Vote ${choice} on proposal ${proposalId} for contract ${contractAddress}`,
-        uri: origin,
-        version: '1',
-        chainId: chainId,
-        nonce: expirationTimeNanos.toString(),
-        issuedAt: currentTimeISO,
-        expirationTime: expirationTimeISO,
-        resources: [`proposal:${proposalId}`, `contract:${contractAddress}`]
-    });
-    
-    const message = siweMessage.prepareMessage();
-    const signature = await signer.signMessage(message);
-    
-    return {
-        message: message,
-        signature: ethers.getBytes(signature)
-    };
 }
 
 // Get current wallet address
 export async function getCurrentAddress() {
-    if (!signer) {
+    if (!walletClient) {
         return null;
     }
-    return await signer.getAddress();
+    
+    try {
+        const [address] = await walletClient.getAddresses();
+        return address;
+    } catch (error) {
+        console.error('Failed to get current address:', error);
+        return null;
+    }
 }
 
 // Get current chain ID
 export async function getCurrentChainId() {
-    if (!signer) {
+    if (!walletClient) {
         return null;
     }
-    const network = await signer.provider.getNetwork();
-    return Number(network.chainId);
+    
+    try {
+        const chainId = await walletClient.getChainId();
+        return Number(chainId);
+    } catch (error) {
+        console.error('Failed to get chain ID:', error);
+        return null;
+    }
 }
 
 // Switch to a specific network
 export async function switchNetwork(chainId) {
-    if (!provider) {
-        throw new Error('Provider not initialized');
+    if (!window.ethereum) {
+        throw new Error('Ethereum provider not available');
     }
     
     try {
-        await provider.send('wallet_switchEthereumChain', [
-            { chainId: `0x${chainId.toString(16)}` }
-        ]);
+        await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: `0x${chainId.toString(16)}` }]
+        });
     } catch (error) {
-        // If the network doesn't exist, you might want to add it
         throw new Error(`Failed to switch to network ${chainId}: ${error.message}`);
     }
+}
+
+// Legacy function for backward compatibility - now just calls loginWithSiwe
+export async function createSiweProofForProposal(contractAddress, chainId = 31337) {
+    console.warn('createSiweProofForProposal is deprecated. Use loginWithSiwe() instead.');
+    await loginWithSiwe();
+    // Note: The actual SIWE proof generation is now handled by the ic-siwe-provider canister
+    // This function is kept for backward compatibility but should be removed in future versions
+    return { message: 'SIWE login completed', signature: new Uint8Array() };
+}
+
+// Legacy function for backward compatibility - now just calls loginWithSiwe
+export async function createSiweProofForVoting(proposalId, choice, contractAddress, chainId = 31337) {
+    console.warn('createSiweProofForVoting is deprecated. Use loginWithSiwe() instead.');
+    await loginWithSiwe();
+    // Note: The actual SIWE proof generation is now handled by the ic-siwe-provider canister
+    // This function is kept for backward compatibility but should be removed in future versions
+    return { message: 'SIWE login completed', signature: new Uint8Array() };
 }

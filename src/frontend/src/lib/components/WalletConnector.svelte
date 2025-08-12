@@ -1,9 +1,10 @@
 <script>
     import { onMount } from "svelte";
-    import { authStore } from "../stores/auth.js";
+    import { siweAuthStore } from "../stores/auth.js";
     import {
         connectWallet,
         disconnectWallet,
+        loginWithSiwe,
         getCurrentAddress,
         getCurrentChainId,
         switchNetwork,
@@ -11,6 +12,7 @@
     import { getNetworkInfo } from "../utils.js";
 
     export let showNetworkInfo = true;
+    export let enableSiweLogin = true; // Option to enable full SIWE login
 
     let currentChainId = null;
     let networkInfo = null;
@@ -22,11 +24,8 @@
                 const address = await getCurrentAddress();
                 const chainId = await getCurrentChainId();
                 if (address) {
-                    authStore.update((state) => ({
-                        ...state,
-                        isAuthenticated: true,
-                        walletAddress: address,
-                    }));
+                    // Just set wallet as connected, don't trigger SIWE login automatically
+                    await connectWallet();
                     currentChainId = chainId;
                     networkInfo = getNetworkInfo(chainId);
                 }
@@ -65,6 +64,14 @@
         }
     }
 
+    async function handleSiweLogin() {
+        try {
+            await loginWithSiwe();
+        } catch (error) {
+            console.error("SIWE login failed:", error);
+        }
+    }
+
     function handleDisconnect() {
         disconnectWallet();
         currentChainId = null;
@@ -75,10 +82,8 @@
         if (accounts.length === 0) {
             handleDisconnect();
         } else {
-            authStore.update((state) => ({
-                ...state,
-                walletAddress: accounts[0],
-            }));
+            // Re-connect with new account
+            handleConnect();
         }
     }
 
@@ -86,13 +91,10 @@
         currentChainId = parseInt(chainId, 16);
         networkInfo = getNetworkInfo(currentChainId);
 
-        // Update the store or trigger re-authentication if needed
+        // Update chain info but don't automatically re-authenticate
         const address = await getCurrentAddress();
         if (address) {
-            authStore.update((state) => ({
-                ...state,
-                walletAddress: address,
-            }));
+            await connectWallet();
         }
     }
 
@@ -112,12 +114,29 @@
 </script>
 
 <div class="wallet-connector">
-    {#if $authStore.isAuthenticated}
+    {#if $siweAuthStore.isAuthenticated}
         <div class="wallet-info">
             <div class="address-display">
                 <span class="address"
-                    >{formatAddress($authStore.walletAddress)}</span
+                    >{formatAddress($siweAuthStore.walletAddress)}</span
                 >
+
+                <!-- Show SIWE login status -->
+                {#if enableSiweLogin}
+                    {#if $siweAuthStore.isFullyAuthenticated}
+                        <span class="siwe-badge success">IC Authenticated</span>
+                    {:else if $siweAuthStore.isLoggingIn}
+                        <span class="siwe-badge loading">Signing in...</span>
+                    {:else}
+                        <button
+                            class="siwe-login-btn"
+                            on:click={handleSiweLogin}
+                        >
+                            Sign in with Ethereum
+                        </button>
+                    {/if}
+                {/if}
+
                 <button class="disconnect-btn" on:click={handleDisconnect}>
                     Disconnect
                 </button>
@@ -135,10 +154,17 @@
                     {/if}
                 </div>
             {/if}
+
+            <!-- Show SIWE errors -->
+            {#if $siweAuthStore.loginError}
+                <div class="error-message">
+                    SIWE Error: {$siweAuthStore.loginError.message}
+                </div>
+            {/if}
         </div>
     {:else}
         <div class="connect-section">
-            {#if $authStore.isConnecting}
+            {#if $siweAuthStore.isConnecting}
                 <button class="connect-btn connecting" disabled>
                     Connecting...
                 </button>
@@ -148,9 +174,9 @@
                 </button>
             {/if}
 
-            {#if $authStore.error}
+            {#if $siweAuthStore.error}
                 <div class="error-message">
-                    {$authStore.error}
+                    {$siweAuthStore.error}
                 </div>
             {/if}
         </div>
@@ -178,12 +204,45 @@
         background: var(--color-surface, #f5f5f5);
         border-radius: 8px;
         border: 1px solid var(--color-border, #e0e0e0);
+        flex-wrap: wrap;
     }
 
     .address {
         font-family: "Courier New", monospace;
         font-size: 0.9rem;
         color: var(--color-text-primary, #333);
+    }
+
+    .siwe-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    .siwe-badge.success {
+        background: var(--color-success, #28a745);
+        color: white;
+    }
+
+    .siwe-badge.loading {
+        background: var(--color-warning, #ffc107);
+        color: var(--color-text-primary, #333);
+    }
+
+    .siwe-login-btn {
+        padding: 0.25rem 0.75rem;
+        background: var(--color-primary, #007bff);
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+    .siwe-login-btn:hover {
+        background: var(--color-primary-dark, #0056b3);
     }
 
     .disconnect-btn {

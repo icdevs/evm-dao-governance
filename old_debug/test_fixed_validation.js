@@ -11,7 +11,7 @@ async function testFixedWitnessValidation() {
   
   const canister = Actor.createActor(evmDaoBridgeIdl, {
     agent,
-    canisterId: process.env.CANISTER_ID_MAIN || 'br5f7-7uaaa-aaaaa-qaaca-cai'
+    canisterId: process.env.CANISTER_ID_BACKEND || 'br5f7-7uaaa-aaaaa-qaaca-cai'
   });
   
   console.log("\n1️⃣ SETUP: Adding test contract configuration...");
@@ -27,7 +27,7 @@ async function testFixedWitnessValidation() {
     },
     rpc_service: {
       rpc_type: "custom",
-      canister_id: "7hfb6-caaaa-aaaar-qadga-cai",
+      canister_id: process.env.CANISTER_ID_EVM_RPC || "7hfb6-caaaa-aaaar-qadga-cai",
       custom_config: []
     },
     contract_type: { ERC20: null },

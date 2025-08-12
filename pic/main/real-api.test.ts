@@ -94,7 +94,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
         action: { Motion: 'Test motion proposal for governance' },
         members: [
           {
-            id: Principal.fromText('7hfb6-caaaa-aaaar-qadga-cai'),
+            id: Principal.fromText(process.env['CANISTER_ID_EVM_RPC'] || '7hfb6-caaaa-aaaar-qadga-cai'),
             votingPower: 1000n
           }
         ],
