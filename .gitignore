@@ -2,3 +2,5 @@ src/declarations/
 package-lock.json
 .mops/
 .dfx/
+node_modules
+js/dist/

@@ -3,7 +3,7 @@ name = "evmdaobridge"
 version = "0.1."
 description = "evmdaobridge description"
 repository = "https://github.com/Pan Industrial/evmdaobridge"
-keywords = [ "evmdaobridge" ]
+keywords = ["evmdaobridge"]
 
 [dependencies]
 base = "0.14.3"
@@ -14,7 +14,7 @@ star = "0.1.1"
 map = "9.0.1"
 icrc10-mo = "0.0.1"
 stable-local-log = "0.1.1"
-dao-proposal-engine = "0.1.3"
+dao-proposal-engine = "1.0.1"
 stableheapbtreemap = "1.5.0"
 rlp-motoko = "https://github.com/relaxed04/rlp-motoko#master@16ee578b1315dd160718f1379a7e20c1f33c7d0d"
 sha3 = "0.1.1"
