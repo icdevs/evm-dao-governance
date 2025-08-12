@@ -6,3 +6,4 @@ node_modules
 src/frontend/dist/
 src/frontend_old/dist/
 .svelte-kit/
+.env
