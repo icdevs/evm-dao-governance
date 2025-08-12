@@ -7,10 +7,10 @@ import { spawn, execSync } from 'child_process';
 import { ethers, JsonRpcProvider } from 'ethers';
 
 // Runtime import: include the .js extension
-import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/main/main.did.js";
+import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/backend/backend.did.js";
 
 // Type-only import: import types from the candid interface without the extension
-import type { _SERVICE as mainService, SIWEProof } from "../../src/declarations/main/main.did.js";
+import type { _SERVICE as mainService, SIWEProof } from "../../src/declarations/backend/backend.did.js";
 
 // Import SIWE utilities
 import { createSIWEProofForProposal, createSimpleSIWEProof } from "../utils/siwe-utils";

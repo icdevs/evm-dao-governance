@@ -7,11 +7,11 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 import { ethers, JsonRpcProvider, Contract } from 'ethers';
 
 // Runtime import: include the .js extension
-import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/main/main.did.js";
+import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/backend/backend.did.js";
 import { idlFactory as evmRpcIDLFactory, init as evmRpcInit } from "../../src/declarations/evm_rpc/evm_rpc.did.js";
 
 // Type-only import: import types from the candid interface without the extension
-import type { _SERVICE as mainService } from "../../src/declarations/main/main.did.js";
+import type { _SERVICE as mainService } from "../../src/declarations/backend/backend.did.js";
 import type { _SERVICE as evmRpcService } from "../../src/declarations/evm_rpc/evm_rpc.did.js";
 
 const admin = createIdentity("admin");

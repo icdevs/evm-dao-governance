@@ -15,11 +15,11 @@ import { generateTokenBalanceWitness, validateWitnessIntegrity, getTokenBalance 
 };
 
 // Runtime import: include the .js extension
-import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/main/main.did.js";
+import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/backend/backend.did.js";
 import { idlFactory as evmRpcIDLFactory, init as evmRpcInit } from "../../src/declarations/evm_rpc/evm_rpc.did.js";
 
 // Type-only import: import types from the candid interface without the extension
-import type { _SERVICE as mainService, VoteArgs, VoteChoice, Witness, SIWEProof, EthTx } from "../../src/declarations/main/main.did.js";
+import type { _SERVICE as mainService, VoteArgs, VoteChoice, Witness, SIWEProof, EthTx } from "../../src/declarations/backend/backend.did.js";
 import type { _SERVICE as evmRpcService } from "../../src/declarations/evm_rpc/evm_rpc.did.js";
 
 // Define the actual CreateProposalRequest type based on the generated interface

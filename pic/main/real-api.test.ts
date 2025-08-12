@@ -4,7 +4,7 @@
 import { PocketIc } from '@dfinity/pic';
 import { ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
-import { idlFactory, _SERVICE, init as mainInit } from '../../src/declarations/main/main.did.js';
+import { idlFactory, _SERVICE, init as mainInit } from '../../src/declarations/backend/backend.did.js';
 import { IDL } from '@dfinity/candid';
 
 describe('EVMDAOBridge Real API Integration Tests', () => {

@@ -12,10 +12,10 @@ import type {
 } from "@dfinity/pic";
 
 // Runtime import: include the .js extension
-import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/main/main.did.js";
+import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/backend/backend.did.js";
 
 // Type-only import: import types from the candid interface without the extension
-import type { _SERVICE as mainService } from "../../src/declarations/main/main.did.js";
+import type { _SERVICE as mainService } from "../../src/declarations/backend/backend.did.js";
 
 export const WASM_PATH = ".dfx/local/canisters/main/main.wasm.gz";
 
