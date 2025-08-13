@@ -100,6 +100,35 @@ module {
   public let ICRC85_Timer_Namespace = "icrc85:ovs:shareaction:evmdaobridge";
   public let ICRC85_Payment_Namespace = "com.evmdaobridge-org.libraries.evmdaobridge";
 
+  // Centralized RPC service configuration helper
+  private func createRpcService(chain_id: Nat, canister_id: Principal) : MigrationTypes.Current.EthereumRPCService {
+    {
+      rpc_type = switch (chain_id) {
+        case (1) "mainnet";
+        case (5) "goerli"; 
+        case (11155111) "sepolia";
+        case (_) "custom";
+      };
+      canister_id = canister_id;
+      custom_config = switch (chain_id) {
+        case (31337 or 1337 or 1338) ?[("url", "http://127.0.0.1:8545")];
+        case (_) null;
+      };
+    }
+  };
+
+  // Enhanced helper with debug logging
+  private func createRpcServiceWithLogging(chain_id: Nat, canister_id: Principal, context: Text) : MigrationTypes.Current.EthereumRPCService {
+    let service = createRpcService(chain_id, canister_id);
+    
+    D.print("🔧 RPC_SERVICE_" # context # ": Chain ID: " # Nat.toText(chain_id));
+    D.print("🔧 RPC_SERVICE_" # context # ": RPC Type: " # service.rpc_type);
+    D.print("🔧 RPC_SERVICE_" # context # ": Canister ID: " # Principal.toText(service.canister_id));
+    D.print("🔧 RPC_SERVICE_" # context # ": Custom Config: " # debug_show(service.custom_config));
+    
+    service;
+  };
+
   public func Init<system>(config : {
     manager: ClassPlusLib.ClassPlusInitializationManager;
     initialState: State;
@@ -266,6 +295,8 @@ module {
 
     // Helper function to get RPC services based on chain and service configuration
     private func getRpcServices(chain: MigrationTypes.Current.EthereumNetwork, rpc_service: MigrationTypes.Current.EthereumRPCService) : RpcServices {
+      D.print("🔧 GET_RPC_SERVICES: Processing chain " # Nat.toText(chain.chain_id) # " with RPC type: " # rpc_service.rpc_type);
+      
       switch (rpc_service.rpc_type) {
         case ("custom") {
           // Look for URL in custom_config
@@ -277,17 +308,31 @@ module {
             case (?("url", value)) value;
             case (_) "http://127.0.0.1:8545"; // Default fallback
           };
+          
+          D.print("🔧 GET_RPC_SERVICES: Using custom RPC with URL: " # url);
+          D.print("🔧 GET_RPC_SERVICES: Chain ID for custom: " # Nat.toText(chain.chain_id));
+          
           #Custom({
             chainId = Nat64.fromNat(chain.chain_id); // Convert Nat to Nat64 for EVM RPC interface
             services = [{url = url; headers = null}];
           });
         };
         case (_) {
+          D.print("🔧 GET_RPC_SERVICES: Using predefined services for chain " # Nat.toText(chain.chain_id));
           // Use predefined services based on chain
           switch (chain.chain_id) {
-            case (1) #EthMainnet(?[#Alchemy, #Ankr, #BlockPi]); // Mainnet
-            case (11155111) #EthSepolia(?[#Alchemy, #Ankr, #BlockPi]); // Sepolia
-            case (_) #EthMainnet(?[#Alchemy, #Ankr]); // Default to mainnet
+            case (1) {
+              D.print("🔧 GET_RPC_SERVICES: Mainnet providers selected");
+              #EthMainnet(?[#Alchemy, #Ankr, #BlockPi]);
+            };
+            case (11155111) {
+              D.print("🔧 GET_RPC_SERVICES: Sepolia providers selected");
+              #EthSepolia(?[#Alchemy, #Ankr, #BlockPi]);
+            };
+            case (_) {
+              D.print("🔧 GET_RPC_SERVICES: Default mainnet providers for chain " # Nat.toText(chain.chain_id));
+              #EthMainnet(?[#Alchemy, #Ankr]);
+            };
           };
         };
       };
@@ -301,6 +346,13 @@ module {
     // Helper function to get latest finalized block
     private func getLatestFinalizedBlock(rpc_service: MigrationTypes.Current.EthereumRPCService, chain: MigrationTypes.Current.EthereumNetwork) : async* Result.Result<Block, Text> {
       try {
+        D.print("🔧 FINALIZED_BLOCK: ========== DEBUG CHAIN CONFIGURATION ==========");
+        D.print("🔧 FINALIZED_BLOCK: Chain ID received: " # Nat.toText(chain.chain_id));
+        D.print("🔧 FINALIZED_BLOCK: Chain network name: " # chain.network_name);
+        D.print("🔧 FINALIZED_BLOCK: RPC service type: " # rpc_service.rpc_type);
+        D.print("🔧 FINALIZED_BLOCK: RPC canister ID: " # Principal.toText(rpc_service.canister_id));
+        D.print("🔧 FINALIZED_BLOCK: Custom config: " # debug_show(rpc_service.custom_config));
+        
         let rpcActor = getEvmRpcActor(rpc_service);
         let rpcServices = getRpcServices(chain, rpc_service);
         let config : ?RpcConfig = ?{ 
@@ -308,7 +360,7 @@ module {
           responseConsensus = null; // Use default consensus strategy
         };
         
-        D.print("Getting latest block and going back 6 blocks for finalized safety on chain " # Nat.toText(chain.chain_id));
+        D.print("Getting latest block and determining finalized block for safety on chain " # Nat.toText(chain.chain_id));
         
         // Get latest block first - this is universally supported - add timeout for test environment
         D.print("⏳ Making eth_getBlockByNumber(Latest) RPC call...");
@@ -321,7 +373,7 @@ module {
             // Determine how many blocks to go back for safety
             let confirmationBlocks = switch (chain.chain_id) {
               case (1) 6; // Ethereum mainnet - 6 blocks back approximates finalized
-              case (31337 or 1337) 2; // Local dev chains - just 2 blocks back
+              case (31337 or 1337) 0; // Local dev chains - use latest block for tests
               case (_) 6; // All other chains - 6 blocks back for safety
             };
             
@@ -401,7 +453,7 @@ module {
                     // Same logic as above but for inconsistent response
                     let confirmationBlocks = switch (chain.chain_id) {
                       case (1) 6; // Ethereum mainnet
-                      case (31337 or 1337) 2; // Local dev chains
+                      case (31337 or 1337) 0; // Local dev chains - use latest block for tests
                       case (_) 6; // All other chains
                     };
                     
@@ -511,17 +563,24 @@ module {
               
               D.print("🔧 TOTAL_SUPPLY: Clean hex string: " # cleanHex);
               
-              // Convert hex string to Nat (simplified - assumes valid hex)
+              // Convert hex string to Nat (optimized for large hex strings)
+              D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(cleanHex.size()) # " characters");
+              
+              // Remove leading zeros to reduce processing time
+              let trimmedHex = Text.trimStart(cleanHex, #char('0'));
+              let finalHex = if (trimmedHex.size() == 0) "0" else trimmedHex;
+              
+              D.print("🔧 TOTAL_SUPPLY: Trimmed hex string: " # finalHex # " (removed leading zeros)");
+              
               var totalSupply : Nat = 0;
-              var multiplier : Nat = 1;
-              let chars = Text.toArray(cleanHex);
-              var i = chars.size();
+              let chars = Text.toArray(finalHex);
               
-              D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(chars.size()) # " characters");
+              D.print("🔧 TOTAL_SUPPLY: Starting hex conversion loop, processing " # Nat.toText(chars.size()) # " characters");
               
-              while (i > 0) {
-                i -= 1;
-                let char = chars[i];
+              // Process hex digits from left to right (more efficient for large numbers)
+              var charIndex = 0;
+              for (char in chars.vals()) {
+                D.print("🔧 TOTAL_SUPPLY: Processing character " # Nat.toText(charIndex) # "/" # Nat.toText(chars.size()) # ": " # Text.fromChar(char));
                 let digit = switch (char) {
                   case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
                   case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
@@ -529,9 +588,12 @@ module {
                   case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
                   case (_) 0;
                 };
-                totalSupply += digit * multiplier;
-                multiplier *= 16;
+                totalSupply := totalSupply * 16 + digit;
+                charIndex += 1;
+                D.print("🔧 TOTAL_SUPPLY: After character " # Nat.toText(charIndex) # ", totalSupply = " # Nat.toText(totalSupply));
               };
+              
+              D.print("🔧 TOTAL_SUPPLY: Hex conversion loop completed");
               
               D.print("✅ TOTAL_SUPPLY: Successfully parsed total supply: " # Nat.toText(totalSupply));
               #ok(totalSupply);
@@ -601,16 +663,20 @@ module {
                       
                       D.print("🔧 TOTAL_SUPPLY: Clean hex string: " # cleanHex);
                       
+                      // Convert hex string to Nat (optimized for large hex strings)
+                      D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(cleanHex.size()) # " characters");
+                      
+                      // Remove leading zeros to reduce processing time
+                      let trimmedHex = Text.trimStart(cleanHex, #char('0'));
+                      let finalHex = if (trimmedHex.size() == 0) "0" else trimmedHex;
+                      
+                      D.print("🔧 TOTAL_SUPPLY: Trimmed hex string: " # finalHex # " (removed leading zeros)");
+                      
                       var totalSupply : Nat = 0;
-                      var multiplier : Nat = 1;
-                      let chars = Text.toArray(cleanHex);
-                      var i = chars.size();
+                      let chars = Text.toArray(finalHex);
                       
-                      D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(chars.size()) # " characters");
-                      
-                      while (i > 0) {
-                        i -= 1;
-                        let char = chars[i];
+                      // Process hex digits from left to right (more efficient for large numbers)
+                      for (char in chars.vals()) {
                         let digit = switch (char) {
                           case ('0') 0; case ('1') 1; case ('2') 2; case ('3') 3; case ('4') 4;
                           case ('5') 5; case ('6') 6; case ('7') 7; case ('8') 8; case ('9') 9;
@@ -618,8 +684,7 @@ module {
                           case ('d' or 'D') 13; case ('e' or 'E') 14; case ('f' or 'F') 15;
                           case (_) 0;
                         };
-                        totalSupply += digit * multiplier;
-                        multiplier *= 16;
+                        totalSupply := totalSupply * 16 + digit;
                       };
                       
                       D.print("✅ TOTAL_SUPPLY: Successfully parsed total supply: " # Nat.toText(totalSupply));
@@ -869,17 +934,8 @@ module {
             let ethAddress = await* getEthereumAddress(queueEntry.eth_tx.subaccount);
             D.print("🔄 QUEUE_PROCESS: Ethereum address: " # ethAddress);
             
-            // Configure RPC service
-            let rpc_service = {
-              rpc_type = switch (queueEntry.eth_tx.chain.chain_id) {
-                case (1) "mainnet";
-                case (5) "goerli";
-                case (11155111) "sepolia";
-                case (_) "custom";
-              };
-              canister_id = state.config.evm_rpc_canister_id;
-              custom_config = null;
-            };
+            // Configure RPC service using centralized function
+            let rpc_service = createRpcServiceWithLogging(queueEntry.eth_tx.chain.chain_id, state.config.evm_rpc_canister_id, "QUEUE_PROCESS");
             
             // Create derivation path
             let derivationPath = switch (queueEntry.eth_tx.subaccount) {
@@ -1138,18 +1194,9 @@ module {
         let ethAddress = await* getEthereumAddress(eth_tx.subaccount);
         D.print("💰 ETH_TX: Step 1 COMPLETE - Ethereum address: " # ethAddress);
         
-        // Find appropriate RPC service for this chain
+        // Find appropriate RPC service for this chain using centralized function
         D.print("💰 ETH_TX: Step 2 - Configuring RPC service...");
-        let rpc_service = {
-          rpc_type = switch (eth_tx.chain.chain_id) {
-            case (1) "mainnet";
-            case (5) "goerli";
-            case (11155111) "sepolia";
-            case (_) "custom";
-          };
-          canister_id = state.config.evm_rpc_canister_id; // Use configured EVM RPC canister
-          custom_config = null;
-        };
+        let rpc_service = createRpcServiceWithLogging(eth_tx.chain.chain_id, state.config.evm_rpc_canister_id, "ETH_TX");
         D.print("💰 ETH_TX: Step 2 COMPLETE - RPC service type: " # rpc_service.rpc_type);
         D.print("💰 ETH_TX: Step 2 COMPLETE - RPC canister ID: " # Principal.toText(rpc_service.canister_id));
         
@@ -1780,12 +1827,8 @@ module {
     public func test_parallel_rpc_calls(_caller: Principal, rpc_canister_id: Principal) : async {#Ok: (Nat, Nat, Nat); #Err: Text} {
       D.print("🧪 TEST: Starting 3 simple parallel block requests");
       
-      // Use provided RPC canister ID
-      let rpc_service = {
-        rpc_type = "custom";
-        canister_id = rpc_canister_id;
-        custom_config = ?[("url", "http://127.0.0.1:8545")];
-      };
+      // Use centralized RPC service creation for testing
+      let rpc_service = createRpcServiceWithLogging(31337, rpc_canister_id, "TEST");
       
       let chain = {
         chain_id = 31337;
@@ -2631,6 +2674,15 @@ module {
                 return #Err("Internal error: snapshot contract config not found");
             };
         };
+
+        // DEBUG: Log the snapshot contract configuration being used
+        D.print("🎯 PROPOSAL_CREATE: ========== SNAPSHOT CONFIG DEBUG ==========");
+        D.print("🎯 PROPOSAL_CREATE: Contract address: " # final_snapshot_contract_config.contract_address);
+        D.print("🎯 PROPOSAL_CREATE: Chain ID: " # Nat.toText(final_snapshot_contract_config.chain.chain_id));
+        D.print("🎯 PROPOSAL_CREATE: Chain network name: " # final_snapshot_contract_config.chain.network_name);
+        D.print("🎯 PROPOSAL_CREATE: RPC service type: " # final_snapshot_contract_config.rpc_service.rpc_type);
+        D.print("🎯 PROPOSAL_CREATE: RPC canister ID: " # Principal.toText(final_snapshot_contract_config.rpc_service.canister_id));
+        D.print("🎯 PROPOSAL_CREATE: Custom config: " # debug_show(final_snapshot_contract_config.rpc_service.custom_config));
 
         // Create snapshot for this proposal using the specified snapshot contract
         // Get latest finalized block from RPC
@@ -3524,17 +3576,8 @@ module {
               let ethAddress = await* getEthereumAddress(queuedTransaction.eth_tx.subaccount);
               D.print("🚀 QUEUE_PROCESSOR: Ethereum address: " # ethAddress);
               
-              // Configure RPC service
-              let rpc_service = {
-                rpc_type = switch (queuedTransaction.eth_tx.chain.chain_id) {
-                  case (1) "mainnet";
-                  case (5) "goerli";
-                  case (11155111) "sepolia";
-                  case (_) "custom";
-                };
-                canister_id = state.config.evm_rpc_canister_id;
-                custom_config = null;
-              };
+              // Configure RPC service using centralized function
+              let rpc_service = createRpcServiceWithLogging(queuedTransaction.eth_tx.chain.chain_id, state.config.evm_rpc_canister_id, "QUEUE_PROCESSOR");
               
               // Create derivation path
               let derivationPath = switch (queuedTransaction.eth_tx.subaccount) {
@@ -4019,6 +4062,25 @@ module {
         queue_entries = queueEntries;
         processed_entries = processedEntries;
       };
+    };
+
+    // Debug function to show current RPC configuration
+    public func debug_rpc_configuration(chain_id: Nat) : {
+      rpc_type: Text;
+      canister_id: Text;
+      custom_config: ?[(Text, Text)];
+      resolved_rpc_services: Text;
+    } {
+      let service = createRpcService(chain_id, state.config.evm_rpc_canister_id);
+      let chain = { chain_id = chain_id; network_name = "debug" };
+      let rpcServices = getRpcServices(chain, service);
+      
+      {
+        rpc_type = service.rpc_type;
+        canister_id = Principal.toText(service.canister_id);
+        custom_config = service.custom_config;
+        resolved_rpc_services = debug_show(rpcServices);
+      }
     };
 
   };
