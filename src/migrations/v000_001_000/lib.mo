@@ -9,12 +9,10 @@ import BTree "mo:stableheapbtreemap/BTree";
 import Nat "mo:base/Nat";
 import Text "mo:base/Text";
 
-
-
 module {
 
   //do not change the signature of this function or class-plus migrations will not work.
-  public func upgrade(_prevmigration_state: MigrationTypes.State, args: MigrationTypes.Args, _caller: Principal, _canister: Principal): MigrationTypes.State {
+  public func upgrade(_prevmigration_state : MigrationTypes.State, args : MigrationTypes.Args, _caller : Principal, _canister : Principal) : MigrationTypes.State {
 
     /*
     todo: implement init args
@@ -25,8 +23,8 @@ module {
           case(?restore){
             let existingPrevIds = BTree.
             (restore.)
-          }
-        }
+          };
+        };
       };
       case (_) {("nobody")};
     };
@@ -34,21 +32,19 @@ module {
 
     // You must output the same type that is defined in the types.mo file in this directory.
 
-
-    
     let state : v0_1_0.State = {
-      var config = switch(args) {
-        case(?{snapshot_contracts; execution_contracts; approved_icp_methods; admin_principals}) {
+      var config = switch (args) {
+        case (?{ snapshot_contracts; execution_contracts; approved_icp_methods; admin_principals }) {
           let snapshotTree = BTree.init<Text, v0_1_0.SnapshotContractConfig>(null);
           for (contract in snapshot_contracts.vals()) {
             ignore BTree.insert(snapshotTree, Text.compare, contract.contract_address, contract);
           };
-          
+
           let executionTree = BTree.init<Text, v0_1_0.ExecutionContractConfig>(null);
           for (contract in execution_contracts.vals()) {
             ignore BTree.insert(executionTree, Text.compare, contract.contract_address, contract);
           };
-          
+
           let icpMethodsTree = BTree.init<Text, v0_1_0.ICPMethodConfig>(null);
           for (method in approved_icp_methods.vals()) {
             let key = Principal.toText(method.canister) # ":" # method.method;
@@ -56,11 +52,11 @@ module {
           };
 
           let adminTree = BTree.init<Principal, Bool>(null);
-          
+
           for (admin in admin_principals.vals()) {
             ignore BTree.insert(adminTree, Principal.compare, admin, true);
           };
-          
+
           {
             var snapshot_contracts = snapshotTree;
             var execution_contracts = executionTree;
@@ -75,23 +71,23 @@ module {
               };
               case (null) 4 * 24 * 60 * 60 * 1_000_000_000; // Default to 4 days in nanoseconds if no args provided
             };
-            var default_snapshot_contract = if (BTree.size(snapshotTree) > 0) { 
+            var default_snapshot_contract = if (BTree.size(snapshotTree) > 0) {
               switch (BTree.entries(snapshotTree) |> _.next()) {
                 case (?(key, _)) { ?key };
                 case (null) { null };
-              }
+              };
             } else { null };
             var evm_rpc_canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // Default to mainnet EVM RPC canister
           };
         };
-        case(null) {
+        case (null) {
           let snapshotTree = BTree.init<Text, v0_1_0.SnapshotContractConfig>(null);
           let executionTree = BTree.init<Text, v0_1_0.ExecutionContractConfig>(null);
           let icpMethodsTree = BTree.init<Text, v0_1_0.ICPMethodConfig>(null);
           let adminTree = BTree.init<Principal, Bool>(null);
           D.print("Adding admin principal: " # Principal.toText(_caller));
           ignore BTree.insert(adminTree, Principal.compare, _caller, true);
-          
+
           // Add a default snapshot contract for backward compatibility
           let defaultSnapshotContract : v0_1_0.SnapshotContractConfig = {
             contract_address = "0x0000000000000000000000000000000000000000";
@@ -109,7 +105,7 @@ module {
             enabled = true;
           };
           ignore BTree.insert(snapshotTree, Text.compare, defaultSnapshotContract.contract_address, defaultSnapshotContract);
-          
+
           {
             var snapshot_contracts = snapshotTree;
             var execution_contracts = executionTree;
@@ -121,10 +117,10 @@ module {
           };
         };
       };
-      
+
       snapshots = BTree.init<Nat, v0_1_0.ProposalSnapshot>(?32);
       var proposalEngine = {
-        proposals = [];
+        proposals = BTree.init<Nat, v0_1_0.ProposalData>(?32);
         proposalDuration = ?#days(4); // Will be overridden by dynamic config
         votingThreshold = #percent({
           percent = 50; // 50% threshold
@@ -132,20 +128,20 @@ module {
         });
         allowVoteChange = false;
       };
-      
+
       // Initialize indexes for efficient proposal filtering
       proposalsByProposer = BTree.init<Principal, BTree.BTree<Nat, Bool>>(?32);
       proposalsByStatus = BTree.init<Text, BTree.BTree<Nat, Bool>>(?32);
       proposalsByActionType = BTree.init<Text, BTree.BTree<Nat, Bool>>(?32);
       proposalsChronological = BTree.init<Nat, Nat>(?32);
-      
+
       // Initialize Ethereum nonce tracking
       ethereumNonces = BTree.init<Text, Nat>(?32);
-      
+
       icrc85 = {
-        var nextCycleActionId: ?Nat = null; // Initialize to null or a specific value if needed
-        var lastActionReported: ?Nat = null; // Initialize to null or a specific value if needed
-        var activeActions: Nat = 0; // Initialize to 0 or a specific value if needed
+        var nextCycleActionId : ?Nat = null; // Initialize to null or a specific value if needed
+        var lastActionReported : ?Nat = null; // Initialize to null or a specific value if needed
+        var activeActions : Nat = 0; // Initialize to 0 or a specific value if needed
       };
     };
 
