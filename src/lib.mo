@@ -2702,211 +2702,192 @@ module {
       };
 
       // Validate EthTransaction actions against approved execution contracts
-      let actionItem : ProposalAction = switch (proposal_args.action) {
-        case (#EthTransaction(eth_tx)) {
-          // Find execution contract by normalizing addresses for comparison
-          let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
-          var execution_contract_config : ?MigrationTypes.Current.ExecutionContractConfig = null;
-          for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
-            if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
-              execution_contract_config := ?config;
-            };
-          };
-
-          switch (execution_contract_config) {
-            case (?contract_config) {
-                if (not contract_config.enabled) {
-                    return #Err("Snapshot contract is not enabled: " # snapshot_contract_address);
-                };
-            };
-            case (null) {
-                return #Err("Snapshot contract is not approved: " # snapshot_contract_address);
-            };
-        };
+      
         
         // Validate EthTransaction actions against approved execution contracts
-        let actionItem : ProposalAction = switch (proposal_args.action) {
-            case (#EthTransaction(eth_tx)) {
-                // Find execution contract by normalizing addresses for comparison
-                let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
-                var execution_contract_config: ?MigrationTypes.Current.ExecutionContractConfig = null;
-                for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
-                    if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
-                        execution_contract_config := ?config;
-                    };
-                };
-                
-                switch (execution_contract_config) {
-                    case (?contract_config) {
-                        if (not contract_config.enabled) {
-                            return #Err("Target execution contract is not enabled: " # eth_tx.to);
-                        };
-                    };
-                    case (null) {
-                        return #Err("Target execution contract is not approved: " # eth_tx.to);
-                    };
-                };
-                #EthTransaction({
-                    to = eth_tx.to;
-                    value = eth_tx.value;
-                    data = eth_tx.data;
-                    chain = eth_tx.chain;
-                    subaccount = eth_tx.subaccount;
-                    maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
-                    maxFeePerGas = eth_tx.maxFeePerGas;
-                    gasLimit = eth_tx.gasLimit;
-                    var signature = null; // Signature will be set after proposal creation
-                    var nonce = null; // Nonce will be set during execution
-                });
-            };
-            case (#Motion(a)) {
-                // Motions don't require execution contract validation
-                #Motion(a)
-            };
-            case(#ICPCall(call)) {
-                // ICP calls don't require execution contract validation
-                #ICPCall({call with
-                    var result : ?{#Err : Text; #Ok : Blob} = null; // Result will be set after proposal execution
-                });
-            };
-        };
+      let actionItem : ProposalAction = switch (proposal_args.action) {
+          case (#EthTransaction(eth_tx)) {
+              // Find execution contract by normalizing addresses for comparison
+              let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
+              var execution_contract_config: ?MigrationTypes.Current.ExecutionContractConfig = null;
+              for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
+                  if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
+                      execution_contract_config := ?config;
+                  };
+              };
+              
+              switch (execution_contract_config) {
+                  case (?contract_config) {
+                      if (not contract_config.enabled) {
+                          return #Err("Target execution contract is not enabled: " # eth_tx.to);
+                      };
+                  };
+                  case (null) {
+                      return #Err("Target execution contract is not approved: " # eth_tx.to);
+                  };
+              };
+              #EthTransaction({
+                  to = eth_tx.to;
+                  value = eth_tx.value;
+                  data = eth_tx.data;
+                  chain = eth_tx.chain;
+                  subaccount = eth_tx.subaccount;
+                  maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
+                  maxFeePerGas = eth_tx.maxFeePerGas;
+                  gasLimit = eth_tx.gasLimit;
+                  var signature = null; // Signature will be set after proposal creation
+                  var nonce = null; // Nonce will be set during execution
+              });
+          };
+          case (#Motion(a)) {
+              // Motions don't require execution contract validation
+              #Motion(a)
+          };
+          case(#ICPCall(call)) {
+              // ICP calls don't require execution contract validation
+              #ICPCall({call with
+                  var result : ?{#Err : Text; #Ok : Blob} = null; // Result will be set after proposal execution
+              });
+          };
+      
+      };
 
-        let content : MigrationTypes.Current.ProposalContent = {
-            action = actionItem;
-            snapshot = null; // Will be set after creation
-            metadata = proposal_args.metadata;
-        };
+      let content : MigrationTypes.Current.ProposalContent = {
+          action = actionItem;
+          snapshot = null; // Will be set after creation
+          metadata = proposal_args.metadata;
+      };
 
-        // Get the snapshot contract config for creating the snapshot
-        let final_snapshot_contract_config = switch (snapshot_contract_config) {
-            case (?config) config;
-            case (null) {
-                // This shouldn't happen since we validated above
-                return #Err("Internal error: snapshot contract config not found");
-            };
-        };
+      // Get the snapshot contract config for creating the snapshot
+      let final_snapshot_contract_config = switch (snapshot_contract_config) {
+          case (?config) config;
+          case (null) {
+              // This shouldn't happen since we validated above
+              return #Err("Internal error: snapshot contract config not found");
+          };
+      };
 
-        // DEBUG: Log the snapshot contract configuration being used
-        D.print("🎯 PROPOSAL_CREATE: ========== SNAPSHOT CONFIG DEBUG ==========");
-        D.print("🎯 PROPOSAL_CREATE: Contract address: " # final_snapshot_contract_config.contract_address);
-        D.print("🎯 PROPOSAL_CREATE: Chain ID: " # Nat.toText(final_snapshot_contract_config.chain.chain_id));
-        D.print("🎯 PROPOSAL_CREATE: Chain network name: " # final_snapshot_contract_config.chain.network_name);
-        D.print("🎯 PROPOSAL_CREATE: RPC service type: " # final_snapshot_contract_config.rpc_service.rpc_type);
-        D.print("🎯 PROPOSAL_CREATE: RPC canister ID: " # Principal.toText(final_snapshot_contract_config.rpc_service.canister_id));
-        D.print("🎯 PROPOSAL_CREATE: Custom config: " # debug_show(final_snapshot_contract_config.rpc_service.custom_config));
+      // DEBUG: Log the snapshot contract configuration being used
+      D.print("🎯 PROPOSAL_CREATE: ========== SNAPSHOT CONFIG DEBUG ==========");
+      D.print("🎯 PROPOSAL_CREATE: Contract address: " # final_snapshot_contract_config.contract_address);
+      D.print("🎯 PROPOSAL_CREATE: Chain ID: " # Nat.toText(final_snapshot_contract_config.chain.chain_id));
+      D.print("🎯 PROPOSAL_CREATE: Chain network name: " # final_snapshot_contract_config.chain.network_name);
+      D.print("🎯 PROPOSAL_CREATE: RPC service type: " # final_snapshot_contract_config.rpc_service.rpc_type);
+      D.print("🎯 PROPOSAL_CREATE: RPC canister ID: " # Principal.toText(final_snapshot_contract_config.rpc_service.canister_id));
+      D.print("🎯 PROPOSAL_CREATE: Custom config: " # debug_show(final_snapshot_contract_config.rpc_service.custom_config));
 
-        // Create snapshot for this proposal using the specified snapshot contract
-        // Get latest finalized block from RPC
-        let blockResult = await* getLatestFinalizedBlock(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain);
-        let (block_number, state_root, total_supply) = switch (blockResult) {
-            case (#ok(block)) {
-                // Validate and convert state root hex string to Blob
-                if (not validateStateRoot(block.stateRoot)) {
-                    return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
-                };
-                
-                switch (Utils.hexStringToBlob(block.stateRoot)) {
-                    case (#ok(state_root_blob)) {
-                        D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
-                        
-                        // Get total supply from the contract (for ERC20 tokens)
-                        D.print("🏁 SUPPLY_CALL: About to get total supply for contract type: ERC20/ERC721/Other");
-                        let total_supply = switch (final_snapshot_contract_config.contract_type) {
-                            case (#ERC20) {
-                                D.print("🏁 SUPPLY_CALL: Processing ERC20 contract, calling getTotalSupply for: " # snapshot_contract_address);
-                                let supplyResult = await* getTotalSupply(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain, snapshot_contract_address);
-                                D.print("🏁 SUPPLY_CALL: getTotalSupply call completed, processing result...");
-                                switch (supplyResult) {
-                                    case (#ok(supply)) {
-                                        D.print("🏁 SUPPLY_CALL: Successfully got total supply: " # Nat.toText(supply));
-                                        supply;
-                                    };
-                                    case (#err(errMsg)) {
-                                        D.print("🏁 SUPPLY_CALL: Failed to get total supply: " # errMsg);
-                                        // CRITICAL: totalSupply failure should cause proposal creation to FAIL, not use defaults  
-                                        return #Err("Failed to get totalSupply for snapshot: " # errMsg);
-                                    };
-                                };
-                            };
-                            case (#ERC721) {
-                                D.print("🏁 SUPPLY_CALL: ERC721 contract type detected - returning error");
-                                // CRITICAL: ERC721 total supply calculation MUST be implemented, not defaulted
-                                return #Err("ERC721 total supply calculation not implemented - this must be fixed before proposal creation");
-                            };
-                            case (#Other(_)) {
-                                D.print("🏁 SUPPLY_CALL: Other contract type detected - returning error");
-                                // CRITICAL: Custom contract types MUST have proper total supply calculation
-                                return #Err("Custom contract type total supply calculation not implemented - this must be fixed before proposal creation");
-                            };
-                        };
-                        
-                        D.print("🏁 SUPPLY_CALL: Total supply processing complete: " # Nat.toText(total_supply));
-                        
-                        (block.number, state_root_blob, total_supply);
-                    };
-                    case (#err(hexErr)) {
-                        return #Err("Failed to convert state root hex to blob: " # hexErr);
-                    };
-                };
-            };
-            case (#err(errMsg)) {
-                // CRITICAL: RPC failure should cause proposal creation to FAIL, not use defaults
-                return #Err("Failed to get latest block for snapshot: " # errMsg);
-            };
-        };
+      // Create snapshot for this proposal using the specified snapshot contract
+      // Get latest finalized block from RPC
+      let blockResult = await* getLatestFinalizedBlock(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain);
+      let (block_number, state_root, total_supply) = switch (blockResult) {
+          case (#ok(block)) {
+              // Validate and convert state root hex string to Blob
+              if (not validateStateRoot(block.stateRoot)) {
+                  return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
+              };
+              
+              switch (Utils.hexStringToBlob(block.stateRoot)) {
+                  case (#ok(state_root_blob)) {
+                      D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
+                      
+                      // Get total supply from the contract (for ERC20 tokens)
+                      D.print("🏁 SUPPLY_CALL: About to get total supply for contract type: ERC20/ERC721/Other");
+                      let total_supply = switch (final_snapshot_contract_config.contract_type) {
+                          case (#ERC20) {
+                              D.print("🏁 SUPPLY_CALL: Processing ERC20 contract, calling getTotalSupply for: " # snapshot_contract_address);
+                              let supplyResult = await* getTotalSupply(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain, snapshot_contract_address);
+                              D.print("🏁 SUPPLY_CALL: getTotalSupply call completed, processing result...");
+                              switch (supplyResult) {
+                                  case (#ok(supply)) {
+                                      D.print("🏁 SUPPLY_CALL: Successfully got total supply: " # Nat.toText(supply));
+                                      supply;
+                                  };
+                                  case (#err(errMsg)) {
+                                      D.print("🏁 SUPPLY_CALL: Failed to get total supply: " # errMsg);
+                                      // CRITICAL: totalSupply failure should cause proposal creation to FAIL, not use defaults  
+                                      return #Err("Failed to get totalSupply for snapshot: " # errMsg);
+                                  };
+                              };
+                          };
+                          case (#ERC721) {
+                              D.print("🏁 SUPPLY_CALL: ERC721 contract type detected - returning error");
+                              // CRITICAL: ERC721 total supply calculation MUST be implemented, not defaulted
+                              return #Err("ERC721 total supply calculation not implemented - this must be fixed before proposal creation");
+                          };
+                          case (#Other(_)) {
+                              D.print("🏁 SUPPLY_CALL: Other contract type detected - returning error");
+                              // CRITICAL: Custom contract types MUST have proper total supply calculation
+                              return #Err("Custom contract type total supply calculation not implemented - this must be fixed before proposal creation");
+                          };
+                      };
+                      
+                      D.print("🏁 SUPPLY_CALL: Total supply processing complete: " # Nat.toText(total_supply));
+                      
+                      (block.number, state_root_blob, total_supply);
+                  };
+                  case (#err(hexErr)) {
+                      return #Err("Failed to convert state root hex to blob: " # hexErr);
+                  };
+              };
+          };
+          case (#err(errMsg)) {
+              // CRITICAL: RPC failure should cause proposal creation to FAIL, not use defaults
+              return #Err("Failed to get latest block for snapshot: " # errMsg);
+          };
+      };
 
-        D.print("🏁 PROPOSAL_CREATE: About to create proposal with total supply: " # Nat.toText(total_supply));
-        D.print("🏁 PROPOSAL_CREATE: Block number: " # Nat.toText(block_number));
-        D.print("🏁 PROPOSAL_CREATE: Contract address: " # snapshot_contract_address);
+      D.print("🏁 PROPOSAL_CREATE: About to create proposal with total supply: " # Nat.toText(total_supply));
+      D.print("🏁 PROPOSAL_CREATE: Block number: " # Nat.toText(block_number));
+      D.print("🏁 PROPOSAL_CREATE: Contract address: " # snapshot_contract_address);
 
-        // Create a dynamic proposal with total supply as the total voting power
-        let result = await* getProposalEngine().createProposal<system>(
-            caller, 
-            content, 
-            [], // No initial members - they will be added as they vote
-            #dynamic({ totalVotingPower = null })
-        );
-        
-        D.print("🏁 PROPOSAL_CREATE: getProposalEngine().createProposal call completed");
-        
-        switch(result) {
-            case(#ok(proposal_id)) {
-                let snapshot : MigrationTypes.Current.ProposalSnapshot = {
-                    contract_address = snapshot_contract_address;
-                    chain = final_snapshot_contract_config.chain;
-                    block_number = block_number;
-                    state_root = state_root;
-                    total_supply = total_supply;
-                    snapshot_time = natNow();
-                };
+      // Create a dynamic proposal with total supply as the total voting power
+      let result = await* getProposalEngine().createProposal<system>(
+          caller, 
+          content, 
+          [], // No initial members - they will be added as they vote
+          #dynamic({ totalVotingPower = null })
+      );
+      
+      D.print("🏁 PROPOSAL_CREATE: getProposalEngine().createProposal call completed");
+      
+      switch(result) {
+          case(#ok(proposal_id)) {
+              let snapshot : MigrationTypes.Current.ProposalSnapshot = {
+                  contract_address = snapshot_contract_address;
+                  chain = final_snapshot_contract_config.chain;
+                  block_number = block_number;
+                  state_root = state_root;
+                  total_supply = total_supply;
+                  snapshot_time = natNow();
+              };
 
-                ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
-                
-                // Add proposal to indexes for efficient filtering
-                switch(getProposalEngine().getProposal(proposal_id)) {
-                    case (?proposal) {
-                        addProposalToIndexes(proposal_id, proposal, content);
-                    };
-                    case (null) {
-                        // This shouldn't happen since we just created the proposal
-                        D.print("Warning: Could not find proposal " # Nat.toText(proposal_id) # " for indexing");
-                    };
-                };
+              ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
+              
+              // Add proposal to indexes for efficient filtering
+              switch(getProposalEngine().getProposal(proposal_id)) {
+                  case (?proposal) {
+                      addProposalToIndexes(proposal_id, proposal, content);
+                  };
+                  case (null) {
+                      // This shouldn't happen since we just created the proposal
+                      D.print("Warning: Could not find proposal " # Nat.toText(proposal_id) # " for indexing");
+                  };
+              };
 
-                D.print("🏁 PROPOSAL_CREATE: Successfully created proposal with ID: saving engine state " # Nat.toText(proposal_id))  ;
-                
-                saveProposalEngineState();
-                #Ok(proposal_id);
-            };
-            case(#err(err)) {
-                D.print("❌ PROPOSAL_CREATE: " # debug_show(err));
-                switch(err) {
-                    
-                    case(#notEligible) #Err("Caller not eligible to create proposals");
-                    case(#invalid(errors)) #Err("Invalid proposal: " # Text.join(", ", errors.vals()));
-                };
-            };
-        };
+              D.print("🏁 PROPOSAL_CREATE: Successfully created proposal with ID: saving engine state " # Nat.toText(proposal_id))  ;
+              
+              saveProposalEngineState();
+              #Ok(proposal_id);
+          };
+          case(#err(err)) {
+              D.print("❌ PROPOSAL_CREATE: " # debug_show(err));
+              switch(err) {
+                  
+                  case(#notEligible) #Err("Caller not eligible to create proposals");
+                  case(#invalid(errors)) #Err("Invalid proposal: " # Text.join(", ", errors.vals()));
+              };
+          };
+      };
     };
 
     // Vote on proposal
