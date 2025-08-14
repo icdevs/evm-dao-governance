@@ -2,11 +2,28 @@
 
 # Script to deploy governance token and fund your MetaMask address
 # This helps set up the testing environment for DAO voting
+# Usage: ./setup_tokens.sh <YOUR_METAMASK_ADDRESS>
 
 set -e
 
+# Check if MetaMask address is provided as argument
+if [ $# -eq 0 ]; then
+    echo "❌ Error: MetaMask address is required!"
+    echo "Usage: $0 <YOUR_METAMASK_ADDRESS>"
+    echo "Example: $0 0x4A7C969110f7358bF334b49A2FF1a2585ac372B8"
+    exit 1
+fi
+
 # Configuration
-YOUR_METAMASK_ADDRESS="0x4A7C969110f7358bF334b49A2FF1a2585ac372B8"
+YOUR_METAMASK_ADDRESS="$1"
+
+# Validate Ethereum address format (basic check)
+if ! [[ $YOUR_METAMASK_ADDRESS =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+    echo "❌ Error: Invalid Ethereum address format!"
+    echo "Address must be in format: 0x followed by 40 hexadecimal characters"
+    echo "Provided: $YOUR_METAMASK_ADDRESS"
+    exit 1
+fi
 # Additional addresses to fund with tokens
 ADDITIONAL_ADDRESSES=(
     "0x148311C647Ec8a584D896c04f6492b5D9Cb3a9B0"
