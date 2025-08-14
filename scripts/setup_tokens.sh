@@ -30,12 +30,11 @@ fi
 
 echo "✅ Anvil is running"
 
-# Check if we have the sample tokens directory (look in parent directory since script is in scripts/)
-if [ ! -d "../sample-tokens" ]; then
-    echo "📦 Sample tokens directory not found. Creating simple deployment script..."
-    
-    # Create a Solidity contract file and compile it directly
-    echo "📦 Creating simple ERC20 contract..."
+# Check if we can deploy tokens directly
+echo "📦 Creating token deployment script..."
+
+# Create a Solidity contract file and compile it directly
+echo "📦 Creating simple ERC20 contract..."
     
     cat > GovernanceToken.sol << 'SOLEOF'
 // SPDX-License-Identifier: MIT
@@ -254,39 +253,6 @@ EOF
         done
         echo "3. Note the contract address for use in proposals"
     fi
-    
-else
-    echo "📦 Found sample-tokens directory. Using existing setup..."
-    
-    # Navigate to sample tokens (go up one directory first since we're in scripts/)
-    cd ../sample-tokens
-    
-    # Check if this is a Hardhat project
-    if [ -f "package.json" ]; then
-        echo "📦 Installing dependencies..."
-        npm install
-        
-        echo "🚀 Deploying governance token..."
-        npx hardhat run scripts/deploy.js --network localhost
-        
-        echo "💸 Funding multiple addresses and canister..."
-        # This would require a custom script to transfer tokens
-        echo "⚠️  Manual step: Transfer some governance tokens to all addresses:"
-        echo "   - $YOUR_METAMASK_ADDRESS"
-        for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
-            echo "   - $addr"
-        done
-        echo "   - Canister Ethereum address (get with: dfx canister call main icrc149_get_eth_address '(null)')"
-    else
-        echo "❌ Sample tokens project structure not recognized"
-        echo "📋 Please manually deploy governance tokens and fund all addresses:"
-        echo "   - $YOUR_METAMASK_ADDRESS"
-        for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
-            echo "   - $addr"
-        done
-        echo "   - Canister Ethereum address (get with: dfx canister call main icrc149_get_eth_address '(null)')"
-    fi
-fi
 
 echo ""
 echo "✅ Setup complete!"
