@@ -48,6 +48,9 @@ fi
 echo "✅ Anvil is running"
 
 # Check if we have the sample tokens directory (look in parent directory since script is in scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+pushd "$SCRIPT_DIR" > /dev/null
+
 if [ ! -d "../sample-tokens" ]; then
     echo "📦 Sample tokens directory not found. Creating simple deployment script..."
     
@@ -194,6 +197,9 @@ else
         echo "   - Canister Ethereum address (get with: dfx canister call main icrc149_get_eth_address '(null)')"
     fi
 fi
+
+# Return to original directory
+popd > /dev/null
 
 echo ""
 echo "✅ Setup complete!"
