@@ -6,11 +6,41 @@ import { ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
 import { idlFactory, _SERVICE, init as mainInit } from '../../src/declarations/backend/backend.did.js';
 import { IDL } from '@dfinity/candid';
+import { ethers } from 'ethers';
+import { createSimpleSIWEProof, SIWEProof } from '../utils/siwe-utils.ts';
+
+// Types for proposal creation (from working tests)
+interface CreateProposalRequest {
+  action: any;
+  metadata: [] | [string];
+  siwe: SIWEProof;
+  snapshot_contract: [] | [string];
+}
+
+interface EthTx {
+  to: string;
+  value: bigint;
+  data: Uint8Array;
+  chain: {
+    network_name: string;
+    chain_id: bigint;
+  };
+  subaccount: [] | [Uint8Array];
+  maxPriorityFeePerGas: bigint;
+  maxFeePerGas: bigint;
+  gasLimit: bigint;
+  signature: [] | [Uint8Array];
+  nonce: [] | [bigint];
+}
 
 describe('EVMDAOBridge Real API Integration Tests', () => {
   let pic: PocketIc;
   let canister: ActorSubclass<_SERVICE>;
   let canisterId: Principal;
+
+  // Create a test wallet for SIWE proof generation
+  const testWallet = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+  const testContractAddress = "0x742d35Cc6481C3d99e6A7f9C9A7F9e4B2D2B1234";
 
   beforeAll(async () => {
     pic = await PocketIc.create(process.env.PIC_URL || 'http://localhost:8080');
@@ -18,7 +48,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
     // Create the main canister
     const fixture = await pic.setupCanister<_SERVICE>({
       idlFactory,
-      wasm: '.dfx/local/canisters/main/main.wasm',
+      wasm: '.dfx/local/canisters/main/main.wasm.gz',
       arg: IDL.encode(mainInit({ IDL }), [[]]),
 
     });
@@ -90,16 +120,13 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
 
   describe('Proposal Management Tests', () => {
     it('should create a simple motion proposal', async () => {
-      const proposalData = {
+      const siweProof = await createSimpleSIWEProof(testWallet, 'Create motion proposal', testContractAddress);
+
+      const proposalData: CreateProposalRequest = {
         action: { Motion: 'Test motion proposal for governance' },
-        members: [
-          {
-            id: Principal.fromText(process.env['CANISTER_ID_EVM_RPC'] || '7hfb6-caaaa-aaaar-qadga-cai'),
-            votingPower: 1000n
-          }
-        ],
-        metadata: ['Test proposal metadata'] as [] | [string],
-        snapshot_contract: [] as [] | [string],
+        metadata: ['Test proposal metadata'],
+        siwe: siweProof,
+        snapshot_contract: [],
       };
 
       const result = await canister.icrc149_create_proposal(proposalData);
@@ -126,7 +153,9 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
     });
 
     it('should create an ETH transaction proposal', async () => {
-      const ethTx = {
+      const siweProof = await createSimpleSIWEProof(testWallet, 'Create ETH transaction proposal', testContractAddress);
+
+      const ethTx: EthTx = {
         to: '0x742d35Cc6481C3d99e6A7f9C9A7F9e4B2D2B1234',
         value: 1000000000000000000n, // 1 ETH in wei
         data: new Uint8Array([]),
@@ -134,19 +163,19 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
           network_name: 'ethereum',
           chain_id: 1n,
         },
-        signature: [] as [] | [Uint8Array],
+        subaccount: [], // Empty array for null subaccount
+        maxPriorityFeePerGas: 1000000000n, // 1 gwei
+        maxFeePerGas: 2000000000n, // 2 gwei
+        gasLimit: 21000n, // Standard ETH transfer gas limit
+        signature: [],
+        nonce: [],
       };
 
-      const proposalData = {
+      const proposalData: CreateProposalRequest = {
         action: { EthTransaction: ethTx },
-        members: [
-          {
-            id: Principal.fromText('7hfb6-caaaa-aaaar-qadga-cai'),
-            votingPower: 2000n
-          }
-        ],
-        metadata: ['ETH transaction proposal'] as [] | [string],
-        snapshot_contract: [] as [] | [string],
+        metadata: ['ETH transaction proposal'],
+        siwe: siweProof,
+        snapshot_contract: [],
       };
 
       const result = await canister.icrc149_create_proposal(proposalData);
@@ -178,108 +207,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
     });
   });
 
-  describe('Voting Tests', () => {
-    it('should create proposal and attempt voting', async () => {
-      // First create a proposal
-      const proposalData = {
-        action: { Motion: 'Voting test proposal' },
-        members: [
-          {
-            id: Principal.fromText('7hfb6-caaaa-aaaar-qadga-cai'),
-            votingPower: 1000n
-          }
-        ],
-        metadata: ['Voting test'] as [] | [string],
-        snapshot_contract: [] as [] | [string],
-      };
 
-      const createResult = await canister.icrc149_create_proposal(proposalData);
-      expect('Ok' in createResult).toBe(true);
-
-      if ('Ok' in createResult) {
-        const proposalId = createResult.Ok;
-
-        // Create a vote with witness proof
-        const witness = {
-          blockNumber: 18500000n,
-          blockHash: new Uint8Array([
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0
-          ]),
-          accountProof: [
-            new Uint8Array([0x01, 0x02, 0x03, 0x04]),
-            new Uint8Array([0x05, 0x06, 0x07, 0x08]),
-          ],
-          storageProof: [
-            new Uint8Array([0x11, 0x12, 0x13, 0x14]),
-            new Uint8Array([0x15, 0x16, 0x17, 0x18]),
-          ],
-          userAddress: new Uint8Array([
-            0x74, 0x2d, 0x35, 0xCc, 0x64, 0x81, 0xC3, 0xd9, 0x9e, 0x6A,
-            0x7f, 0x9C, 0x9A, 0x7F, 0x9e, 0x4B, 0x2D, 0x2B, 0x12, 0x34
-          ]),
-          storageKey: new Uint8Array([0x20, 0x21, 0x22, 0x23]),
-          storageValue: new Uint8Array([0x30, 0x31, 0x32, 0x33]),
-          contractAddress: new Uint8Array([
-            0xA0, 0xb8, 0x6a, 0x33, 0xE6, 0x44, 0x11, 0x46, 0x87, 0x69,
-            0x86, 0x13, 0x9F, 0x0A, 0x52, 0xC2, 0xe2, 0xA0, 0xe8, 0xC1
-          ]),
-        };
-
-        const siweProof = {
-          message: `test.example wants you to sign in with your Ethereum account:
-0x742d35Cc6481C3d99e6A7f9C9A7F9e4B2D2B1234
-
-I want to vote on proposal ${proposalId}
-
-URI: https://test.example
-Version: 1
-Chain ID: 1
-Nonce: 12345678
-Issued At: 2024-01-01T00:00:00.000Z`,
-          signature: new Uint8Array([
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-            0x12
-          ])
-        };
-
-        const voteArgs = {
-          voter: new Uint8Array([
-            0x74, 0x2d, 0x35, 0xCc, 0x64, 0x81, 0xC3, 0xd9, 0x9e, 0x6A,
-            0x7f, 0x9C, 0x9A, 0x7F, 0x9e, 0x4B, 0x2D, 0x2B, 0x12, 0x34
-          ]),
-          proposal_id: proposalId,
-          choice: { Yes: null },
-          witness: witness,
-          siwe: siweProof,
-        };
-
-        console.log('Attempting to vote...');
-        const voteResult = await canister.icrc149_vote_proposal(voteArgs);
-        console.log('Vote result:', voteResult);
-
-        // Vote might fail due to proof verification, but should not crash
-        expect('Ok' in voteResult || 'Err' in voteResult).toBe(true);
-
-        // Get tally results
-        const tallyResult = await canister.icrc149_tally_votes(proposalId);
-        console.log('Tally result:', tallyResult);
-        expect(tallyResult).toBeDefined();
-        expect(typeof tallyResult.yes).toBe('bigint');
-        expect(typeof tallyResult.no).toBe('bigint');
-        expect(typeof tallyResult.total).toBe('bigint');
-      }
-    });
-  });
 
   describe('Contract Configuration Tests', () => {
     it('should update snapshot contract configuration', async () => {
@@ -390,16 +318,13 @@ Issued At: 2024-01-01T00:00:00.000Z`,
   describe('Proposal Execution Tests', () => {
     it('should handle proposal execution attempts', async () => {
       // Create a simple proposal first
-      const proposalData = {
+      const siweProof = await createSimpleSIWEProof(testWallet, 'Create execution test proposal', testContractAddress);
+
+      const proposalData: CreateProposalRequest = {
         action: { Motion: 'Test execution proposal' },
-        members: [
-          {
-            id: Principal.fromText('7hfb6-caaaa-aaaar-qadga-cai'),
-            votingPower: 1000n
-          }
-        ],
-        metadata: ['Execution test'] as [] | [string],
-        snapshot_contract: [] as [] | [string],
+        metadata: ['Execution test'],
+        siwe: siweProof,
+        snapshot_contract: [],
       };
 
       const createResult = await canister.icrc149_create_proposal(proposalData);

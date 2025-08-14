@@ -87,9 +87,10 @@ describe("Anvil eth_getProof Integration Tests", () => {
     const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
     const signer = new ethers.Wallet(privateKey, provider);
 
-    // Simple ERC20-like contract bytecode for testing
-    // This is a minimal contract that stores balances in slot 0
-    const mockUSDCBytecode = "0x608060405234801561001057600080fd5b50336000908152602081905260409020678ac7230489e800009055610241806100396000396000f3fe608060405234801561001057600080fd5b50600436106100415760003560e01c806370a08231146100465780636aa3f44a1461007657806395d89b411461009c575b600080fd5b610064610054366004610183565b60006020819052908152604090205481565b60405190815260200160405180910390f35b610064610084366004610183565b6001600160a01b031660009081526020819052604090205490565b6100a46100a4565b6040516100b191906101a5565b60405180910390f35b60408051808201909152600581526455534443560d1b602082015290565b80356001600160a01b03811681146100e657600080fd5b919050565b634e487b7160e01b600052604160045260246000fd5b600082601f83011261011257600080fd5b813567ffffffffffffffff8082111561012d5761012d6100eb565b604051601f8301601f19908116603f01168101908282118183101715610155576101556100eb565b8160405283815286602085880101111561016e57600080fd5b83602087016020830137600092016020019190915292915050565b60006020828403121561019557600080fd5b61019e826100cf565b9392505050565b600060208083528351808285015260005b818110156101d2578581018301518582016040015282016101b6565b506000604082860101526040601f19601f830116850101925050509291505056fea26469706673582212207d4a6b4c8b5e3a9f2c1d8e7b6a5c4d3e2f1a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d64736f6c63430008110033";
+    // Simple ERC20-like contract bytecode with proper balanceOf implementation
+    // This contract implements: mapping(address => uint256) public balances at slot 0
+    // and function balanceOf(address) returns (uint256)
+    const mockUSDCBytecode = "0x608060405234801561001057600080fd5b50336000526000602052604060002068056bc75e2d630eb20000905561025a806100396000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806370a082311461003b5780636aa3f44a14610057575b600080fd5b61005560048036038101906100509190610145565b610073565b005b610071600480360381019061006c9190610145565b6100a3565b005b806000808373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b60008060008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020549050919050565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b600061010a826100df565b9050919050565b61011a816100ff565b811461012557600080fd5b50565b60008135905061013781610111565b92915050565b6000819050919050565b61015081610143565b811461015b57600080fd5b50565b60008135905061016d81610147565b92915050565b6000806040838503121561018a576101896100da565b5b600061019885828601610128565b92505060206101a98582860161015e565b915050929150505056fea2646970667358221220c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e864736f6c63430008070033";
 
     // Deploy the contract
     const deployTx = await signer.sendTransaction({
@@ -114,12 +115,15 @@ describe("Anvil eth_getProof Integration Tests", () => {
     // Set up balance for testing (directly write to storage)
     const balance = ethers.parseUnits("1000", 6); // 1000 USDC
 
-    // Calculate storage key: keccak256(userAddress + slot)
-    // Important: userAddress should be 20 bytes (not padded!)
+    // Calculate storage key: keccak256(abi.encode(userAddress, slot))
+    // For Solidity mappings: mapping(address => uint256) at slot 0
+    // Storage key = keccak256(abi.encode(userAddress, slot))
+    const addressPadded = ethers.zeroPadValue(userAddress, 32); // Pad address to 32 bytes
+    const slotPadded = ethers.zeroPadValue("0x00", 32); // slot 0, padded to 32 bytes
     const storageSlot = ethers.keccak256(
       ethers.concat([
-        ethers.getBytes(userAddress), // 20 bytes - NO padding
-        ethers.zeroPadValue("0x00", 32) // slot 0, padded to 32 bytes
+        addressPadded,  // 32 bytes - properly padded address
+        slotPadded      // 32 bytes - slot number
       ])
     );
 
@@ -175,17 +179,16 @@ describe("Anvil eth_getProof Integration Tests", () => {
   });
 
   it("should generate storage proof using eth_getProof", async () => {
-    // Calculate storage slot for user's balance
+    // Calculate storage slot for user's balance in mapping(address => uint256) at slot 0
     const balanceSlot = 0;
-    const userAddressBytes = ethers.getBytes(userAddress);
-    const slotBytes = ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32);
 
-    // Storage key is keccak256(userAddress + slot)
-    // Important: userAddress should be 20 bytes (not padded to 32!)
+    // For Solidity mappings: storage key = keccak256(abi.encode(userAddress, slot))
+    const addressPadded = ethers.zeroPadValue(userAddress, 32); // Pad address to 32 bytes
+    const slotPadded = ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32); // slot 0, padded to 32 bytes
     const storageKey = ethers.keccak256(
       ethers.concat([
-        userAddressBytes, // 20 bytes - NO padding
-        slotBytes         // 32 bytes - padded slot
+        addressPadded,  // 32 bytes - properly padded address
+        slotPadded      // 32 bytes - slot number
       ])
     );
 
@@ -393,18 +396,17 @@ describe("Anvil eth_getProof Integration Tests", () => {
     // Test that we can generate multiple proofs for different users
     const testUser2 = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"; // Second Anvil account
 
-    // Set balance for second user using anvil_setStorageAt
+    // Set balance for second user using correct storage key calculation
     const mintAmount = ethers.parseUnits("500", 6);
     const balanceSlot = 0;
-    const user2AddressBytes = ethers.getBytes(testUser2);
-    const slotBytes = ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32);
 
-    // Calculate storage key: keccak256(userAddress + slot)
-    // Important: userAddress should be 20 bytes (not padded!)
+    // Calculate storage key: keccak256(abi.encode(userAddress, slot))
+    const user2AddressPadded = ethers.zeroPadValue(testUser2, 32); // Pad address to 32 bytes
+    const slotPadded = ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32); // slot 0, padded to 32 bytes
     const storageKey2 = ethers.keccak256(
       ethers.concat([
-        user2AddressBytes, // 20 bytes - NO padding
-        slotBytes         // 32 bytes - padded slot
+        user2AddressPadded, // 32 bytes - properly padded address
+        slotPadded          // 32 bytes - slot number
       ])
     );
 

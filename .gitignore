@@ -5,5 +5,15 @@ package-lock.json
 node_modules
 src/frontend/dist/
 src/frontend_old/dist/
+cache/
+
+# Token deployment artifacts
+GovernanceToken.sol
+deploy_token.js
+check_contract.js
+transfer_tokens.js
+forge-out/
+package.json
+
 .svelte-kit/
 .env

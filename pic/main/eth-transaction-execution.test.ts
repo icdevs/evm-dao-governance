@@ -33,6 +33,10 @@ interface CreateProposalRequest {
 const MAIN_WASM_PATH = ".dfx/local/canisters/main/main.wasm.gz";
 const EVM_RPC_WASM_PATH = "./evm_rpc/evm_rpc.wasm.gz";
 
+// Chain configuration for Anvil
+const ANVIL_CHAIN_ID = 31337n;
+const BALANCE_STORAGE_SLOT = 0n;
+
 let replacer = (_key: any, value: any) => typeof value === "bigint" ? value.toString() + "n" : value;
 
 let pic: PocketIc;
@@ -222,6 +226,24 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
   // Set timeout for all tests in this suite BEFORE any operations
   jest.setTimeout(3600000); // 60 minutes - long enough for all crypto operations
 
+  // Ensure proper cleanup after all tests to prevent Jest hanging
+  afterAll(async () => {
+    console.log("🧹 Final cleanup: ensuring all background processes are stopped...");
+
+    // Force stop any background processing
+    shouldStopProcessing = true;
+    shouldStopQueueProcessing = true;
+
+    // Clean up any test environment resources
+    try {
+      await cleanupTestEnvironment();
+    } catch (error) {
+      console.warn("Warning: Error during final cleanup:", error);
+    }
+
+    console.log("✅ Final cleanup completed");
+  });
+
   // Kill any existing Anvil processes
   const killExistingProcesses = async () => {
     try {
@@ -319,8 +341,12 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
       }
     }
 
-    // Deploy governance token using the compiled contract
+    // Deploy governance token using the compiled contract with proper nonce management
     const deployer = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", provider);
+
+    // Get current nonce to ensure proper sequencing
+    let currentNonce = await deployer.getNonce();
+    console.log("Starting nonce:", currentNonce);
 
     console.log("Deploying governance token...");
     const tokenFactory = new ethers.ContractFactory(
@@ -328,21 +354,40 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
       governanceTokenArtifact.bytecode,
       deployer
     );
-    const deployedContract = await tokenFactory.deploy(deployer.address); // initialOwner parameter
+    const deployedContract = await tokenFactory.deploy(deployer.address, { nonce: currentNonce++ }); // Use explicit nonce
     await deployedContract.waitForDeployment();
     governanceTokenAddress = await deployedContract.getAddress();
     governanceToken = new Contract(governanceTokenAddress, governanceTokenArtifact.abi, deployer);
 
     console.log("Governance token deployed at:", governanceTokenAddress);
 
-    // Deploy test token for transactions
+    // Deploy test token for transactions with explicit nonce management
     console.log("Deploying test token...");
-    const testTokenDeployment = await tokenFactory.deploy(deployer.address);
+    // Add delay to ensure first deployment is processed
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const testTokenDeployment = await tokenFactory.deploy(deployer.address, { nonce: currentNonce++ });
     await testTokenDeployment.waitForDeployment();
     testTokenAddress = await testTokenDeployment.getAddress();
     testToken = new Contract(testTokenAddress, governanceTokenArtifact.abi, deployer);
 
     console.log("Test token deployed at:", testTokenAddress);
+
+    // Mine some initial blocks to ensure enough block depth for confirmations
+    console.log("🚗 Mining initial blocks to ensure sufficient block depth for confirmations...");
+    const initialBlockNumber = await provider.getBlockNumber();
+    console.log(`Current block before mining: ${initialBlockNumber}`);
+
+    // Mine 50 blocks to ensure we have enough depth even with default confirmation strategy
+    for (let i = 0; i < 50; i++) {
+      await provider.send("evm_mine", []);
+    }
+
+    const finalBlockNumber = await provider.getBlockNumber();
+    console.log(`Current block after mining: ${finalBlockNumber} (mined ${finalBlockNumber - initialBlockNumber} blocks)`);
+
+    // Add extra delay to ensure blocks are fully processed
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Create test voters with different token balances
     const voterPrivateKeys = [
@@ -461,14 +506,14 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
 
     const snapshotConfig = {
       contract_address: governanceTokenAddress,
-      chain: { chain_id: BigInt(31337), network_name: "anvil" },
+      chain: { chain_id: ANVIL_CHAIN_ID, network_name: "anvil" },
       rpc_service: {
         rpc_type: "custom",
         canister_id: evmRpc_fixture.canisterId,
-        custom_config: [[["url", "http://127.0.0.1:8545"]]] as [] | [[string, string][]]
+        custom_config: [[["url", "http://127.0.0.1:8545"], ["chain_id", String(ANVIL_CHAIN_ID)]]] as [] | [[string, string][]]
       },
       contract_type: { ERC20: null },
-      balance_storage_slot: BigInt(0), // Hardcoded to slot 0 as confirmed by discovery
+      balance_storage_slot: BALANCE_STORAGE_SLOT, // Hardcoded to slot 0 as confirmed by discovery
       enabled: true,
     };
 
@@ -485,7 +530,7 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
     // Add execution contract configuration (note: execution contracts don't have RPC service configs)
     const executionConfig = {
       contract_address: testTokenAddress,
-      chain: { chain_id: BigInt(31337), network_name: "anvil" },
+      chain: { chain_id: ANVIL_CHAIN_ID, network_name: "anvil" },
       description: ["Test token for transaction execution"] as [] | [string],
       enabled: true,
     };
@@ -553,16 +598,31 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
     // Then transfer test tokens to the DAO
     const daoTokenAmount = ethers.parseEther("1000"); // 1000 test tokens
 
+    // Wait a moment for all previous transactions to be confirmed
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
     // Get fresh nonce for DAO token transfer to avoid conflicts
     const daoTransferNonce = await provider.getTransactionCount(deployer.address, 'pending');
     console.log(`🔢 Using nonce ${daoTransferNonce} for DAO token transfer`);
 
-    const transferToDAOTx = await testToken['transfer'](daoEthereumAddress, daoTokenAmount, {
-      nonce: daoTransferNonce
-    });
-    console.log(`⏳ DAO token transfer submitted with nonce ${daoTransferNonce}...`);
-    await transferToDAOTx.wait();
-    console.log(`✅ DAO token transfer confirmed`);
+    try {
+      const transferToDAOTx = await testToken['transfer'](daoEthereumAddress, daoTokenAmount, {
+        nonce: daoTransferNonce
+      });
+      console.log(`⏳ DAO token transfer submitted with nonce ${daoTransferNonce}...`);
+      await transferToDAOTx.wait();
+      console.log(`✅ DAO token transfer confirmed`);
+    } catch (error) {
+      console.error(`❌ DAO token transfer failed:`, error);
+      // Try again with fresh nonce
+      const retryNonce = await provider.getTransactionCount(deployer.address, 'pending');
+      console.log(`🔄 Retrying with fresh nonce ${retryNonce}...`);
+      const retryTx = await testToken['transfer'](daoEthereumAddress, daoTokenAmount, {
+        nonce: retryNonce
+      });
+      await retryTx.wait();
+      console.log(`✅ DAO token transfer confirmed on retry`);
+    }
 
     // Verify DAO received the tokens
     const daoTokenBalance = await testToken['balanceOf'](daoEthereumAddress);
@@ -573,21 +633,60 @@ describe("Ethereum Transaction Execution End-to-End Test", () => {
   };
 
   // Cleanup function to tear down test environment
+  // Cleanup function to tear down test environment (enhanced from snapshot-basic.test.ts)
   const cleanupTestEnvironment = async () => {
+    console.log("🧹 Starting enhanced cleanup...");
+
+    // Stop any background RPC processing immediately
+    shouldStopProcessing = true;
+    shouldStopQueueProcessing = true;
+
+    // Wait longer for processing to stop and clear any pending timeouts
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
     // Clean up test voters array for next test
     testVoters = [];
 
+    // Clean up Anvil process first (to stop HTTP requests)
     if (anvilProcess) {
-      anvilProcess.kill('SIGTERM');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      try {
+        console.log("🛑 Terminating Anvil process...");
+        anvilProcess.kill('SIGTERM');
+        // Give it a moment to terminate gracefully
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // Force kill if still running
+        if (!anvilProcess.killed) {
+          anvilProcess.kill('SIGKILL');
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        console.log("✅ Anvil process terminated");
+      } catch (error) {
+        console.error("❌ Error terminating Anvil:", error);
+      }
     }
 
+    // Clean up PocketIC
     if (pic) {
-      await pic.tearDown();
+      try {
+        console.log("🛑 Tearing down PocketIC...");
+        await pic.tearDown();
+        console.log("✅ PocketIC torn down");
+      } catch (error) {
+        console.error("❌ Error tearing down PocketIC:", error);
+      }
     }
 
     // Kill any remaining processes
     await killExistingProcesses();
+
+    // Additional cleanup wait to ensure full isolation between tests
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Reset the flag for next test
+    shouldStopProcessing = false;
+    shouldStopQueueProcessing = false;
+    console.log("✅ Enhanced cleanup completed");
   };
 
   // Utility to create SIWE message for proposal creation
@@ -691,152 +790,399 @@ Expiration Time: ${expirationTimeISO}`;
 
   // Global flag to stop background processing
   let shouldStopProcessing = false;
+  let shouldStopQueueProcessing = false; // Separate flag for queue processing phase
 
-  // Process HTTP outcalls for RPC requests
-  async function processRPCCalls(timeout = 90000): Promise<void[]> { // Increased from 45000 to 90000
-    await pic.tick(5);
+  // Dedicated RPC processing for queue phase (without stop constraints)
+  async function processQueueRPCCalls(timeout = 90000): Promise<void[]> {
+    console.log(`🔄 processQueueRPCCalls starting with ${timeout}ms timeout`);
+    // Absolute minimum tick to reduce load 
+    await pic.tick(1);
     const startTime = Date.now();
-    const processCalls = async (): Promise<void[]> => {
-      // Check if we should stop processing
-      if (shouldStopProcessing) {
-        return [];
-      }
+    let invalidOutcallCount = 0; // Track consecutive invalid outcalls
+    const maxInvalidOutcalls = 10; // Break out if we see too many invalid outcalls
 
+    const processCalls = async (): Promise<void[]> => {
+      console.log(`🔍 processQueueRPCCalls: Getting pending HTTP outcalls...`);
       let pendingHttpsOutcalls;
       try {
         pendingHttpsOutcalls = await pic.getPendingHttpsOutcalls();
+        console.log(`🔍 processQueueRPCCalls: Got ${pendingHttpsOutcalls.length} pending outcalls`);
       } catch (error) {
         console.error(`❌ Failed to get pending HTTP outcalls:`, error);
         if (error instanceof Error && error.message.includes('InvalidCanisterHttpRequestId')) {
           console.warn(`⚠️  Encountered stale HTTP request IDs, returning empty list`);
           return [];
         }
+        if (error instanceof Error && error.message.includes('BadIngressMessage')) {
+          console.warn(`⚠️  BadIngressMessage detected, stopping RPC processing gracefully`);
+          return [];
+        }
         throw error;
       }
 
-      console.log(`📞 Found ${pendingHttpsOutcalls.length} pending HTTP outcalls`);
-
+      console.log("pendingHttpsOutcalls", pendingHttpsOutcalls.length);
       if (pendingHttpsOutcalls.length === 0) {
-        if (Date.now() - startTime >= timeout) {
-          console.log(`⏰ Timeout reached after ${timeout}ms with no outcalls`);
+        invalidOutcallCount = 0; // Reset counter when we have no outcalls
+        const elapsed = Date.now() - startTime;
+        console.log(`🔍 processQueueRPCCalls: No outcalls, elapsed: ${elapsed}ms, timeout: ${timeout}ms`);
+        if (elapsed >= timeout) {
+          console.log(`🔍 processQueueRPCCalls: Timeout reached, returning empty list`);
           return [];
         }
-        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Shorter wait for queue processing to be more responsive
+        console.log(`⏰ processQueueRPCCalls: Waiting 2 seconds before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        console.log(`🔄 processQueueRPCCalls: Recursing to check for more outcalls...`);
         return processCalls();
       }
 
-      const outcallPromises = pendingHttpsOutcalls.map(async (thisOutcall, index) => {
-        console.log(`🔄 Processing outcall ${index + 1}/${pendingHttpsOutcalls.length}`);
 
-        // Debug: Log the full outcall structure to understand what's missing
-        console.log(`🔍 DEBUG: Outcall ${index + 1} structure:`, {
-          hasRequestId: !!thisOutcall.requestId,
-          hasSubnetId: !!thisOutcall.subnetId,
-          hasUrl: !!thisOutcall.url,
-          hasMethod: !!thisOutcall.httpMethod,
-          hasHeaders: !!thisOutcall.headers,
-          hasBody: !!thisOutcall.body,
-          requestId: thisOutcall.requestId,
-          subnetId: thisOutcall.subnetId,
-          url: thisOutcall.url,
-          method: thisOutcall.httpMethod
-        });
+      // First filter out invalid outcalls, then process valid ones
+      const validOutcalls = pendingHttpsOutcalls.filter((thisOutcall: any, index: number) => {
+        // Check for null/undefined instead of falsy values since requestId can be 0
+        if (thisOutcall.requestId == null || !thisOutcall.subnetId || !thisOutcall.url || !thisOutcall.body) {
+          console.warn(`⚠️  Filtering out invalid outcall ${index + 1} - missing required fields (requestId: ${thisOutcall.requestId}, subnetId: ${!!thisOutcall.subnetId}, url: ${!!thisOutcall.url}, body: ${!!thisOutcall.body})`);
 
-        // Add validation for request ID to avoid stale requests
-        if (!thisOutcall.requestId || !thisOutcall.subnetId) {
-          console.warn(`⚠️  Skipping outcall ${index + 1} - missing requestId or subnetId`);
-          console.warn(`⚠️  Full outcall object:`, JSON.stringify(thisOutcall, null, 2));
-          return;
+          // DEBUG: Log the actual outcall structure to understand what we're dealing with
+          console.log(`🔍 DEBUG: Invalid outcall ${index + 1} structure:`, JSON.stringify(thisOutcall, null, 2));
+
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`Processing ${validOutcalls.length} valid outcalls out of ${pendingHttpsOutcalls.length} total`);
+
+      // Log what types of RPC calls we're seeing
+      validOutcalls.forEach((outcall: any, index: number) => {
+        try {
+          const decodedBody = new TextDecoder().decode(outcall.body);
+          const request = JSON.parse(decodedBody);
+          console.log(`🔍 Queue Outcall ${index + 1}: ${request.method} to ${outcall.url}`);
+        } catch (e) {
+          console.log(`🔍 Queue Outcall ${index + 1}: Could not decode body`);
+        }
+      });
+
+      // If we have no valid outcalls but have invalid ones, clear them and continue
+      if (validOutcalls.length === 0 && pendingHttpsOutcalls.length > 0) {
+        invalidOutcallCount++;
+        console.warn(`⚠️  All ${pendingHttpsOutcalls.length} outcalls are invalid - likely stale requests, continuing without processing (attempt ${invalidOutcallCount}/${maxInvalidOutcalls})`);
+
+        // If we've seen too many consecutive invalid outcalls, break out to prevent infinite loop
+        if (invalidOutcallCount >= maxInvalidOutcalls) {
+          console.error(`💥 Breaking out of invalid outcall loop after ${invalidOutcallCount} attempts - PocketIC may be in bad state`);
+          console.log(`🛑 Stopping queue RPC processing due to persistent invalid outcalls`);
+          return [];
         }
 
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return processCalls();
+      }
+
+      // Reset invalid outcall counter when we have valid outcalls
+      if (validOutcalls.length > 0) {
+        invalidOutcallCount = 0;
+      }
+
+      const outcallPromises = validOutcalls.map(async (thisOutcall: any) => {
         const decodedBody = new TextDecoder().decode(thisOutcall.body);
         let ownerRequest = JSON.parse(decodedBody);
 
-        console.log(`📨 Original request method: ${ownerRequest.method}`, ownerRequest.params);
+        console.log(`🔍 Processing queue RPC call: ${ownerRequest.method} (ID: ${ownerRequest.id})`);
 
-        // Handle different RPC method types properly
-        switch (ownerRequest.method) {
-          case "eth_call":
-            // Fix request format for eth_call if needed
-            ownerRequest = {
-              id: ownerRequest.id,
-              jsonrpc: ownerRequest.jsonrpc,
-              method: ownerRequest.method,
-              params: [{
-                to: ownerRequest.params[0].to,
-                data: ownerRequest.params[0].input || ownerRequest.params[0].data,
-                chainId: ownerRequest.params[0].chainId,
-                type: ownerRequest.params[0].type,
-                value: ownerRequest.params[0].value,
-              }, ownerRequest.params[1] || "latest"]
-            };
-            console.log(`🔧 Fixed eth_call request:`, ownerRequest.params);
-            break;
-
-          case "eth_getBlockByNumber":
-            // Ensure proper format for block requests
-            if (!ownerRequest.params || ownerRequest.params.length < 2) {
-              ownerRequest.params = [ownerRequest.params?.[0] || "latest", false];
-            }
-            console.log(`📦 Block request:`, ownerRequest.params);
-            break;
-
-          case "eth_blockNumber":
-            // No params needed for block number
-            ownerRequest.params = [];
-            console.log(`🔢 Block number request (no params)`);
-            break;
-
-          default:
-            console.log(`🔍 Unhandled method: ${ownerRequest.method}, keeping original params`);
-            break;
+        // Fix request format for eth_call using the same pattern as snapshot-basic
+        if (ownerRequest.method === "eth_call") {
+          ownerRequest = {
+            id: ownerRequest.id,
+            jsonrpc: ownerRequest.jsonrpc,
+            method: ownerRequest.method,
+            params: [{
+              to: ownerRequest.params[0].to,
+              data: ownerRequest.params[0].input || ownerRequest.params[0].data,
+              chainId: ownerRequest.params[0].chainId,
+              type: ownerRequest.params[0].type,
+              value: ownerRequest.params[0].value,
+            }, "latest"]
+          };
         }
 
+        console.log("📤 Sending queue RPC request:", ownerRequest.method, "to", thisOutcall.url);
+
         try {
-          console.log(`🌐 Making HTTP request to ${thisOutcall.url}`);
+          // Add longer timeout for HTTP requests to prevent timeout errors
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
           const response = await fetch(thisOutcall.url, {
             method: thisOutcall.httpMethod,
             headers: Object.fromEntries(thisOutcall.headers),
             body: JSON.stringify(ownerRequest),
+            signal: controller.signal
           });
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
+          clearTimeout(timeoutId);
 
           const responseBody = await response.json();
-          console.log(`✅ RPC call success - Method: ${ownerRequest.method}, Response:`, {
-            id: responseBody.id,
-            result: responseBody.result ? "✓ has result" : "✗ no result",
-            error: responseBody.error ? responseBody.error : "none"
+          console.log("📥 Queue RPC response received:", ownerRequest.method, "->", responseBody.result ? "success" : "error");
+
+          await pic.mockPendingHttpsOutcall({
+            requestId: thisOutcall.requestId,
+            subnetId: thisOutcall.subnetId,
+            response: {
+              type: 'success',
+              body: new TextEncoder().encode(JSON.stringify(responseBody)),
+              statusCode: response.status,
+              headers: [],
+            }
           });
 
-          if (responseBody.error) {
-            console.error(`❌ RPC error for ${ownerRequest.method}:`, responseBody.error);
-          }
+          console.log(`✅ Successfully mocked queue outcall for ${ownerRequest.method}`);
+
+          // Shorter delay between outcalls for faster processing
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+        } catch (error) {
+          console.error(`❌ Queue RPC call failed for ${ownerRequest.method}:`, error);
+
+          // Mock a failure response
+          const errorResponse = {
+            id: ownerRequest.id,
+            jsonrpc: "2.0",
+            error: {
+              code: -32603,
+              message: `Internal error: ${error instanceof Error ? error.message : 'Unknown error'}`
+            }
+          };
 
           try {
-            let result = await pic.mockPendingHttpsOutcall({
+            await pic.mockPendingHttpsOutcall({
               requestId: thisOutcall.requestId,
               subnetId: thisOutcall.subnetId,
               response: {
                 type: 'success',
-                body: new TextEncoder().encode(JSON.stringify(responseBody)),
-                statusCode: 200,
+                body: new TextEncoder().encode(JSON.stringify(errorResponse)),
+                statusCode: 500,
                 headers: [],
               }
             });
-
-            console.log(`📤 Mocked outcall ${index + 1} completed successfully`);
-            return result;
+            console.log(`✅ Successfully mocked error response for ${ownerRequest.method}`);
           } catch (mockError) {
-            console.error(`❌ Failed to mock outcall ${index + 1}:`, mockError);
+            console.error(`❌ Failed to mock error outcall:`, mockError);
             if (mockError instanceof Error && mockError.message.includes('InvalidCanisterHttpRequestId')) {
               console.warn(`⚠️  Skipping stale HTTP request ID: ${thisOutcall.requestId}`);
               return; // Skip this stale request
             }
             throw mockError; // Re-throw other errors
           }
+        }
+      });
+
+      const results = await Promise.all(outcallPromises);
+      console.log(`✅ processQueueRPCCalls: Completed ${results.length} outcall promises`);
+
+      return results;
+    };
+
+    console.log(`🔄 processQueueRPCCalls: Starting processCalls recursive function...`);
+    const finalResult = await processCalls();
+    console.log(`✅ processQueueRPCCalls: Completed with ${finalResult.length} results`);
+    return finalResult;
+  }
+
+  // Process HTTP outcalls for RPC requests (enhanced from snapshot-basic.test.ts)
+  async function processRPCCalls(timeout = 90000): Promise<void[]> {
+    console.log(`🔄 processRPCCalls starting with ${timeout}ms timeout`);
+    // Absolute minimum tick to reduce load 
+    await pic.tick(1);
+    const startTime = Date.now();
+    let invalidOutcallCount = 0; // Track consecutive invalid outcalls
+    const maxInvalidOutcalls = 10; // Break out if we see too many invalid outcalls
+
+    const processCalls = async (): Promise<void[]> => {
+      // Check if we should stop processing
+      if (shouldStopProcessing && shouldStopQueueProcessing) {
+        console.log(`🛑 processRPCCalls: Both stop flags are true, exiting`);
+        return [];
+      }
+
+      console.log(`🔍 processRPCCalls: Getting pending HTTP outcalls...`);
+      let pendingHttpsOutcalls;
+      try {
+        pendingHttpsOutcalls = await pic.getPendingHttpsOutcalls();
+        console.log(`🔍 processRPCCalls: Got ${pendingHttpsOutcalls.length} pending outcalls`);
+      } catch (error) {
+        console.error(`❌ Failed to get pending HTTP outcalls:`, error);
+        if (error instanceof Error && error.message.includes('InvalidCanisterHttpRequestId')) {
+          console.warn(`⚠️  Encountered stale HTTP request IDs, returning empty list`);
+          return [];
+        }
+        if (error instanceof Error && error.message.includes('BadIngressMessage')) {
+          console.warn(`⚠️  BadIngressMessage detected, stopping RPC processing gracefully`);
+          return [];
+        }
+        throw error;
+      }
+
+      console.log("pendingHttpsOutcalls", pendingHttpsOutcalls.length);
+      if (pendingHttpsOutcalls.length === 0) {
+        invalidOutcallCount = 0; // Reset counter when we have no outcalls
+        const elapsed = Date.now() - startTime;
+        console.log(`🔍 processRPCCalls: No outcalls, elapsed: ${elapsed}ms, timeout: ${timeout}ms`);
+        if (elapsed >= timeout) {
+          console.log(`🔍 processRPCCalls: Timeout reached, returning empty list`);
+          return [];
+        }
+
+        // Check if we should stop before the wait
+        if (shouldStopProcessing) {
+          console.log(`🛑 processRPCCalls: Stop processing flag is true before wait, exiting`);
+          return [];
+        }
+
+        // Very long wait between checks to give PocketIC maximum recovery time for tECDSA operations
+        console.log(`⏰ processRPCCalls: Waiting 5 seconds before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Check again after wait
+        if (shouldStopProcessing) {
+          console.log(`🛑 processRPCCalls: Stop processing flag is true after wait, exiting`);
+          return [];
+        }
+
+        console.log(`🔄 processRPCCalls: Recursing to check for more outcalls...`);
+        return processCalls();
+      }
+
+
+      // First filter out invalid outcalls, then process valid ones
+      const validOutcalls = pendingHttpsOutcalls.filter((thisOutcall: any, index: number) => {
+        // Check for null/undefined instead of falsy values since requestId can be 0
+        if (thisOutcall.requestId == null || !thisOutcall.subnetId || !thisOutcall.url || !thisOutcall.body) {
+          console.warn(`⚠️  Filtering out invalid outcall ${index + 1} - missing required fields (requestId: ${thisOutcall.requestId}, subnetId: ${!!thisOutcall.subnetId}, url: ${!!thisOutcall.url}, body: ${!!thisOutcall.body})`);
+
+          // DEBUG: Log the actual outcall structure to understand what we're dealing with
+          console.log(`🔍 DEBUG: Invalid outcall ${index + 1} structure:`, JSON.stringify(thisOutcall, null, 2));
+
+          return false;
+        }
+        return true;
+      });
+
+      console.log(`Processing ${validOutcalls.length} valid outcalls out of ${pendingHttpsOutcalls.length} total`);
+
+      // Log what types of RPC calls we're seeing
+      validOutcalls.forEach((outcall: any, index: number) => {
+        try {
+          const decodedBody = new TextDecoder().decode(outcall.body);
+          const request = JSON.parse(decodedBody);
+          console.log(`🔍 Outcall ${index + 1}: ${request.method} to ${outcall.url}`);
+        } catch (e) {
+          console.log(`🔍 Outcall ${index + 1}: Could not decode body`);
+        }
+      });
+
+      // If we have no valid outcalls but have invalid ones, clear them and continue
+      if (validOutcalls.length === 0 && pendingHttpsOutcalls.length > 0) {
+        invalidOutcallCount++;
+        console.warn(`⚠️  All ${pendingHttpsOutcalls.length} outcalls are invalid - likely stale requests, continuing without processing (attempt ${invalidOutcallCount}/${maxInvalidOutcalls})`);
+
+        // If we've seen too many consecutive invalid outcalls, break out to prevent infinite loop
+        if (invalidOutcallCount >= maxInvalidOutcalls) {
+          console.error(`💥 Breaking out of invalid outcall loop after ${invalidOutcallCount} attempts - PocketIC may be in bad state`);
+          console.log(`🛑 Stopping RPC processing due to persistent invalid outcalls`);
+          return [];
+        }
+
+        // DEBUG: Try to force clear these stale outcalls by doing a more aggressive tick
+        console.log(`🧹 Attempting to clear ${pendingHttpsOutcalls.length} stale outcalls with aggressive ticking...`);
+        try {
+          await pic.tick(3); // More aggressive ticking to try to clear stale state
+
+          // Check if they're still there
+          const afterClearOutcalls = await pic.getPendingHttpsOutcalls();
+          console.log(`🔍 After clearing attempt: ${afterClearOutcalls.length} outcalls remain`);
+
+          if (afterClearOutcalls.length > 0) {
+            console.warn(`⚠️  ${afterClearOutcalls.length} stale outcalls persist even after aggressive clearing`);
+          }
+        } catch (clearError) {
+          console.warn(`⚠️  Error during stale outcall clearing:`, clearError);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return processCalls();
+      }
+
+      // Reset invalid outcall counter when we have valid outcalls
+      if (validOutcalls.length > 0) {
+        invalidOutcallCount = 0;
+      }
+
+      const outcallPromises = validOutcalls.map(async (thisOutcall: any) => {
+        // Check again before processing each outcall
+        if (shouldStopProcessing && shouldStopQueueProcessing) {
+          console.log(`🛑 processRPCCalls: Both stop flags are true, skipping outcall`);
+          return;
+        }
+
+        const decodedBody = new TextDecoder().decode(thisOutcall.body);
+        let ownerRequest = JSON.parse(decodedBody);
+
+        console.log(`🔍 Processing RPC call: ${ownerRequest.method} (ID: ${ownerRequest.id})`);
+
+        // Fix request format for eth_call using the same pattern as snapshot-basic
+        if (ownerRequest.method === "eth_call") {
+          ownerRequest = {
+            id: ownerRequest.id,
+            jsonrpc: ownerRequest.jsonrpc,
+            method: ownerRequest.method,
+            params: [{
+              to: ownerRequest.params[0].to,
+              data: ownerRequest.params[0].input || ownerRequest.params[0].data,
+              chainId: ownerRequest.params[0].chainId,
+              type: ownerRequest.params[0].type,
+              value: ownerRequest.params[0].value,
+            }, "latest"]
+          };
+        }
+
+        console.log("📤 Sending RPC request:", ownerRequest.method, "to", thisOutcall.url);
+
+        try {
+          // Add longer timeout for HTTP requests to prevent timeout errors
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+          const response = await fetch(thisOutcall.url, {
+            method: thisOutcall.httpMethod,
+            headers: Object.fromEntries(thisOutcall.headers),
+            body: JSON.stringify(ownerRequest),
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          const responseBody = await response.json();
+          console.log("📥 RPC response received:", ownerRequest.method, "->", responseBody.result ? "success" : "error");
+
+          await pic.mockPendingHttpsOutcall({
+            requestId: thisOutcall.requestId,
+            subnetId: thisOutcall.subnetId,
+            response: {
+              type: 'success',
+              body: new TextEncoder().encode(JSON.stringify(responseBody)),
+              statusCode: response.status,
+              headers: [],
+            }
+          });
+
+          console.log(`✅ Successfully mocked outcall for ${ownerRequest.method}`);
+
+          // Shorter delay between outcalls for faster processing
+          await new Promise(resolve => setTimeout(resolve, 500));
 
         } catch (error) {
           console.error(`❌ RPC call failed for ${ownerRequest.method}:`, error);
@@ -852,7 +1198,7 @@ Expiration Time: ${expirationTimeISO}`;
           };
 
           try {
-            let result = await pic.mockPendingHttpsOutcall({
+            await pic.mockPendingHttpsOutcall({
               requestId: thisOutcall.requestId,
               subnetId: thisOutcall.subnetId,
               response: {
@@ -862,11 +1208,9 @@ Expiration Time: ${expirationTimeISO}`;
                 headers: [],
               }
             });
-
-            console.log(`📤 Mocked error outcall ${index + 1} completed`);
-            return result;
+            console.log(`✅ Successfully mocked error response for ${ownerRequest.method}`);
           } catch (mockError) {
-            console.error(`❌ Failed to mock error outcall ${index + 1}:`, mockError);
+            console.error(`❌ Failed to mock error outcall:`, mockError);
             if (mockError instanceof Error && mockError.message.includes('InvalidCanisterHttpRequestId')) {
               console.warn(`⚠️  Skipping stale HTTP request ID: ${thisOutcall.requestId}`);
               return; // Skip this stale request
@@ -876,24 +1220,32 @@ Expiration Time: ${expirationTimeISO}`;
         }
       });
 
-      return Promise.all(outcallPromises);
+      const results = await Promise.all(outcallPromises);
+      console.log(`✅ processRPCCalls: Completed ${results.length} outcall promises`);
+
+      // No additional tick after processing to minimize PocketIC load
+
+      return results;
     };
 
-    console.log("🚀 Starting RPC call processing...");
-    return processCalls();
+    console.log(`🔄 processRPCCalls: Starting processCalls recursive function...`);
+    const finalResult = await processCalls();
+    console.log(`✅ processRPCCalls: Completed with ${finalResult.length} results`);
+    return finalResult;
   }
 
-  // Simplified function to execute canister operations that involve RPC calls
+  // Execute canister operations that involve RPC calls (enhanced from snapshot-basic.test.ts)
   async function executeWithRPCProcessing<T>(
     operation: () => Promise<T>,
-    maxRounds = 5, // Reduced from 10 to avoid PocketIC "100 rounds" timeout
-    roundTimeout = 10000 // Reduced from 20000 to make faster
+    maxRounds = 8, // Increased for tECDSA operations
+    roundTimeout = 15000 // Increased timeout for complex operations
   ): Promise<T> {
     const operationStartTime = Date.now();
     console.log(`🚀 Starting operation with RPC processing (max ${maxRounds} rounds, ${roundTimeout}ms timeout per round)...`);
 
-    // Start the operation with immediate RPC processing
-    console.log(`📞 Starting canister operation with immediate RPC support...`);
+    // Reset the stop processing flag for this new operation
+    shouldStopProcessing = false;
+    console.log(`� Reset shouldStopProcessing flag to false for new operation`);
 
     // Initial tick to trigger any immediate HTTP outcalls
     await pic.tick();
@@ -910,29 +1262,69 @@ Expiration Time: ${expirationTimeISO}`;
 
     const rpcProcessingPromise = (async () => {
       for (let round = 0; round < maxRounds; round++) {
+        // Check if we should stop processing
+        if (shouldStopProcessing) {
+          console.log(`🛑 Stopping RPC processing at round ${round + 1} due to shouldStopProcessing flag`);
+          break;
+        }
+
         const roundStartTime = Date.now();
         console.log(`\n🔄 === RPC ROUND ${round + 1}/${maxRounds} === (${roundStartTime - operationStartTime}ms elapsed)`);
+        console.log(`🔍 shouldStopProcessing flag: ${shouldStopProcessing}`);
 
         try {
-          // Quick RPC processing with short timeout
-          await processRPCCalls(3000); // Only 3 seconds per round to be fast
+          // Extended timeout for tECDSA operations
+          const processingTimeout = round === 0 ? 20000 : 15000; // Much extended timeout for complex operations
+          console.log(`🔄 Starting processRPCCalls with ${processingTimeout}ms timeout...`);
+          await processRPCCalls(processingTimeout);
+          console.log(`✅ processRPCCalls completed for round ${round + 1}`);
 
-          // Brief pause
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Check again before the pause
+          if (shouldStopProcessing) {
+            console.log(`🛑 Stopping RPC processing during pause after round ${round + 1} due to shouldStopProcessing flag`);
+            break;
+          }
+
+          // Longer pause between rounds for tECDSA recovery
+          const pauseDuration = round === 0 ? 3000 : 2000; // Longer pauses for tECDSA operations
+          console.log(`⏸️ Pausing for ${pauseDuration}ms between rounds...`);
+          await new Promise(resolve => setTimeout(resolve, pauseDuration));
 
           console.log(`⏱️  RPC Round ${round + 1} completed in ${Date.now() - roundStartTime}ms`);
-
         } catch (error) {
           console.error(`❌ Error in RPC round ${round + 1}:`, error);
-          // Continue to next round
+          // If we get PocketIC deletion error, stop processing
+          if (error instanceof Error && error.message?.includes('Instance was deleted')) {
+            console.log(`🛑 Stopping RPC processing due to PocketIC instance deletion`);
+            break;
+          }
+          // If we get ingress timeout or BadIngressMessage, pause even longer before continuing
+          if (error instanceof Error && (error.message?.includes('BadIngressMessage') || error.message?.includes('ingress'))) {
+            console.log(`⚠️ PocketIC ingress issue detected, pausing longer before next round...`);
+            await new Promise(resolve => setTimeout(resolve, 8000)); // Very long pause for recovery
+
+            // If we're getting repeated BadIngressMessage errors, consider stopping
+            if (round > 2 && error.message?.includes('BadIngressMessage')) {
+              console.warn(`⚠️ Multiple BadIngressMessage errors detected, may need to stop processing`);
+              // Continue for now but with longer delays
+            }
+          }
+        }
+
+        // Final check before next iteration
+        if (shouldStopProcessing) {
+          console.log(`🛑 Stopping RPC processing at end of round ${round + 1} due to shouldStopProcessing flag`);
+          break;
         }
       }
       console.log(`📊 RPC processing completed after ${maxRounds} rounds`);
+      console.log(`🔍 Final shouldStopProcessing flag: ${shouldStopProcessing}`);
     })();
 
-    // Race the operation against timeout, with RPC processing running in parallel
+    // Race the operation against timeout with proper cleanup
+    let timeoutId: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         console.error(`⏰ OPERATION TIMEOUT: Core operation exceeded ${maxRounds * roundTimeout}ms timeout`);
         reject(new Error(`Operation timeout after ${maxRounds * roundTimeout}ms`));
       }, maxRounds * roundTimeout);
@@ -942,18 +1334,61 @@ Expiration Time: ${expirationTimeISO}`;
       console.log(`🔄 Starting race between operation and timeout...`);
       const result = await Promise.race([operationPromise, timeoutPromise]);
 
+      // CRITICAL: Clear the timeout immediately when operation completes successfully
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        console.log(`🧹 Cleared main operation timeout timer`);
+      }
+
       const totalTime = Date.now() - operationStartTime;
       console.log(`✅ Operation completed successfully in ${totalTime}ms`);
+      console.log(`✅ Operation result:`, result);
 
-      // Let RPC processing finish if it's still running
-      rpcProcessingPromise.catch(error => {
-        console.warn(`⚠️ Background RPC processing error (operation already completed):`, error);
-      });
+      // Stop background processing and wait for it to finish
+      console.log(`🛑 Stopping background RPC processing...`);
+      console.log(`🔍 shouldStopProcessing flag being set to true`);
+      shouldStopProcessing = true;
+
+      // Wait for background processing to stop (with timeout and proper cleanup)
+      console.log(`⏰ Waiting up to 8 seconds for background RPC processing to stop...`);
+      let cleanupTimeoutId: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          rpcProcessingPromise,
+          new Promise((_, reject) => {
+            cleanupTimeoutId = setTimeout(() => {
+              console.log(`⚠️ RPC cleanup timeout reached after 8 seconds`);
+              console.log(`🔍 shouldStopProcessing flag value: ${shouldStopProcessing}`);
+              reject(new Error('RPC cleanup timeout after 8 seconds'));
+            }, 8000);
+          })
+        ]);
+        if (cleanupTimeoutId) {
+          clearTimeout(cleanupTimeoutId);
+          console.log(`🧹 Cleared RPC cleanup timeout timer`);
+        }
+        console.log(`✅ Background RPC processing stopped cleanly`);
+      } catch (cleanupError) {
+        if (cleanupTimeoutId) {
+          clearTimeout(cleanupTimeoutId);
+          console.log(`🧹 Cleared RPC cleanup timeout timer (on error)`);
+        }
+        console.warn(`⚠️ Background RPC processing cleanup error:`, cleanupError);
+        console.log(`🔍 This suggests the background RPC processing loop is not responding to the stop signal`);
+        console.log(`🔍 This could be due to hanging HTTP requests or long timeouts in processRPCCalls`);
+      }
 
       return result;
 
     } catch (error) {
       console.error(`❌ executeWithRPCProcessing failed:`, error);
+      // CRITICAL: Clear the timeout even on error to prevent hanging timers
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        console.log(`🧹 Cleared main operation timeout timer (on error)`);
+      }
+      // Ensure we stop background processing even on error
+      shouldStopProcessing = true;
       throw error;
     }
   }
@@ -1021,7 +1456,7 @@ Expiration Time: ${expirationTimeISO}`;
         to: testTokenAddress,
         value: 0n, // No ETH value, just token transfer  
         data: ethers.getBytes(transferData),
-        chain: { chain_id: 31337n, network_name: "anvil" },
+        chain: { chain_id: ANVIL_CHAIN_ID, network_name: "anvil" },
         subaccount: [], // Use empty array for null subaccount (treasury address)
         maxPriorityFeePerGas: BigInt(ethers.parseUnits("1", "gwei").toString()), // Reduced from 2 gwei
         maxFeePerGas: BigInt(ethers.parseUnits("2", "gwei").toString()), // Reduced from 20 gwei  
@@ -1332,13 +1767,204 @@ Expiration Time: ${expirationTimeISO}`;
         throw new Error(`DAO address ${daoEthereumAddress} has insufficient ETH for gas. Has: ${ethers.formatEther(daoEthBalance)} ETH, needs: ${ethers.formatEther(maxGasCost)} ETH`);
       }
 
+      // DEBUG: Check the current proposal status before execution
+      console.log("🔍 DEBUG: Checking proposal status before execution...");
+      try {
+        const preExecutionProposal = await evmDAOBridge_fixture.actor.icrc149_get_proposal(proposalId);
+        if (preExecutionProposal.length > 0) {
+          const proposal = preExecutionProposal[0] as any;
+          console.log("Pre-execution proposal status:", proposal.status);
+          console.log("Pre-execution proposal tally:", proposal.tally);
+        } else {
+          console.log("Could not get pre-execution proposal: not found");
+        }
+      } catch (preError) {
+        console.log("Error getting pre-execution proposal status:", preError);
+      }
+
+      console.log("🚀 Starting proposal execution with extended timeout...");
       const executeResult = await executeWithRPCProcessing(
         () => evmDAOBridge_fixture.actor.icrc149_execute_proposal(proposalId),
-        3, // max 3 rounds for execution
-        5000 // 5 second timeout per round
+        10, // max 10 rounds for execution (increased from 3)
+        30000 // 30 second timeout per round (increased from 5000) - Total: 300s (5 minutes)
       );
 
       console.log("Proposal execution result:", executeResult);
+
+      // CRITICAL: Wait for the queued transaction to be processed
+      // The canister adds transactions to a queue and processes them asynchronously with a 10-second delay
+      console.log("⏳ Waiting for queued transaction processing...");
+
+      // First, check queue status immediately after execution
+      try {
+        const immediateQueueStatus = await evmDAOBridge_fixture.actor.debug_queue_status();
+        console.log("🔍 Immediate queue status after execution:", {
+          queueSize: immediateQueueStatus.queue_size.toString(),
+          processedSize: immediateQueueStatus.processed_size.toString(),
+          lastProcessedSequence: immediateQueueStatus.last_processed_sequence.toString(),
+          activeEntries: immediateQueueStatus.queue_entries.length,
+          processedEntries: immediateQueueStatus.processed_entries.length
+        });
+
+        if (immediateQueueStatus.queue_entries.length > 0) {
+          console.log("📋 Active queue entries found:");
+          immediateQueueStatus.queue_entries.forEach(([seqId, entry]: [bigint, any]) => {
+            const hashDisplay = (entry.hash && entry.hash.length > 0 && entry.hash[0]) ? entry.hash[0] : 'none';
+            console.log(`  - Seq ${seqId.toString()}: Proposal ${entry.proposal_id.toString()}, Status: ${entry.status}, Hash: ${hashDisplay}`);
+          });
+        } else {
+          console.log("⚠️ No active queue entries found - transaction may have been processed immediately or failed to queue");
+        }
+      } catch (queueError) {
+        console.log("Could not get immediate queue status:", queueError);
+      }
+
+      // ENHANCED QUEUE PROCESSING LOOP: 5 minutes of PIC time + 20 seconds real time minimum
+      console.log("🔄 Starting enhanced queue processing loop...");
+      console.log("   - Will advance 5 minutes of PIC time (300 seconds)");
+      console.log("   - Will wait at least 20 seconds of real time");
+      console.log("   - Will process RPC calls during each iteration");
+
+      // Reset queue processing flag to allow RPC processing during queue phase
+      shouldStopQueueProcessing = false;
+      console.log("🔄 Reset shouldStopQueueProcessing to false for queue processing phase");
+
+      const realTimeStart = Date.now();
+      const minRealTimeMs = 20000; // 20 seconds minimum real time
+      const picTimeAdvanceMs = 10000; // 10 seconds per iteration
+      const totalPicTimeMs = 300000; // 5 minutes total PIC time
+      const maxIterations = totalPicTimeMs / picTimeAdvanceMs; // 30 iterations
+
+      let iteration = 0;
+      let transactionFound = false;
+
+      while (iteration < maxIterations && !transactionFound) {
+        const realTimeElapsed = Date.now() - realTimeStart;
+        iteration++;
+
+        console.log(`\n🔄 === QUEUE PROCESSING ITERATION ${iteration}/${maxIterations} ===`);
+        console.log(`   Real time elapsed: ${Math.round(realTimeElapsed / 1000)}s / ${minRealTimeMs / 1000}s minimum`);
+        console.log(`   PIC time advancing: ${iteration * picTimeAdvanceMs / 1000}s / ${totalPicTimeMs / 1000}s total`);
+
+        // Advance PIC time by 10 seconds
+        await pic.advanceTime(picTimeAdvanceMs);
+        await pic.tick(10);
+
+        // Process any RPC calls that were triggered by the time advancement
+        try {
+          console.log(`🔄 Processing queue RPC calls aggressively for iteration ${iteration}...`);
+
+          // Process RPC calls multiple times per iteration to catch HTTP outcalls quickly
+          for (let rpcRound = 1; rpcRound <= 3; rpcRound++) {
+            console.log(`  🔄 Queue RPC processing round ${rpcRound}/3...`);
+            await processQueueRPCCalls(5000); // 5 second timeout per round
+            await new Promise(resolve => setTimeout(resolve, 800)); // 800ms between rounds
+          }
+        } catch (rpcError) {
+          console.log(`⚠️ Queue RPC processing error in iteration ${iteration}:`, rpcError);
+          // Continue anyway - RPC errors are expected sometimes
+        }
+
+        // Check queue status after this iteration
+        try {
+          const iterationQueueStatus = await evmDAOBridge_fixture.actor.debug_queue_status();
+          console.log(`🔍 Queue status after iteration ${iteration}:`, {
+            queueSize: iterationQueueStatus.queue_size.toString(),
+            processedSize: iterationQueueStatus.processed_size.toString(),
+            lastProcessedSequence: iterationQueueStatus.last_processed_sequence.toString(),
+            activeEntries: iterationQueueStatus.queue_entries.length,
+            processedEntries: iterationQueueStatus.processed_entries.length
+          });
+
+          // Check if our proposal's transaction has been processed
+          for (const [seqId, entry] of iterationQueueStatus.processed_entries) {
+            if (entry.proposal_id.toString() === proposalId.toString()) {
+              const hasHash = entry.hash && entry.hash.length > 0 && entry.hash[0];
+              console.log(`✅ Found our proposal in processed entries: Seq ${seqId.toString()}, Status: ${entry.status}, Hash: ${hasHash ? entry.hash[0] : 'none'}`);
+
+              if (hasHash && entry.hash[0] && entry.hash[0].startsWith('0x')) {
+                console.log(`🎉 TRANSACTION HASH FOUND: ${entry.hash[0]}`);
+                transactionFound = true;
+                break;
+              }
+            }
+          }
+
+          // Also check active entries to see processing status
+          for (const [seqId, entry] of iterationQueueStatus.queue_entries) {
+            if (entry.proposal_id.toString() === proposalId.toString()) {
+              const hasHash = entry.hash && entry.hash.length > 0 && entry.hash[0];
+              console.log(`📋 Found our proposal in active queue: Seq ${seqId.toString()}, Status: ${entry.status}, Hash: ${hasHash ? entry.hash[0] : 'none'}`);
+            }
+          }
+
+        } catch (queueError) {
+          console.log(`Could not get queue status for iteration ${iteration}:`, queueError);
+        }
+
+        // If we found the transaction, break early
+        if (transactionFound) {
+          console.log(`✅ Transaction found after ${iteration} iterations, breaking early`);
+          break;
+        }
+
+        // Don't exit until minimum real time has passed
+        if (realTimeElapsed < minRealTimeMs) {
+          console.log(`⏰ Minimum real time not yet reached (${Math.round(realTimeElapsed / 1000)}s < ${minRealTimeMs / 1000}s), continuing...`);
+        }
+      }
+
+      const finalRealTime = Date.now() - realTimeStart;
+      console.log(`\n📊 Queue processing loop completed:`);
+      console.log(`   - Iterations: ${iteration}/${maxIterations}`);
+      console.log(`   - Real time elapsed: ${Math.round(finalRealTime / 1000)}s`);
+      console.log(`   - PIC time advanced: ${iteration * picTimeAdvanceMs / 1000}s`);
+      console.log(`   - Transaction found: ${transactionFound ? 'YES' : 'NO'}`);
+
+      // Set queue processing flag to stop RPC processing after queue phase
+      shouldStopQueueProcessing = true;
+      console.log("🔄 Set shouldStopQueueProcessing to true after queue processing phase");
+
+      // Give a final bit of real time for any last RPC calls to complete
+      console.log("⏳ Final real-time wait for any remaining RPC processing...");
+      await new Promise(resolve => setTimeout(resolve, 3000)); // 3 more seconds
+
+      console.log("✅ Queue processing time completed");
+
+      // Final queue status check to see if transaction was processed
+      try {
+        const finalQueueStatus = await evmDAOBridge_fixture.actor.debug_queue_status();
+        console.log("🔍 Final queue status after RPC processing:", {
+          queueSize: finalQueueStatus.queue_size.toString(),
+          processedSize: finalQueueStatus.processed_size.toString(),
+          lastProcessedSequence: finalQueueStatus.last_processed_sequence.toString(),
+          activeEntries: finalQueueStatus.queue_entries.length,
+          processedEntries: finalQueueStatus.processed_entries.length
+        });
+
+        if (finalQueueStatus.processed_entries.length > 0) {
+          console.log("📋 Final processed entries:");
+          finalQueueStatus.processed_entries.forEach(([seqId, entry]: [bigint, any]) => {
+            const hashDisplay = (entry.hash && entry.hash.length > 0 && entry.hash[0]) ? entry.hash[0] : 'none';
+            console.log(`  - Seq ${seqId.toString()}: Proposal ${entry.proposal_id.toString()}, Status: ${entry.status}, Hash: ${hashDisplay}`);
+
+            // If we have a hash, that means the transaction was submitted
+            if (entry.hash && entry.hash.length > 0 && entry.hash[0] && entry.hash[0].startsWith('0x')) {
+              console.log(`✅ Found Ethereum transaction hash: ${entry.hash[0]}`);
+            }
+          });
+        }
+
+        if (finalQueueStatus.queue_entries.length > 0) {
+          console.log("⚠️ Still active queue entries (may be processing):");
+          finalQueueStatus.queue_entries.forEach(([seqId, entry]: [bigint, any]) => {
+            const hashDisplay = (entry.hash && entry.hash.length > 0 && entry.hash[0]) ? entry.hash[0] : 'none';
+            console.log(`  - Seq ${seqId.toString()}: Proposal ${entry.proposal_id.toString()}, Status: ${entry.status}, Hash: ${hashDisplay}`);
+          });
+        }
+      } catch (queueError) {
+        console.log("Could not get final queue status:", queueError);
+      }
 
       // Debug: Check if we can get more information from the canister
       console.log("\n🔍 DEBUG: Getting more information from canister...");
@@ -1346,8 +1972,8 @@ Expiration Time: ${expirationTimeISO}`;
         // Get the DAO's current Ethereum address
         const currentDaoAddress = await executeWithRPCProcessing(
           () => evmDAOBridge_fixture.actor.icrc149_get_ethereum_address([]),
-          2,
-          3000
+          3, // Increased rounds
+          60000 // 60 second timeout per round
         );
         console.log("Current DAO Ethereum address:", currentDaoAddress);
 
@@ -1356,6 +1982,36 @@ Expiration Time: ${expirationTimeISO}`;
           console.log("⚠️ Address mismatch! Current vs expected:");
           console.log("  Current:", currentDaoAddress);
           console.log("  Expected:", daoEthereumAddress);
+        }
+
+        // Check queue status to see if transaction was processed
+        try {
+          const queueStatus = await evmDAOBridge_fixture.actor.debug_queue_status();
+          console.log("Queue status:", {
+            queueSize: queueStatus.queue_size.toString(),
+            processedSize: queueStatus.processed_size.toString(),
+            lastProcessedSequence: queueStatus.last_processed_sequence.toString(),
+            queueEntries: queueStatus.queue_entries.length,
+            processedEntries: queueStatus.processed_entries.length
+          });
+
+          // Log details of queue entries
+          if (queueStatus.queue_entries.length > 0) {
+            console.log("Active queue entries:");
+            queueStatus.queue_entries.forEach(([seqId, entry]: [bigint, any]) => {
+              console.log(`  - Seq ${seqId.toString()}: Proposal ${entry.proposal_id.toString()}, Status: ${entry.status}, Hash: ${entry.hash || 'none'}`);
+            });
+          }
+
+          // Log details of processed entries
+          if (queueStatus.processed_entries.length > 0) {
+            console.log("Processed entries:");
+            queueStatus.processed_entries.forEach(([seqId, entry]: [bigint, any]) => {
+              console.log(`  - Seq ${seqId.toString()}: Proposal ${entry.proposal_id.toString()}, Status: ${entry.status}, Hash: ${entry.hash || 'none'}`);
+            });
+          }
+        } catch (queueError) {
+          console.log("Could not get queue status:", queueError);
         }
 
         // Try our debug functions if they're available
@@ -1405,8 +2061,37 @@ Expiration Time: ${expirationTimeISO}`;
       // Step 5: Verify the transaction was successful
       console.log("Step 5: Verifying transaction success...");
 
+      // First, try to get the transaction hash from the queue status
+      let queueTransactionHash: string | null = null;
+      try {
+        const queueStatus = await evmDAOBridge_fixture.actor.debug_queue_status();
+        console.log("🔍 Checking queue for transaction hash...");
+
+        for (const [seqId, entry] of queueStatus.processed_entries) {
+          const hasValidHash = entry.hash && entry.hash.length > 0 && entry.hash[0] && entry.hash[0].startsWith('0x');
+          if (entry.proposal_id.toString() === proposalId.toString() && hasValidHash) {
+            queueTransactionHash = entry.hash[0]!;
+            console.log(`✅ Found transaction hash in queue: ${queueTransactionHash}`);
+            break;
+          }
+        }
+
+        if (!queueTransactionHash) {
+          console.log("⚠️ No transaction hash found in processed queue entries");
+          console.log("🔍 Checking active queue entries...");
+          for (const [seqId, entry] of queueStatus.queue_entries) {
+            if (entry.proposal_id.toString() === proposalId.toString()) {
+              const hashDisplay = (entry.hash && entry.hash.length > 0 && entry.hash[0]) ? entry.hash[0] : 'none';
+              console.log(`📋 Found active queue entry: Seq ${seqId.toString()}, Status: ${entry.status}, Hash: ${hashDisplay}`);
+            }
+          }
+        }
+      } catch (queueError) {
+        console.log("Could not check queue for transaction hash:", queueError);
+      }
+
       // Check if we got a proper transaction hash or just a success message
-      let transactionHash: string | null = null;
+      let transactionHash: string | null = queueTransactionHash;
       if ('Ok' in executeResult) {
         const result = executeResult.Ok;
         console.log("Execution result:", result);
@@ -1587,7 +2272,7 @@ Expiration Time: ${expirationTimeISO}`;
     }
   });
 
-  it.skip("should block execution if the vote fails", async () => {
+  it("should block execution if the vote fails", async () => {
     // Set up fresh test environment for this test
     await setupTestEnvironment();
 
@@ -1642,7 +2327,7 @@ Expiration Time: ${expirationTimeISO}`;
         to: testTokenAddress,
         value: 0n, // No ETH value, just token transfer  
         data: ethers.getBytes(transferData),
-        chain: { chain_id: 31337n, network_name: "anvil" },
+        chain: { chain_id: ANVIL_CHAIN_ID, network_name: "anvil" },
         subaccount: [], // Use empty array for null subaccount (treasury address)
         maxPriorityFeePerGas: BigInt(ethers.parseUnits("1", "gwei").toString()),
         maxFeePerGas: BigInt(ethers.parseUnits("2", "gwei").toString()),
@@ -1664,8 +2349,8 @@ Expiration Time: ${expirationTimeISO}`;
       console.log("Starting proposal creation...");
       const proposalResult = await executeWithRPCProcessing(
         () => evmDAOBridge_fixture.actor.icrc149_create_proposal(createProposalRequest),
-        5, // max 5 rounds
-        6000 // 6 second timeout per round
+        20, // max 20 rounds (increased for complex RPC sequences)
+        60000 // 60 second timeout per round - Total timeout: 1200 seconds (20 minutes)
       );
 
       console.log("Proposal result:", proposalResult);
@@ -1788,15 +2473,15 @@ Expiration Time: ${expirationTimeISO}`;
 
       // Expect the proposal to FAIL (15,000 No vs 1,000 Yes)
       expect(tallyResult.no > tallyResult.yes).toBe(true);
-      expect(tallyResult.result).toBe("Rejected"); // Should be "Rejected" for failed proposals
+      expect(tallyResult.result).toBe("Failed"); // Should be "Failed" for failed proposals
 
       // Step 5: Attempt to execute the proposal (should fail)
       console.log("Step 5: Attempting to execute the failed proposal (should be rejected)...");
 
       const executeResult = await executeWithRPCProcessing(
         () => evmDAOBridge_fixture.actor.icrc149_execute_proposal(proposalId),
-        3, // max 3 rounds for execution
-        5000 // 5 second timeout per round
+        10, // max 10 rounds for execution (increased from 3)
+        30000 // 30 second timeout per round (increased from 5000) - Total: 300s (5 minutes)
       );
 
       console.log("Proposal execution result:", executeResult);

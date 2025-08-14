@@ -73,17 +73,21 @@ describe("Witness Generation Test", () => {
     const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; 
     const testAddress = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"; // User #1 from Anvil
     
-    // Set contract code (minimal ERC20-like)
-    await provider.send("anvil_setCode", [contractAddress, "0x6080604052348015600f57600080fd5b506004361060285760003560e01c806370a0823114602d575b600080fd5b60436004803603810190603f9190605c565b6049565b60405160509190607a565b60405180910390f35b60008060008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020549050919050565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b600060aa8260008401111560b857600080fd5b50919050565b60c48160008401111560d257600080fd5b50919050565b600060da8260008401111560e857600080fd5b50919050565b600080fd5b6000819050919050565b60ff8160008401111561010d57600080fd5b50919050565b61011681610100565b811461012157600080fd5b50565b600081359050610133816110d7565b92915050565b60006020828403121561014b5761014a60eb565b5b600061015984828501610124565b9150509291505056fea2646970667358221220e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e5e5b6a5e564736f6c63430008070033"]);
+    // Set contract code (proper ERC20 with balanceOf function)
+    const erc20Bytecode = "0x608060405234801561001057600080fd5b50336000526000602052604060002068056bc75e2d630eb20000905561025a806100396000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806370a082311461003b5780636aa3f44a14610057575b600080fd5b61005560048036038101906100509190610145565b610073565b005b610071600480360381019061006c9190610145565b6100a3565b005b806000808373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b60008060008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020549050919050565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b600061010a826100df565b9050919050565b61011a816100ff565b811461012557600080fd5b50565b60008135905061013781610111565b92915050565b6000819050919050565b61015081610143565b811461015b57600080fd5b50565b60008135905061016d81610147565b92915050565b6000806040838503121561018a576101896100da565b5b600061019885828601610128565b92505060206101a98582860161015e565b915050929150505056fea2646970667358221220c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e864736f6c63430008070033";
+    await provider.send("anvil_setCode", [contractAddress, erc20Bytecode]);
     
     // Set balance directly in storage slot 0 (standard ERC20 _balances mapping)
-    // Calculate storage key for the test user's balance using same method as witness generator
-    const userAddressBytes = ethers.getBytes(testAddress);
-    const slotBytes = ethers.zeroPadValue(ethers.toBeHex(0), 32); // slot 0 
-    const combinedBytes = new Uint8Array(userAddressBytes.length + ethers.getBytes(slotBytes).length);
-    combinedBytes.set(userAddressBytes, 0);
-    combinedBytes.set(ethers.getBytes(slotBytes), userAddressBytes.length);
-    const storageKey = ethers.keccak256(combinedBytes);
+    // Calculate storage key for the test user's balance using Solidity mapping encoding
+    // For mapping(address => uint256): storage key = keccak256(abi.encode(address, slot))
+    const addressPadded = ethers.zeroPadValue(testAddress, 32); // Pad address to 32 bytes
+    const slotPadded = ethers.zeroPadValue("0x00", 32); // slot 0, padded to 32 bytes
+    const storageKey = ethers.keccak256(
+      ethers.concat([
+        addressPadded,  // 32 bytes - properly padded address
+        slotPadded      // 32 bytes - slot number
+      ])
+    );
     
     // Set the user's balance to 5000 tokens (with 18 decimals)
     const balanceValue = ethers.toBeHex(ethers.parseUnits("5000", 18), 32);

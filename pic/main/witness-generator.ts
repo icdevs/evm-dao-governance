@@ -347,30 +347,71 @@ export async function getTokenBalance(
 ): Promise<bigint> {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   
-  // ERC20 balanceOf function selector
-  const balanceOfSelector = "0x70a08231";
-  const paddedAddress = userAddress.toLowerCase().replace('0x', '').padStart(64, '0');
-  const callData = balanceOfSelector + paddedAddress;
-  
-  const blockTag = blockNumber ? (
-    typeof blockNumber === 'number' ? `0x${blockNumber.toString(16)}` : blockNumber
-  ) : 'latest';
-  
-  const result = await provider.send("eth_call", [
-    {
-      to: contractAddress,
-      data: callData
-    },
-    blockTag
-  ]);
-  
-  // Handle empty or invalid responses
-  if (!result || result === '0x' || result.length <= 2) {
-    console.log(`⚠️  No balance data returned from contract ${contractAddress} for address ${userAddress} - returning 0`);
-    return 0n; // Return 0 balance for non-existent contracts or empty responses
+  try {
+    // ERC20 balanceOf function selector
+    const balanceOfSelector = "0x70a08231";
+    const paddedAddress = userAddress.toLowerCase().replace('0x', '').padStart(64, '0');
+    const callData = balanceOfSelector + paddedAddress;
+    
+    const blockTag = blockNumber ? (
+      typeof blockNumber === 'number' ? `0x${blockNumber.toString(16)}` : blockNumber
+    ) : 'latest';
+    
+    console.log(`📞 Calling balanceOf for ${userAddress} on contract ${contractAddress} at block ${blockTag}`);
+    
+    const result = await provider.send("eth_call", [
+      {
+        to: contractAddress,
+        data: callData
+      },
+      blockTag
+    ]);
+    
+    // Handle empty or invalid responses
+    if (!result || result === '0x' || result.length <= 2) {
+      console.log(`⚠️  No balance data returned from contract ${contractAddress} for address ${userAddress} - returning 0`);
+      return 0n; // Return 0 balance for non-existent contracts or empty responses
+    }
+    
+    const balance = ethers.getBigInt(result);
+    console.log(`💰 Retrieved balance: ${balance.toString()} for ${userAddress}`);
+    return balance;
+    
+  } catch (error) {
+    console.warn(`⚠️ Failed to get balance via contract call: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.log(`🔄 Falling back to direct storage reading...`);
+    
+    // Fallback: try to read balance directly from storage
+    try {
+      // Calculate the storage key for the balance mapping
+      const addressPadded = ethers.zeroPadValue(userAddress, 32);
+      const slotPadded = ethers.zeroPadValue("0x00", 32); // slot 0
+      const storageKey = ethers.keccak256(ethers.concat([addressPadded, slotPadded]));
+      
+      const blockTag = blockNumber ? (
+        typeof blockNumber === 'number' ? `0x${blockNumber.toString(16)}` : blockNumber
+      ) : 'latest';
+      
+      const storageValue = await provider.send("eth_getStorageAt", [
+        contractAddress,
+        storageKey,
+        blockTag
+      ]);
+      
+      if (!storageValue || storageValue === '0x' || storageValue === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+        console.log(`📦 No balance found in storage for ${userAddress} - returning 0`);
+        return 0n;
+      }
+      
+      const balance = ethers.getBigInt(storageValue);
+      console.log(`💰 Retrieved balance from storage: ${balance.toString()} for ${userAddress}`);
+      return balance;
+      
+    } catch (storageError) {
+      console.error(`❌ Both contract call and storage reading failed:`, storageError);
+      return 0n; // Return 0 if everything fails
+    }
   }
-  
-  return ethers.getBigInt(result);
 }
 
 /**

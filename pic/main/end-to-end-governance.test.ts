@@ -1,4 +1,4 @@
-import { describe, beforeEach, afterEach, it, expect } from '@jest/globals';
+import { describe, beforeEach, afterEach, afterAll, it, expect } from '@jest/globals';
 import { Principal } from "@dfinity/principal";
 import { IDL } from "@dfinity/candid";
 import { PocketIc, createIdentity } from '@dfinity/pic';
@@ -47,6 +47,46 @@ describe("EVMDAOBridge End-to-End Governance Test", () => {
   let governanceTokenAddress: string;
   let testVoters: TestVoter[] = [];
   let proposalId: bigint;
+
+  // Ensure proper cleanup after all tests to prevent Jest hanging
+  afterAll(async () => {
+    console.log("🧹 Final cleanup: ensuring all background processes are stopped...");
+
+    // Clean up any test environment resources
+    try {
+      // Clean up provider to stop any pending network requests
+      if (provider) {
+        await provider.destroy?.();
+        provider = null as any;
+      }
+
+      // Clean up PocketIC
+      if (pic) {
+        await pic.tearDown();
+        pic = null as any;
+      }
+
+      // Clean up Anvil process
+      if (anvilProcess) {
+        anvilProcess.kill('SIGKILL');
+        anvilProcess = null as any;
+      }
+
+      // Clean up test data
+      testVoters = [];
+
+      // Kill any remaining processes
+      await killExistingProcesses();
+
+      // Extra wait for full cleanup
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+    } catch (error) {
+      console.warn("Warning: Error during final cleanup:", error);
+    }
+
+    console.log("✅ Final cleanup completed");
+  });
 
   // Kill any existing Anvil processes
   const killExistingProcesses = async () => {
@@ -260,8 +300,12 @@ Expiration Time: ${expirationTimeISO}`;
       }
     }
 
-    // Deploy governance token using the compiled contract
+    // Deploy governance token using the compiled contract with proper nonce management
     const deployer = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", provider);
+
+    // Get current nonce to ensure proper sequencing
+    let currentNonce = await deployer.getNonce();
+    console.log("Starting nonce:", currentNonce);
 
     console.log("Deploying governance token...");
     const tokenFactory = new ethers.ContractFactory(
@@ -269,7 +313,7 @@ Expiration Time: ${expirationTimeISO}`;
       governanceTokenArtifact.bytecode,
       deployer
     );
-    const deployedContract = await tokenFactory.deploy(deployer.address); // initialOwner parameter
+    const deployedContract = await tokenFactory.deploy(deployer.address, { nonce: currentNonce++ }); // Use explicit nonce
     await deployedContract.waitForDeployment();
     governanceTokenAddress = await deployedContract.getAddress();
     governanceToken = new Contract(governanceTokenAddress, governanceTokenArtifact.abi, deployer);
@@ -289,16 +333,33 @@ Expiration Time: ${expirationTimeISO}`;
       ethers.parseEther("1000"),   // Voter 3: 1,000 tokens
     ];
 
+    console.log(`🔍 Starting token distribution for ${voterPrivateKeys.length} voters...`);
+
     for (let i = 0; i < voterPrivateKeys.length; i++) {
+      console.log(`📊 Processing voter ${i + 1}/${voterPrivateKeys.length}...`);
       const wallet = new ethers.Wallet(voterPrivateKeys[i], provider);
       const balance = tokenBalances[i];
+
+      console.log(`🎯 Voter ${i + 1}: Address=${wallet.address}, Balance=${ethers.formatEther(balance)} tokens`);
 
       // The GovernanceToken contract mints tokens to the owner, so let's transfer from owner to voters
       console.log(`Transferring ${ethers.formatEther(balance)} tokens to voter ${i + 1} (${wallet.address})`);
 
       // Get fresh nonce for each transaction to avoid conflicts
-      const transferTx = await governanceToken['transfer'](wallet.address, balance);
+      const deployerNonce = await provider.getTransactionCount(deployer.address, 'pending');
+      console.log(`🔢 Using nonce ${deployerNonce} for transfer to voter ${i + 1}`);
+
+      const transferTx = await governanceToken['transfer'](wallet.address, balance, {
+        nonce: deployerNonce
+      });
+      console.log(`⏳ Transfer transaction submitted for voter ${i + 1} with nonce ${deployerNonce}...`);
       await transferTx.wait();
+      console.log(`✅ Transfer confirmed for voter ${i + 1}`);
+
+      // Wait between transfers to prevent nonce conflicts
+      if (i < voterPrivateKeys.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
 
       testVoters.push({
         wallet,
@@ -382,20 +443,50 @@ Expiration Time: ${expirationTimeISO}`;
   });
 
   afterEach(async () => {
+    console.log("🧹 Starting test cleanup...");
+
     // Clean up test voters array for next test
     testVoters = [];
 
-    if (anvilProcess) {
-      anvilProcess.kill('SIGTERM');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    // Clean up provider first to stop any pending network requests
+    if (provider) {
+      try {
+        await provider.destroy?.();
+      } catch (error) {
+        console.warn("Warning: Error destroying provider:", error);
+      }
+      provider = null as any;
     }
 
+    // Clean up Anvil process
+    if (anvilProcess) {
+      try {
+        anvilProcess.kill('SIGTERM');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (!anvilProcess.killed) {
+          anvilProcess.kill('SIGKILL');
+        }
+      } catch (error) {
+        console.warn("Warning: Error terminating Anvil:", error);
+      }
+    }
+
+    // Clean up PocketIC
     if (pic) {
-      await pic.tearDown();
+      try {
+        await pic.tearDown();
+      } catch (error) {
+        console.warn("Warning: Error tearing down PocketIC:", error);
+      }
     }
 
     // Kill any remaining processes
     await killExistingProcesses();
+
+    // Additional wait to ensure full cleanup
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    console.log("✅ Test cleanup completed");
   });
 
   it("should complete full end-to-end governance workflow", async () => {
