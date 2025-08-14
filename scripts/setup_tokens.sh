@@ -279,7 +279,7 @@ else
     echo "📦 Found sample-tokens directory. Using existing setup..."
     
     # Navigate to sample tokens (go up one directory first since we're in scripts/)
-    cd ../sample-tokens
+    pushd ../sample-tokens > /dev/null
     
     # Check if this is a Hardhat project
     if [ -f "package.json" ]; then
@@ -306,6 +306,9 @@ else
         done
         echo "   - Canister Ethereum address (get with: dfx canister call main icrc149_get_eth_address '(null)')"
     fi
+    
+    # Return from sample-tokens directory
+    popd > /dev/null
 fi
 
 # Return to original directory
