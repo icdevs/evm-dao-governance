@@ -4,3 +4,12 @@ package-lock.json
 .dfx/
 node_modules
 js/dist/
+cache/
+
+# Token deployment artifacts
+GovernanceToken.sol
+deploy_token.js
+check_contract.js
+transfer_tokens.js
+forge-out/
+package.json

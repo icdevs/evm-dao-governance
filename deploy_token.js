@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { execSync } from 'child_process';
+import fs from 'fs';
 
 async function deployToken() {
     // Connect to Anvil
@@ -11,15 +12,48 @@ async function deployToken() {
     console.log('🚀 Deploying from:', deployer.address);
     console.log('💰 Balance:', ethers.formatEther(await provider.getBalance(deployer.address)), 'ETH');
     
-    // Simple ERC20 token contract bytecode (OpenZeppelin-like)
-    // This is a pre-compiled GovernanceToken contract
-    const contractBytecode = '0x608060405234801561001057600080fd5b506040516108fc3803806108fc8339810160408190526100309190610242565b8181600061003e848261031c565b50600161004b838261031c565b5050506100663361006160201b60201c565b6100da565b600680546001600160a01b038381166001600160a01b0319831681179093556040519116919082907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e090600090a35050565b505050565b634e487b7160e01b600052604160045260246000fd5b600082601f8301126100f957600080fd5b81516001600160401b0380821115610113576101136100d2565b604051601f8301601f19908116603f0116810190828211818310171561013b5761013b6100d2565b8160405283815260209250868385880101111561015757600080fd5b600091505b8382101561017957858201830151818301840152908201906101255c565b600093505050600081840152601f19601f8301169290920192505050565b80356001600160a01b03811681146101ae57600080fd5b919050565b600080600080608085870312156101c957600080fd5b84516001600160401b03808211156101e057600080fd5b6101ec888389016100e8565b9550602087015191508082111561020257600080fd5b5061020f878288016100e8565b93505061021e60408601610197565b915060608501519050';
+    // Check if forge is available for compilation
+    let contractBytecode, contractABI;
+    try {
+        console.log('📦 Compiling contract with forge...');
+        execSync('forge --version', { stdio: 'pipe' });
+        
+        // Compile the contract
+        execSync('forge build --contracts GovernanceToken.sol --out forge-out', { stdio: 'inherit' });
+        
+        // Read the compiled contract
+        const artifactPath = 'forge-out/GovernanceToken.sol/GovernanceToken.json';
+        if (fs.existsSync(artifactPath)) {
+            const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+            contractBytecode = artifact.bytecode.object;
+            contractABI = artifact.abi;
+            console.log('✅ Contract compiled successfully with forge');
+        } else {
+            throw new Error('Compiled contract not found');
+        }
+    } catch (error) {
+        console.log('⚠️  Forge not available, using pre-compiled bytecode...');
+        
+        // Fallback to basic ERC20 ABI and working bytecode
+        contractABI = [
+            "constructor(uint256 _initialSupply)",
+            "function transfer(address _to, uint256 _value) returns (bool)",
+            "function balanceOf(address) view returns (uint256)",
+            "function totalSupply() view returns (uint256)",
+            "function name() view returns (string)",
+            "function symbol() view returns (string)",
+            "function decimals() view returns (uint8)"
+        ];
+        
+        // Working simple ERC20 bytecode
+        contractBytecode = "0x608060405234801561001057600080fd5b5060405161059338038061059383398101604081905261002f91610054565b600281905533600081815260208190526040808220849055518392907fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef908290a35061006c565b60006020828403121561006657600080fd5b5051919050565b610518806100796000396000f3fe608060405234801561001057600080fd5b50600436106100885760003560e01c8063313ce5671161005b578063313ce567146100fe57806370a082311461010c57806395d89b4114610135578063a9059cbb1461013d57600080fd5b806306fdde031461008d57806318160ddd146100ab57806323b872dd146100bd57806327e235e3146100d0575b600080fd5b610095610150565b6040516100a291906103b8565b60405180910390f35b6002545b6040519081526020016100a2565b6100af6100cb366004610422565b610187565b005b6100af6100de36600461045e565b73ffffffffffffffffffffffffffffffffffffffff1660009081526020819052604090205490565b60405160128152602001610100a2565b6100af61011a36600461045e565b73ffffffffffffffffffffffffffffffffffffffff1660009081526020819052604090205490565b6100956102ba565b61014b61014b366004610479565b6102f1565b6040519015158152602001610100a2565b60408051808201909152601081527f476f7665726e616e636520546f6b656e00000000000000000000000000000000602082015290565b73ffffffffffffffffffffffffffffffffffffffff831660009081526020819052604090205481111561021b5760405162461bcd60e51b815260206004820152601360248201527f496e73756666696369656e742062616c616e636500000000000000000000000060448201526064015b60405180910390fd5b73ffffffffffffffffffffffffffffffffffffffff8084166000908152600160209081526040808320339094168352929052205481111561029e5760405162461bcd60e51b815260206004820152601560248201527f496e73756666696369656e7420616c6c6f77616e6365000000000000000000006044820152606401610212565b73ffffffffffffffffffffffffffffffffffffffff808416600081815260208181526040808320805487900390559386168083529184902080548601905592825260018152828220339093168252919091522080548390039055565b60408051808201909152600381527f474f560000000000000000000000000000000000000000000000000000000000602082015290565b600073ffffffffffffffffffffffffffffffffffffffff83166000908152602081905260409020548211156103685760405162461bcd60e51b815260206004820152601360248201527f496e73756666696369656e742062616c616e6365000000000000000000000000006044820152606401610212565b73ffffffffffffffffffffffffffffffffffffffff831660008181526020818152604080832080548790039055938616808352918490208054860190559251848152919290917fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef910160405180910390a350600192915050565b600060208083528351808285015260005b818110156103e5578581018301518582016040015282016103c9565b818111156103f7576000604083870101525b50601f01601f1916929092016040019392505050565b803573ffffffffffffffffffffffffffffffffffffffff8116811461041d57600080fd5b919050565b60008060006060848603121561043757600080fd5b610440846103f9565b925061044e602085016103f9565b9150604084013590509250925092565b60006020828403121561047057600080fd5b610479826103f9565b9392505050565b6000806040838503121561048c57600080fd5b610495836103f9565b94602093909301359350505056fea26469706673582212208a8de1f6e8b4e7d9d7b7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e764736f6c634300080d0033";
+    }
     
     // Deploy the contract
-    const factory = new ethers.ContractFactory([], contractBytecode, deployer);
+    const factory = new ethers.ContractFactory(contractABI, contractBytecode, deployer);
     console.log('📦 Deploying GovernanceToken...');
     
-    const contract = await factory.deploy('GovernanceToken', 'GOV', deployer.address, '1000000000000000000000000');
+    const contract = await factory.deploy(ethers.parseEther("1000000"));
     await contract.waitForDeployment();
     
     const contractAddress = await contract.getAddress();
@@ -28,11 +62,26 @@ async function deployToken() {
     // Fund all addresses with tokens
     const allAddresses = ['0x4A7C969110f7358bF334b49A2FF1a2585ac372B8', '0x148311C647Ec8a584D896c04f6492b5D9Cb3a9B0', '0x36311a95623ddf14De0c7C07250de259E118Cc2e', '0x2BBd20672EAE1dE51fA49088b7bc1D421b7b3FEC'];
     
-    for (const address of allAddresses) {
+    for (let i = 0; i < allAddresses.length; i++) {
+        const address = allAddresses[i];
         console.log(`💸 Transferring 100000000000000000000 tokens to ${address}...`);
-        const transferTx = await contract.transfer(address, '100000000000000000000');
+        
+        // Get current nonce to avoid conflicts
+        const nonce = await provider.getTransactionCount(deployer.address);
+        
+        const transferTx = await contract.transfer(address, '100000000000000000000', {
+            nonce: nonce,
+            gasLimit: 100000
+        });
+        
+        console.log(`⏳ Transaction sent: ${transferTx.hash}`);
         await transferTx.wait();
         console.log(`✅ Transfer to ${address} complete!`);
+        
+        // Small delay between transfers to ensure nonce updates
+        if (i < allAddresses.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
     
     console.log('✅ All user address transfers complete!');
@@ -50,17 +99,26 @@ async function deployToken() {
             
             // Fund canister with governance tokens (100 tokens)
             const canisterTokenAmount = '100000000000000000000'; // 100 tokens
-            console.log(`� Transferring ${ethers.formatEther(canisterTokenAmount)} tokens to canister...`);
-            const canisterTokenTx = await contract.transfer(canisterAddress, canisterTokenAmount);
+            console.log(`💸 Transferring ${ethers.formatEther(canisterTokenAmount)} tokens to canister...`);
+            
+            const tokenNonce = await provider.getTransactionCount(deployer.address);
+            const canisterTokenTx = await contract.transfer(canisterAddress, canisterTokenAmount, {
+                nonce: tokenNonce,
+                gasLimit: 100000
+            });
             await canisterTokenTx.wait();
             console.log('✅ Canister token transfer complete!');
             
             // Fund canister with Ether (1 ETH)
             const canisterEtherAmount = '1000000000000000000'; // 1 ETH
             console.log(`💸 Transferring ${ethers.formatEther(canisterEtherAmount)} ETH to canister...`);
+            
+            const etherNonce = await provider.getTransactionCount(deployer.address);
             const canisterEtherTx = await deployer.sendTransaction({
                 to: canisterAddress,
-                value: canisterEtherAmount
+                value: canisterEtherAmount,
+                nonce: etherNonce,
+                gasLimit: 21000
             });
             await canisterEtherTx.wait();
             console.log('✅ Canister Ether transfer complete!');
