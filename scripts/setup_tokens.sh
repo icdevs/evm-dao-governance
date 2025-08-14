@@ -110,6 +110,7 @@ SOLEOF
 import { ethers } from 'ethers';
 import { execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 
 async function deployToken() {
     // Connect to Anvil
@@ -131,7 +132,9 @@ async function deployToken() {
         execSync('forge build --contracts GovernanceToken.sol --out forge-out', { stdio: 'inherit' });
         
         // Read the compiled contract
-        const artifactPath = 'forge-out/GovernanceToken.sol/GovernanceToken.json';
+        const artifactPath = '../forge-out/GovernanceToken.sol/GovernanceToken.json';
+        const absolutePath = path.resolve(artifactPath);
+        console.log('Checking for file at:', absolutePath);
         if (fs.existsSync(artifactPath)) {
             const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
             contractBytecode = artifact.bytecode.object;
@@ -141,7 +144,7 @@ async function deployToken() {
             throw new Error('Compiled contract not found');
         }
     } catch (error) {
-        console.log('⚠️  Forge not available, using pre-compiled bytecode...');
+        console.log('⚠️  Forge not available, using pre-compiled bytecode...', error);
         
         // Fallback to basic ERC20 ABI and working bytecode
         contractABI = [
@@ -198,10 +201,10 @@ async function deployToken() {
     // Get canister Ethereum address and fund it
     console.log('🏦 Getting canister Ethereum address...');
     try {
-        const canisterResult = execSync('dfx canister call --network local main icrc149_get_eth_address "(null)"', 
+        const canisterResult = execSync('dfx canister call --network local backend icrc149_get_ethereum_address "(null)"', 
             { encoding: 'utf8', stdio: 'pipe' });
         
-        const addressMatch = canisterResult.match(/opt\\s+"([^"]+)"/);
+        const addressMatch = canisterResult.match(/"([^"]+)"/);
         if (addressMatch && addressMatch[1]) {
             const canisterAddress = addressMatch[1];
             console.log('✅ Canister Ethereum address:', canisterAddress);
@@ -212,7 +215,7 @@ async function deployToken() {
             
             const tokenNonce = await provider.getTransactionCount(deployer.address);
             const canisterTokenTx = await contract.transfer(canisterAddress, canisterTokenAmount, {
-                nonce: tokenNonce,
+                nonce: tokenNonce + 1, // TODO this was the only way i could avoid 'reuse' of a nonce???
                 gasLimit: 100000
             });
             await canisterTokenTx.wait();
