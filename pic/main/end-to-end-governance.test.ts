@@ -9,11 +9,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Runtime import: include the .js extension
-import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/main/main.did.js";
+import { idlFactory as mainIDLFactory, init as mainInit } from "../../src/declarations/backend/backend.did.js";
 import { idlFactory as evmRpcIDLFactory, init as evmRpcInit } from "../../src/declarations/evm_rpc/evm_rpc.did.js";
 
 // Type-only import: import types from the candid interface without the extension
-import type { _SERVICE as mainService, VoteArgs, VoteChoice, Witness, SIWEProof } from "../../src/declarations/main/main.did.js";
+import type { _SERVICE as mainService, VoteArgs, VoteChoice, Witness, SIWEProof } from "../../src/declarations/backend/backend.did.js";
 import type { _SERVICE as evmRpcService } from "../../src/declarations/evm_rpc/evm_rpc.did.js";
 
 // Import SIWE utilities
@@ -51,7 +51,7 @@ describe("EVMDAOBridge End-to-End Governance Test", () => {
   // Ensure proper cleanup after all tests to prevent Jest hanging
   afterAll(async () => {
     console.log("🧹 Final cleanup: ensuring all background processes are stopped...");
-    
+
     // Clean up any test environment resources
     try {
       // Clean up provider to stop any pending network requests
@@ -59,32 +59,32 @@ describe("EVMDAOBridge End-to-End Governance Test", () => {
         await provider.destroy?.();
         provider = null as any;
       }
-      
+
       // Clean up PocketIC
       if (pic) {
         await pic.tearDown();
         pic = null as any;
       }
-      
+
       // Clean up Anvil process
       if (anvilProcess) {
         anvilProcess.kill('SIGKILL');
         anvilProcess = null as any;
       }
-      
+
       // Clean up test data
       testVoters = [];
-      
+
       // Kill any remaining processes
       await killExistingProcesses();
-      
+
       // Extra wait for full cleanup
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
     } catch (error) {
       console.warn("Warning: Error during final cleanup:", error);
     }
-    
+
     console.log("✅ Final cleanup completed");
   });
 
@@ -99,7 +99,7 @@ describe("EVMDAOBridge End-to-End Governance Test", () => {
       } else {
         execSync(`pkill -f ${processName}`, { stdio: 'ignore' });
       }
-      
+
       // Wait a bit for processes to fully terminate
       await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
@@ -113,10 +113,10 @@ describe("EVMDAOBridge End-to-End Governance Test", () => {
     const picTimeMs = await pic.getTime(); // PocketIC time in microseconds
     const canisterTimeNanos = BigInt(Math.floor(picTimeMs)) * 1_000_000n; // Convert to nanoseconds, ensure integer
     const expirationTimeNanos = canisterTimeNanos + 600_000_000_000n; // 10 minutes from now in nanoseconds
-    
+
     const currentTimeISO = new Date(Number(canisterTimeNanos / 1_000_000n)).toISOString();
     const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
-    
+
     return `example.com wants you to sign in with your Ethereum account:
 ${address}
 
@@ -162,10 +162,10 @@ Expiration Time: ${expirationTimeISO}`;
   // Process HTTP outcalls for RPC requests with immediate processing
   async function processRPCCallsImmediate(maxIterations = 30): Promise<void> {
     console.log(`🔄 Processing RPC calls immediately (max ${maxIterations} iterations)...`);
-    
+
     for (let i = 0; i < maxIterations; i++) {
       await pic.tick(2);
-      
+
       const pendingHttpsOutcalls = await pic.getPendingHttpsOutcalls();
       if (pendingHttpsOutcalls.length === 0) {
         if (i > 0) {
@@ -173,20 +173,20 @@ Expiration Time: ${expirationTimeISO}`;
         }
         return;
       }
-      
+
       console.log(`📞 Iteration ${i + 1}: Found ${pendingHttpsOutcalls.length} pending HTTP outcalls`);
-      
+
       const outcallPromises = pendingHttpsOutcalls.map(async (thisOutcall, index) => {
         try {
           console.log(`🌐 Processing outcall ${index + 1}/${pendingHttpsOutcalls.length} to ${thisOutcall.url}`);
-          
+
           const decodedBody = new TextDecoder().decode(thisOutcall.body);
           let ownerRequest = JSON.parse(decodedBody);
-          
+
           console.log(`📨 RPC Request: ${ownerRequest.method}`, ownerRequest.params);
-          
+
           // Fix request format for eth_call if needed
-          if(ownerRequest.method === "eth_call") {
+          if (ownerRequest.method === "eth_call") {
             ownerRequest = {
               id: ownerRequest.id,
               jsonrpc: ownerRequest.jsonrpc,
@@ -226,26 +226,26 @@ Expiration Time: ${expirationTimeISO}`;
               headers: [],
             }
           });
-          
+
           console.log(`✅ Mocked response for outcall ${index + 1}`);
-          
+
         } catch (error) {
           console.error(`❌ Error processing outcall ${index + 1}:`, error);
-          
+
           // Mock an error response with a proper error JSON response
           const errorResponse = {
             jsonrpc: "2.0",
             id: null,
             error: { code: -32000, message: error instanceof Error ? error.message : 'RPC call failed' }
           };
-          
+
           try {
             const parsedRequest = JSON.parse(new TextDecoder().decode(thisOutcall.body));
             errorResponse.id = parsedRequest.id;
           } catch (parseError) {
             console.warn("Could not parse request for error response ID");
           }
-          
+
           await pic.mockPendingHttpsOutcall({
             requestId: thisOutcall.requestId,
             subnetId: thisOutcall.subnetId,
@@ -262,7 +262,7 @@ Expiration Time: ${expirationTimeISO}`;
       await Promise.all(outcallPromises);
       await pic.tick(3);
     }
-    
+
     console.log(`⏰ Reached maximum iterations (${maxIterations}), stopping RPC processing`);
   }
 
@@ -287,7 +287,7 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Connect to Anvil
     provider = new JsonRpcProvider('http://127.0.0.1:8545');
-    
+
     // Verify connection and wait for blockchain to be ready
     let retries = 0;
     while (retries < 10) {
@@ -302,22 +302,22 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Deploy governance token using the compiled contract with proper nonce management
     const deployer = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", provider);
-    
+
     // Get current nonce to ensure proper sequencing
     let currentNonce = await deployer.getNonce();
     console.log("Starting nonce:", currentNonce);
-    
+
     console.log("Deploying governance token...");
     const tokenFactory = new ethers.ContractFactory(
-      governanceTokenArtifact.abi, 
-      governanceTokenArtifact.bytecode, 
+      governanceTokenArtifact.abi,
+      governanceTokenArtifact.bytecode,
       deployer
     );
     const deployedContract = await tokenFactory.deploy(deployer.address, { nonce: currentNonce++ }); // Use explicit nonce
     await deployedContract.waitForDeployment();
     governanceTokenAddress = await deployedContract.getAddress();
     governanceToken = new Contract(governanceTokenAddress, governanceTokenArtifact.abi, deployer);
-    
+
     console.log("Governance token deployed at:", governanceTokenAddress);
 
     // Create test voters with different token balances
@@ -334,40 +334,40 @@ Expiration Time: ${expirationTimeISO}`;
     ];
 
     console.log(`🔍 Starting token distribution for ${voterPrivateKeys.length} voters...`);
-    
+
     for (let i = 0; i < voterPrivateKeys.length; i++) {
       console.log(`📊 Processing voter ${i + 1}/${voterPrivateKeys.length}...`);
       const wallet = new ethers.Wallet(voterPrivateKeys[i], provider);
       const balance = tokenBalances[i];
-      
+
       console.log(`🎯 Voter ${i + 1}: Address=${wallet.address}, Balance=${ethers.formatEther(balance)} tokens`);
-      
+
       // The GovernanceToken contract mints tokens to the owner, so let's transfer from owner to voters
       console.log(`Transferring ${ethers.formatEther(balance)} tokens to voter ${i + 1} (${wallet.address})`);
-      
+
       // Get fresh nonce for each transaction to avoid conflicts
       const deployerNonce = await provider.getTransactionCount(deployer.address, 'pending');
       console.log(`🔢 Using nonce ${deployerNonce} for transfer to voter ${i + 1}`);
-      
+
       const transferTx = await governanceToken['transfer'](wallet.address, balance, {
         nonce: deployerNonce
       });
       console.log(`⏳ Transfer transaction submitted for voter ${i + 1} with nonce ${deployerNonce}...`);
       await transferTx.wait();
       console.log(`✅ Transfer confirmed for voter ${i + 1}`);
-      
+
       // Wait between transfers to prevent nonce conflicts
       if (i < voterPrivateKeys.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
+
       testVoters.push({
         wallet,
         address: wallet.address,
         tokenBalance: balance,
         expectedVoteWeight: balance, // 1:1 token to vote weight
       });
-      
+
       console.log(`Voter ${i + 1} (${wallet.address}) received ${ethers.formatEther(balance)} tokens`);
     }
 
@@ -394,10 +394,10 @@ Expiration Time: ${expirationTimeISO}`;
       idlFactory: evmRpcIDLFactory,
       wasm: EVM_RPC_WASM_PATH,
       sender: admin.getPrincipal(),
-      arg: IDL.encode(evmRpcInit({IDL}), [{ 
-        logFilter : [{ShowAll : null}],
-        demo : [],
-        manageApiKeys : [[admin.getPrincipal()]]
+      arg: IDL.encode(evmRpcInit({ IDL }), [{
+        logFilter: [{ ShowAll: null }],
+        demo: [],
+        manageApiKeys: [[admin.getPrincipal()]]
       }]),
     });
 
@@ -413,7 +413,7 @@ Expiration Time: ${expirationTimeISO}`;
       idlFactory: mainIDLFactory,
       wasm: MAIN_WASM_PATH,
       sender: admin.getPrincipal(),
-      arg: IDL.encode(mainInit({IDL}), [[]]), // Use null for minimal setup
+      arg: IDL.encode(mainInit({ IDL }), [[]]), // Use null for minimal setup
     });
 
     // Set admin identity for configuration
@@ -444,10 +444,10 @@ Expiration Time: ${expirationTimeISO}`;
 
   afterEach(async () => {
     console.log("🧹 Starting test cleanup...");
-    
+
     // Clean up test voters array for next test
     testVoters = [];
-    
+
     // Clean up provider first to stop any pending network requests
     if (provider) {
       try {
@@ -457,7 +457,7 @@ Expiration Time: ${expirationTimeISO}`;
       }
       provider = null as any;
     }
-    
+
     // Clean up Anvil process
     if (anvilProcess) {
       try {
@@ -470,7 +470,7 @@ Expiration Time: ${expirationTimeISO}`;
         console.warn("Warning: Error terminating Anvil:", error);
       }
     }
-    
+
     // Clean up PocketIC
     if (pic) {
       try {
@@ -479,13 +479,13 @@ Expiration Time: ${expirationTimeISO}`;
         console.warn("Warning: Error tearing down PocketIC:", error);
       }
     }
-    
+
     // Kill any remaining processes
     await killExistingProcesses();
-    
+
     // Additional wait to ensure full cleanup
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     console.log("✅ Test cleanup completed");
   });
 
@@ -494,7 +494,7 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Create admin wallet for SIWE signing
     const adminWallet = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", provider);
-    
+
     // Create SIWE proof for proposal creation
     const siweProof = await createSIWEProofForProposal(
       adminWallet,
@@ -512,19 +512,19 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Create proposal and handle RPC calls
     console.log("Creating proposal...");
-    
+
     // Start the proposal creation
     const createResultPromise = evmDAOBridge_fixture.actor.icrc149_create_proposal(proposalRequest);
-    
+
     // Give a moment for the canister to start processing, then handle RPC calls
     await new Promise(resolve => setTimeout(resolve, 2000));
     await processRPCCallsImmediate(20);
-    
+
     // Wait for the proposal creation to complete
     const createResult = await createResultPromise;
-    
+
     console.log("Create result:", createResult);
-    
+
     // Handle both success and failure cases gracefully
     if ('Ok' in createResult) {
       proposalId = createResult.Ok as bigint;
@@ -542,10 +542,10 @@ Expiration Time: ${expirationTimeISO}`;
     // Verify snapshot was created automatically
     const governanceConfig = await evmDAOBridge_fixture.actor.icrc149_governance_config();
     const snapshots = governanceConfig.snapshot_contracts;
-    const governanceSnapshot = snapshots.find(([addr, _]: [any, any]) => 
+    const governanceSnapshot = snapshots.find(([addr, _]: [any, any]) =>
       addr.toLowerCase() === governanceTokenAddress.toLowerCase()
     );
-    
+
     expect(governanceSnapshot).toBeDefined();
     console.log("✅ Snapshot configuration verified");
 
@@ -569,23 +569,23 @@ Expiration Time: ${expirationTimeISO}`;
 
     for (const [index, { voter, choice }] of votes.entries()) {
       console.log(`\nCasting vote for Voter ${index + 1}...`);
-      
+
       // Determine choice string for SIWE message
       const choiceStr = Object.keys(choice)[0]; // "Yes", "No", or "Abstain"
-      
+
       // Create SIWE message with updated format
       const siweMessage = await createSIWEMessage(voter.address, proposalId, choiceStr, governanceTokenAddress.toLowerCase());
-      
+
       // Sign the SIWE message
       const signature = await voter.wallet.signMessage(siweMessage);
-      
+
       // Get current block for witness
       const currentBlock = await provider.getBlockNumber();
       const witnessBlock = BigInt(currentBlock - 1); // Use previous block for witness
-      
+
       // Create witness proof
       const witness = await createMockWitness(governanceTokenAddress, voter.address, witnessBlock);
-      
+
       // Cast vote
       const voteArgs = {
         proposal_id: proposalId, // Use bigint directly
@@ -599,10 +599,10 @@ Expiration Time: ${expirationTimeISO}`;
       };
 
       const voteResult = await evmDAOBridge_fixture.actor.icrc149_vote_proposal(voteArgs);
-      
+
       // Process any RPC calls that might be needed for witness verification
       await processRPCCallsImmediate(5);
-      
+
       if ('ok' in voteResult) {
         console.log(`✅ Voter ${index + 1} successfully voted: ${choiceStr}`);
       } else {
@@ -618,10 +618,10 @@ Expiration Time: ${expirationTimeISO}`;
     // Try to get proposal details to see vote results
     try {
       const proposalResult = await evmDAOBridge_fixture.actor.icrc149_get_proposal(proposalId);
-      
+
       if (proposalResult && 'state' in proposalResult) {
         console.log("📊 Proposal State:", proposalResult.state);
-        
+
         // If the proposal has vote tallying information, display it
         if ('votes' in proposalResult) {
           console.log("📊 Vote Results:");
@@ -661,7 +661,7 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Create admin wallet for SIWE signing
     const adminWallet = new ethers.Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80", provider);
-    
+
     // Create SIWE proof for proposal creation
     const siweProof = await createSIWEProofForProposal(
       adminWallet,
@@ -679,18 +679,18 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Create proposal with concurrent RPC processing
     console.log("Creating vote weight verification proposal...");
-    
+
     const createResultPromise = evmDAOBridge_fixture.actor.icrc149_create_proposal(proposalRequest);
-    
+
     // Give a moment for the canister to start processing, then handle RPC calls
     await new Promise(resolve => setTimeout(resolve, 2000));
     await processRPCCallsImmediate(20);
-    
+
     // Wait for the proposal creation to complete
     const createResult = await createResultPromise;
-    
+
     console.log("Vote weight verification proposal result:", createResult);
-    
+
     // Handle both success and failure cases gracefully
     if ('Ok' in createResult) {
       proposalId = createResult.Ok as bigint;
@@ -706,13 +706,13 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Test voting with the highest balance voter
     const topVoter = testVoters[0]; // 10,000 tokens
-    
+
     const siweMessage = await createSIWEMessage(topVoter.address, proposalId, "Yes", governanceTokenAddress.toLowerCase());
     const signature = await topVoter.wallet.signMessage(siweMessage);
-    
+
     const currentBlock = await provider.getBlockNumber();
     const witness = await createMockWitness(governanceTokenAddress, topVoter.address, BigInt(currentBlock - 1));
-    
+
     const voteArgs = {
       proposal_id: proposalId,
       voter: ethers.getBytes(topVoter.address),
@@ -726,21 +726,21 @@ Expiration Time: ${expirationTimeISO}`;
 
     // Cast vote and verify the system processes it
     const voteResult = await evmDAOBridge_fixture.actor.icrc149_vote_proposal(voteArgs);
-    
+
     // The vote may succeed or fail depending on witness verification implementation
     // But the system should handle it gracefully either way
     console.log("Vote result:", voteResult);
-    
+
     // Try to verify vote was processed
     try {
       const proposalResult = await evmDAOBridge_fixture.actor.icrc149_get_proposal(proposalId);
       console.log("Proposal state after vote:", proposalResult);
-      
+
       expect(proposalResult).toBeDefined();
     } catch (error) {
       console.log("Could not retrieve proposal details");
     }
-    
+
     console.log("✅ Vote weight verification test completed");
   }, 180000); // 3 minute timeout
 
@@ -762,7 +762,7 @@ Expiration Time: ${expirationTimeISO}`;
         action: "dev_fund"
       },
       {
-        title: "Proposal B: Marketing Budget", 
+        title: "Proposal B: Marketing Budget",
         description: "Allocate funds for marketing",
         action: "marketing_fund"
       }
@@ -775,14 +775,14 @@ Expiration Time: ${expirationTimeISO}`;
 
     for (const [index, proposal] of proposals.entries()) {
       console.log(`\nCreating ${proposal.title}...`);
-      
+
       // Create SIWE proof for each proposal
       const siweProof = await createSIWEProofForProposal(
         adminWallet,
         governanceTokenAddress.toLowerCase(),
         pic
       );
-      
+
       const proposalRequest = {
         action: { Motion: proposal.title + " - " + proposal.description },
         metadata: [proposal.description] as [] | [string],
@@ -792,18 +792,18 @@ Expiration Time: ${expirationTimeISO}`;
 
       // Create proposal with concurrent RPC processing
       console.log(`Creating proposal ${index + 1}: ${proposal.title}...`);
-      
+
       const createProposalPromise = evmDAOBridge_fixture.actor.icrc149_create_proposal(proposalRequest);
-      
+
       // Give a moment for the canister to start processing, then handle RPC calls
       await new Promise(resolve => setTimeout(resolve, 2000));
       await processRPCCallsImmediate(15);
-      
+
       // Wait for the proposal creation to complete
       const result = await createProposalPromise;
-      
+
       console.log(`Proposal ${index + 1} result:`, result);
-      
+
       // Handle both success and failure cases gracefully
       if ('Ok' in result) {
         proposalIds.push(result.Ok as bigint);

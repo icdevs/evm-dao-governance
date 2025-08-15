@@ -165,7 +165,7 @@ async function approveSnapshotContract(contractAddress) {
         },
         rpc_service: {
             rpc_type: "custom",
-            canister_id: "7hfb6-caaaa-aaaar-qadga-cai", // EVM RPC canister ID from dfx.json
+            canister_id: process.env.CANISTER_ID_EVM_RPC || "7hfb6-caaaa-aaaar-qadga-cai", // EVM RPC canister ID from dfx.json
             custom_config: [["url", "http://127.0.0.1:8545"]]
         }
     };

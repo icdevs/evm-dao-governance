@@ -70,9 +70,9 @@ This project bridges Ethereum-based DAO governance with the Internet Computer ec
 3. **Output declarations**
 
     ```bash
-    # Output main canister candid declarations
+    # Output canister candid declarations
     # (Only initially or on backend API change)
-    dfx generate main
+    dfx generate
     ```
 
 4. **Start local development**
@@ -123,6 +123,24 @@ const voteResult = await canister.icrc149_vote_proposal({
 ```
 
 ## 🔧 Development
+
+### Prerequisites
+
+For development beyond the basic Quick Start setup, you'll need these additional tools:
+
+-   **[Foundry](https://book.getfoundry.sh/getting-started/installation)** - Ethereum development toolkit
+    ```bash
+    curl -L https://foundry.paradigm.xyz | bash
+    foundryup
+    ```
+-   **[Hardhat](https://hardhat.org/tutorial/setting-up-the-environment)** - Ethereum development environment
+    ```bash
+    npm install -g hardhat
+    ```
+-   **[TypeScript](https://www.typescriptlang.org/)** - For type-safe JavaScript development
+-   **[ic-wasm](https://github.com/dfinity/ic-wasm)** - WebAssembly optimization tool (only needed if using `./build.sh` instead of `dfx build`)
+-   **[Python 3](https://www.python.org/)** - For running local development servers (only needed if using `frontend_old` with `npm run serve/demo`)
+-   **[Docker](https://docs.docker.com/get-docker/)** (Optional) - For containerized builds
 
 ### Building
 

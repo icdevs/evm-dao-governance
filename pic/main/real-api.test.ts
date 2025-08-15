@@ -4,7 +4,7 @@
 import { PocketIc } from '@dfinity/pic';
 import { ActorSubclass } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
-import { idlFactory, _SERVICE, init as mainInit } from '../../src/declarations/main/main.did.js';
+import { idlFactory, _SERVICE, init as mainInit } from '../../src/declarations/backend/backend.did.js';
 import { IDL } from '@dfinity/candid';
 import { ethers } from 'ethers';
 import { createSimpleSIWEProof, SIWEProof } from '../utils/siwe-utils.ts';
@@ -44,15 +44,15 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
 
   beforeAll(async () => {
     pic = await PocketIc.create(process.env.PIC_URL || 'http://localhost:8080');
-    
+
     // Create the main canister
     const fixture = await pic.setupCanister<_SERVICE>({
       idlFactory,
       wasm: '.dfx/local/canisters/main/main.wasm.gz',
-      arg: IDL.encode(mainInit({IDL}), [[]]),
+      arg: IDL.encode(mainInit({ IDL }), [[]]),
 
     });
-    
+
     canister = fixture.actor as unknown as ActorSubclass<_SERVICE>;
     canisterId = fixture.canisterId;
   });
@@ -71,9 +71,9 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
     it('should return supported standards including ICRC-149', async () => {
       const standards = await canister.icrc10_supported_standards();
       expect(Array.isArray(standards)).toBe(true);
-      
+
       console.log('Supported standards:', standards);
-      
+
       // Should include ICRC-149
       const icrc149 = standards.find(s => s.name === 'ICRC-149');
       expect(icrc149).toBeDefined();
@@ -85,35 +85,35 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
       expect(Array.isArray(config.admin_principals)).toBe(true);
       expect(Array.isArray(config.snapshot_contracts)).toBe(true);
       expect(Array.isArray(config.execution_contracts)).toBe(true);
-      
+
       console.log('Governance config:', config);
     });
 
     it('should return snapshot contracts configuration', async () => {
       const contracts = await canister.icrc149_get_snapshot_contracts();
       expect(Array.isArray(contracts)).toBe(true);
-      
+
       console.log('Configured snapshot contracts:', contracts);
     });
 
     it('should return execution contracts configuration', async () => {
       const contracts = await canister.icrc149_get_execution_contracts();
       expect(Array.isArray(contracts)).toBe(true);
-      
+
       console.log('Configured execution contracts:', contracts);
     });
 
     it('should return approved ICP methods', async () => {
       const methods = await canister.icrc149_get_approved_icp_methods();
       expect(Array.isArray(methods)).toBe(true);
-      
+
       console.log('Approved ICP methods:', methods);
     });
 
     it('should perform health check', async () => {
       const health = await canister.icrc149_health_check();
       expect(typeof health).toBe('string');
-      
+
       console.log('Health check result:', health);
     });
   });
@@ -121,7 +121,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
   describe('Proposal Management Tests', () => {
     it('should create a simple motion proposal', async () => {
       const siweProof = await createSimpleSIWEProof(testWallet, 'Create motion proposal', testContractAddress);
-      
+
       const proposalData: CreateProposalRequest = {
         action: { Motion: 'Test motion proposal for governance' },
         metadata: ['Test proposal metadata'],
@@ -131,9 +131,9 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
 
       const result = await canister.icrc149_create_proposal(proposalData);
       console.log('Create proposal result:', result);
-      
+
       expect('Ok' in result || 'Err' in result).toBe(true);
-      
+
       if ('Ok' in result) {
         const proposalId = result.Ok;
         console.log('Created proposal with ID:', proposalId);
@@ -141,7 +141,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
         // Try to get the proposal back
         const proposalResult = await canister.icrc149_get_proposal(proposalId);
         console.log('Retrieved proposal:', proposalResult);
-        
+
         if (proposalResult.length > 0) {
           const proposal = proposalResult[0];
           if (proposal) {
@@ -154,7 +154,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
 
     it('should create an ETH transaction proposal', async () => {
       const siweProof = await createSimpleSIWEProof(testWallet, 'Create ETH transaction proposal', testContractAddress);
-      
+
       const ethTx: EthTx = {
         to: '0x742d35Cc6481C3d99e6A7f9C9A7F9e4B2D2B1234',
         value: 1000000000000000000n, // 1 ETH in wei
@@ -180,7 +180,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
 
       const result = await canister.icrc149_create_proposal(proposalData);
       console.log('ETH proposal result:', result);
-      
+
       expect('Ok' in result || 'Err' in result).toBe(true);
     });
 
@@ -191,7 +191,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
         [], // limit  
         []  // filters
       );
-      
+
       console.log('All proposals:', allProposals);
       expect(Array.isArray(allProposals)).toBe(true);
 
@@ -201,13 +201,13 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
         [],
         [{ by_action_type: { motion: null } }]
       );
-      
+
       console.log('Motion proposals:', motionProposals);
       expect(Array.isArray(motionProposals)).toBe(true);
     });
   });
 
-  
+
 
   describe('Contract Configuration Tests', () => {
     it('should update snapshot contract configuration', async () => {
@@ -232,7 +232,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
         contractId,
         [config]
       );
-      
+
       console.log('Update snapshot contract result:', result);
       expect('Ok' in result || 'Err' in result).toBe(true);
     });
@@ -253,7 +253,7 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
         contractId,
         [config]
       );
-      
+
       console.log('Update execution contract result:', result);
       expect('Ok' in result || 'Err' in result).toBe(true);
     });
@@ -262,20 +262,20 @@ describe('EVMDAOBridge Real API Integration Tests', () => {
   describe('Admin Functions Tests', () => {
     it('should handle admin principal updates', async () => {
       const testPrincipal = Principal.fromText('7hfb6-caaaa-aaaar-qadga-cai');
-      
+
       const result = await canister.icrc149_update_admin_principal(testPrincipal, true);
       console.log('Update admin principal result:', result);
-      
+
       // This will likely fail due to authorization, but should not crash
       expect('Ok' in result || 'Err' in result).toBe(true);
     });
 
     it('should handle controller updates', async () => {
       const testPrincipal = Principal.fromText('7hfb6-caaaa-aaaar-qadga-cai');
-      
+
       const result = await canister.icrc149_set_controller(testPrincipal);
       console.log('Set controller result:', result);
-      
+
       // This will likely fail due to authorization, but should not crash
       expect('Ok' in result || 'Err' in result).toBe(true);
     });
@@ -309,7 +309,7 @@ Issued At: 2024-01-01T00:00:00.000Z`,
 
       const result = await canister.icrc149_verify_siwe(siweProof);
       console.log('SIWE verification result:', result);
-      
+
       // Should return either Ok or Err, not crash
       expect('Ok' in result || 'Err' in result).toBe(true);
     });
@@ -319,7 +319,7 @@ Issued At: 2024-01-01T00:00:00.000Z`,
     it('should handle proposal execution attempts', async () => {
       // Create a simple proposal first
       const siweProof = await createSimpleSIWEProof(testWallet, 'Create execution test proposal', testContractAddress);
-      
+
       const proposalData: CreateProposalRequest = {
         action: { Motion: 'Test execution proposal' },
         metadata: ['Execution test'],
@@ -328,14 +328,14 @@ Issued At: 2024-01-01T00:00:00.000Z`,
       };
 
       const createResult = await canister.icrc149_create_proposal(proposalData);
-      
+
       if ('Ok' in createResult) {
         const proposalId = createResult.Ok;
-        
+
         // Try to execute (will likely fail due to voting requirements)
         const executeResult = await canister.icrc149_execute_proposal(proposalId);
         console.log('Execute proposal result:', executeResult);
-        
+
         expect('Ok' in executeResult || 'Err' in executeResult).toBe(true);
       }
     });
