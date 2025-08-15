@@ -502,23 +502,31 @@
                             </div>
                         </div>
                     {:else if activeTab === "proposals"}
-                        <ProposalList />
+                        <div class="proposals-view">
+                            <div class="proposals-container">
+                                <ProposalList />
+                            </div>
+                        </div>
                     {:else if activeTab === "create"}
                         {#if $authStore.isAuthenticated}
-                            <ProposalForm
-                                on:proposalCreated={handleProposalCreated}
-                            />
+                            <div class="create-view">
+                                <ProposalForm
+                                    on:proposalCreated={handleProposalCreated}
+                                />
+                            </div>
                         {:else}
-                            <div class="auth-required">
-                                <div class="auth-icon">🔒</div>
-                                <h3>Wallet Connection Required</h3>
-                                <p>
-                                    Connect your wallet to create and vote on
-                                    proposals.
-                                </p>
-                                <div class="auth-hint">
-                                    Use the wallet connector in the header to
-                                    get started.
+                            <div class="create-view">
+                                <div class="auth-required">
+                                    <div class="auth-icon">🔒</div>
+                                    <h3>Wallet Connection Required</h3>
+                                    <p>
+                                        Connect your wallet to create and vote
+                                        on proposals.
+                                    </p>
+                                    <div class="auth-hint">
+                                        Use the wallet connector in the header
+                                        to get started.
+                                    </div>
                                 </div>
                             </div>
                         {/if}
@@ -760,6 +768,7 @@
         background: var(--color-bg-secondary);
         border-bottom: 1px solid var(--color-border);
         padding: 0.5rem;
+        margin-bottom: 0;
         gap: 0.25rem;
         position: relative;
     }
@@ -810,7 +819,7 @@
 
     /* Content Area */
     .content-area {
-        padding: 2.5rem;
+        padding: 1.5rem 2.5rem 1rem 2.5rem;
         min-height: 60vh;
         background: var(--color-bg-primary);
     }
@@ -821,6 +830,51 @@
         flex-direction: column;
         gap: 2.5rem;
         position: relative;
+    }
+
+    /* Proposals View - Similar structure to dashboard */
+    .proposals-view {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        position: relative;
+    }
+
+    /* Create View - Similar structure to dashboard */
+    .create-view {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        position: relative;
+    }
+
+    /* Proposals Container - Grey sub-box styling similar to balance dashboard */
+    .proposals-container {
+        background: linear-gradient(
+            135deg,
+            var(--color-surface) 0%,
+            var(--color-surface-secondary) 100%
+        );
+        border: 1px solid var(--color-border);
+        border-radius: 16px;
+        padding: 2rem;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .proposals-container::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+            90deg,
+            var(--color-primary),
+            var(--color-success)
+        );
+        opacity: 0.7;
     }
 
     .dashboard-controls {
@@ -1081,8 +1135,11 @@
         justify-content: space-between;
         padding: 0.75rem 2rem;
         background: var(--color-surface-secondary);
-        border-bottom: 1px solid var(--color-border);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
         font-size: 0.9rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
 
     .governance-info {

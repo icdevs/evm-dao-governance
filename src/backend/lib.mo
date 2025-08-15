@@ -365,7 +365,7 @@ module {
               case (_) 6; // All other chains - 6 blocks back for safety
             };
 
-            let targetBlockNumber = if (latestBlock.number > confirmationBlocks) {
+            let targetBlockNumber : Nat = if (latestBlock.number > confirmationBlocks) {
               latestBlock.number - confirmationBlocks;
             } else {
               latestBlock.number; // Use latest if chain is too new

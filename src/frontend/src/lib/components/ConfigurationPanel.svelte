@@ -972,11 +972,6 @@
         flex-shrink: 0;
     }
 
-    /* Additional styles for contract selection */
-    .input-hint .success {
-        color: var(--color-success, #28a745);
-    }
-
     .loading-container {
         display: flex;
         align-items: center;
@@ -1011,37 +1006,6 @@
         margin-top: 1.5rem;
         padding-top: 1.5rem;
         border-top: 1px solid var(--color-border-light, #e0e0e0);
-    }
-
-    .add-contract-btn {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 1rem;
-        background: transparent;
-        color: var(--color-primary, #007bff);
-        border: 2px dashed var(--color-primary, #007bff);
-        border-radius: 8px;
-        cursor: pointer;
-        font-size: 0.9rem;
-        transition: all 0.2s ease;
-        width: 100%;
-        justify-content: center;
-    }
-
-    .add-contract-btn:hover:not(:disabled) {
-        background: var(--color-primary-light, rgba(0, 123, 255, 0.1));
-        border-style: solid;
-    }
-
-    .add-contract-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    .add-contract-btn svg {
-        width: 16px;
-        height: 16px;
     }
 
     .add-contract-form {
@@ -1140,8 +1104,7 @@
         gap: 0.75rem;
     }
 
-    .contract-selector-group select,
-    .contract-selector-group input {
+    .contract-selector-group select {
         flex: 1;
     }
 

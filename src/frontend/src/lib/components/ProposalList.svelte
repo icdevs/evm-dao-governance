@@ -252,9 +252,7 @@
 
 <style>
     .proposal-list {
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 1rem;
+        padding: 0;
     }
 
     .list-header {
@@ -262,13 +260,25 @@
         justify-content: space-between;
         align-items: center;
         margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--color-border-light);
         flex-wrap: wrap;
         gap: 1rem;
     }
 
     h2 {
-        color: var(--color-text-primary, #333);
         margin: 0;
+        color: var(--color-text-primary);
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(
+            135deg,
+            var(--color-primary) 0%,
+            var(--color-success) 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
 
     .filter-section {
@@ -284,10 +294,25 @@
     }
 
     select {
-        padding: 0.5rem;
-        border: 1px solid var(--color-border, #ddd);
-        border-radius: 4px;
+        padding: 0.5rem 0.75rem;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        color: var(--color-text-primary);
         font-size: 0.9rem;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+
+    select:hover {
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.1);
+    }
+
+    select:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.2);
     }
 
     .alert {

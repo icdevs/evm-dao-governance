@@ -574,17 +574,50 @@
 
 <style>
     .proposal-form {
-        max-width: 600px;
-        margin: 0 auto;
+        width: 100%;
+        margin: 0;
         padding: 2rem;
-        background: var(--color-surface, #fff);
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(
+            135deg,
+            var(--color-surface) 0%,
+            var(--color-surface-secondary) 100%
+        );
+        border: 1px solid var(--color-border);
+        border-radius: 16px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .proposal-form::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+            90deg,
+            var(--color-primary),
+            var(--color-success)
+        );
+        opacity: 0.7;
     }
 
     h2 {
-        margin-bottom: 1.5rem;
-        color: var(--color-text-primary, #333);
+        margin: 0 0 1.5rem 0;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--color-border-light);
+        color: var(--color-text-primary);
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(
+            135deg,
+            var(--color-primary) 0%,
+            var(--color-success) 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
 
     h3,
@@ -638,32 +671,56 @@
         cursor: pointer;
     }
 
+    input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+        accent-color: var(--color-primary);
+        transform: scale(1.2);
+    }
+
     input,
     select,
     textarea {
         width: 100%;
         padding: 0.75rem;
-        border: 1px solid var(--color-border, #ddd);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
         border-radius: 8px;
+        color: var(--color-text-primary);
         font-size: 1rem;
-        transition:
-            border-color 0.2s,
-            box-shadow 0.2s;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+        color: var(--color-text-muted);
+        opacity: 0.8;
+    }
+
+    input:hover,
+    select:hover,
+    textarea:hover {
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.1);
     }
 
     input:focus,
     select:focus,
     textarea:focus {
         outline: none;
-        border-color: var(--color-primary, #007bff);
-        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.2);
+        background: var(--color-surface-secondary);
     }
 
     input:disabled,
     select:disabled,
     textarea:disabled {
-        background: var(--color-disabled, #f8f9fa);
+        background: var(--color-surface-secondary);
+        color: var(--color-text-muted);
+        border-color: var(--color-border-light);
         cursor: not-allowed;
+        opacity: 0.6;
     }
 
     textarea {
