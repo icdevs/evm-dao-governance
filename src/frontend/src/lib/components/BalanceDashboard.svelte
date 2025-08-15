@@ -3,6 +3,7 @@
     import { authStore } from "../stores/auth.js";
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
+    import { governanceStatsStore } from "../stores/governance.js";
     import { getCurrentChainId } from "../ethereum.js";
     import {
         getCanisterEthereumAddress,
@@ -14,10 +15,16 @@
     } from "../blockchain.js";
 
     let canisterAddress = "";
-    let ethBalance = "0";
-    let tokenBalance = "0";
+    let ethBalance = "-";
+    let tokenBalance = "-";
     let isLoading = false;
     let chainId = null;
+
+    // Export the refresh function so parent can call it
+    export let onRefresh = null;
+
+    // Export loading state so parent can show it
+    export { isLoading };
 
     // Subscribe to auth and config stores
     $: isConnected = $authStore.isAuthenticated;
@@ -43,16 +50,8 @@
         isLoading = true;
 
         try {
-            statusStore.add(
-                "Getting canister Ethereum address...",
-                "info",
-                3000
-            );
-
             // Get canister's derived Ethereum address
             canisterAddress = await getCanisterEthereumAddress(canisterId);
-
-            statusStore.add("Checking balances...", "info", 3000);
 
             // Get current chain ID if not already set
             if (!chainId) {
@@ -68,7 +67,16 @@
             ethBalance = balanceInfo.ethBalance;
             tokenBalance = balanceInfo.tokenBalance;
 
-            statusStore.add("Balances refreshed successfully", "success");
+            // Also refresh governance stats
+            try {
+                await governanceStatsStore.load();
+            } catch (statsError) {
+                console.error(
+                    "Failed to refresh governance stats:",
+                    statsError
+                );
+                // Don't show error for governance stats as it's secondary data
+            }
         } catch (error) {
             console.error("Failed to refresh balances:", error);
             statusStore.add(
@@ -108,7 +116,7 @@
 
     // Initialize balances when component mounts and conditions are met
     let initialized = false;
-    
+
     onMount(async () => {
         if (isConnected) {
             chainId = await getCurrentChainId();
@@ -117,20 +125,26 @@
             }
         }
         initialized = true;
+
+        // Expose refresh function to parent
+        if (onRefresh) {
+            onRefresh(refreshBalances);
+        }
     });
 
     // Watch for auth and config changes to trigger refresh (prevent loops)
     let previousConnected = false;
     let previousConfigured = false;
     let previousCanisterId = "";
-    
+
     $: {
         // Only refresh if we have meaningful state changes and component is initialized
         if (initialized && isConnected && isConfigured) {
             const connectionChanged = !previousConnected && isConnected;
             const configChanged = !previousConfigured && isConfigured;
-            const canisterChanged = previousCanisterId !== canisterId && canisterId;
-            
+            const canisterChanged =
+                previousCanisterId !== canisterId && canisterId;
+
             if (connectionChanged || configChanged || canisterChanged) {
                 refreshBalances();
             }
@@ -143,95 +157,48 @@
 
 <div class="balance-dashboard">
     <div class="dashboard-header">
-        <h3>💰 DAO Treasury</h3>
-        <button
-            class="refresh-btn"
-            on:click={refreshBalances}
-            disabled={!isConnected || !isConfigured || isLoading}
-            title="Refresh balances"
-        >
-            <svg
-                class="refresh-icon"
-                class:spinning={isLoading}
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-            >
-                <path
-                    d="M1 4V10H7"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                />
-                <path
-                    d="M23 20V14H17"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                />
-                <path
-                    d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                />
-            </svg>
-            {isLoading ? "Refreshing..." : "Refresh"}
-        </button>
+        <div class="header-left">
+            <h3>💰 DAO Treasury</h3>
+            {#if canisterAddress}
+                <div class="inline-address">
+                    <span class="address-short" title={canisterAddress}>
+                        {formatAddressLocal(canisterAddress)}
+                    </span>
+                    <button
+                        class="inline-copy-btn"
+                        on:click={copyAddress}
+                        title="Copy address"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <rect
+                                x="9"
+                                y="9"
+                                width="13"
+                                height="13"
+                                rx="2"
+                                ry="2"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                fill="none"
+                            />
+                            <path
+                                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                fill="none"
+                            />
+                        </svg>
+                    </button>
+                </div>
+            {/if}
+        </div>
     </div>
 
     <div class="balance-grid">
-        <div class="balance-card canister-address">
-            <div class="card-header">
-                <h4>📍 Canister Address</h4>
-                <button
-                    class="copy-btn"
-                    on:click={copyAddress}
-                    disabled={!canisterAddress}
-                    title="Copy address"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        xmlns="http://www.w3.org/2000/svg"
-                    >
-                        <rect
-                            x="9"
-                            y="9"
-                            width="13"
-                            height="13"
-                            rx="2"
-                            ry="2"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            fill="none"
-                        />
-                        <path
-                            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            fill="none"
-                        />
-                    </svg>
-                </button>
-            </div>
-            <div class="address-display">
-                {#if canisterAddress}
-                    <span class="address-short"
-                        >{formatAddressLocal(canisterAddress)}</span
-                    >
-                    <span class="address-full">{canisterAddress}</span>
-                {:else}
-                    <span class="placeholder"
-                        >Configure canister to view address</span
-                    >
-                {/if}
-            </div>
-        </div>
-
         <div class="balance-card eth-balance">
             <div class="card-header">
                 <h4>
@@ -240,8 +207,14 @@
                         : "ETH"}
                 </h4>
                 <div class="balance-value">
-                    {ethBalance}
-                    {chainId ? getNativeCurrencySymbol(chainId) : "ETH"}
+                    {#if isLoading}
+                        -
+                    {:else}
+                        {ethBalance}
+                    {/if}
+                    {#if !isLoading}
+                        {chainId ? getNativeCurrencySymbol(chainId) : "ETH"}
+                    {/if}
                 </div>
             </div>
             <div class="balance-subtitle">Network gas fees & transactions</div>
@@ -251,7 +224,11 @@
             <div class="card-header">
                 <h4>🪙 Governance Tokens</h4>
                 <div class="balance-value">
-                    {tokenBalance}
+                    {#if isLoading}
+                        -
+                    {:else}
+                        {tokenBalance}
+                    {/if}
                 </div>
             </div>
             <div class="balance-subtitle">Voting power available</div>
@@ -302,7 +279,7 @@
     .dashboard-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
         margin-bottom: 2rem;
         padding-bottom: 1.5rem;
         border-bottom: 1px solid var(--color-border-light);
@@ -321,6 +298,60 @@
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+    }
+
+    .header-left {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .inline-address {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.375rem 0.75rem;
+        background: rgba(0, 210, 255, 0.1);
+        border: 1px solid rgba(0, 210, 255, 0.2);
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+
+    .inline-address:hover {
+        background: rgba(0, 210, 255, 0.15);
+        border-color: rgba(0, 210, 255, 0.3);
+    }
+
+    .inline-address .address-short {
+        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        font-size: 0.8rem;
+        color: var(--color-primary);
+        font-weight: 600;
+        cursor: help;
+    }
+
+    .inline-copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.25rem;
+        border-radius: 4px;
+        color: var(--color-primary);
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .inline-copy-btn:hover {
+        background: rgba(0, 210, 255, 0.2);
+        transform: scale(1.1);
+    }
+
+    .inline-copy-btn svg {
+        width: 0.9rem;
+        height: 0.9rem;
     }
 
     .refresh-btn {
@@ -368,21 +399,21 @@
     }
 
     .refresh-icon.spinning {
-        animation: spin 1s linear infinite;
+        animation: spin-counterclockwise 1s linear infinite;
     }
 
-    @keyframes spin {
+    @keyframes spin-counterclockwise {
         from {
             transform: rotate(0deg);
         }
         to {
-            transform: rotate(360deg);
+            transform: rotate(-360deg);
         }
     }
 
     .balance-grid {
         display: grid;
-        grid-template-columns: 2fr 1fr 1fr;
+        grid-template-columns: 1fr 1fr;
         gap: 1.5rem;
         margin-bottom: 1.5rem;
     }
@@ -565,6 +596,20 @@
             align-items: stretch;
         }
 
+        .header-left {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .inline-address {
+            align-self: flex-start;
+        }
+
+        .inline-address .address-short {
+            font-size: 0.75rem;
+        }
+
         .refresh-btn {
             justify-content: center;
         }
@@ -577,11 +622,6 @@
             flex-direction: column;
             align-items: flex-start;
             gap: 0.75rem;
-        }
-
-        .address-short,
-        .address-full {
-            font-size: 0.8rem;
         }
     }
 </style>

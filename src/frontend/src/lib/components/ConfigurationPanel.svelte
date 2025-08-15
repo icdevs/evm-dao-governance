@@ -2,18 +2,26 @@
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { onMount } from "svelte";
+    import { createEventDispatcher } from "svelte";
 
-    export let isExpanded = false;
+    export let isExpanded = true; // Always expanded when used as standalone page
+    export let onConfigurationComplete = null; // Callback for when config is complete
+
+    const dispatch = createEventDispatcher();
 
     let canisterId = "";
     let environment = "local";
     let contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 
-    // Subscribe to config store
+    // Subscribe to config store (only on initial load, not on every change)
+    let hasLoadedFromStore = false;
     configStore.subscribe((config) => {
-        canisterId = config.canisterId;
-        environment = config.environment;
-        contractAddress = config.contractAddress;
+        if (!hasLoadedFromStore) {
+            canisterId = config.canisterId;
+            environment = config.environment;
+            contractAddress = config.contractAddress;
+            hasLoadedFromStore = true;
+        }
     });
 
     onMount(() => {
@@ -21,29 +29,41 @@
     });
 
     function handleCanisterIdChange() {
-        configStore.updateField("canisterId", canisterId);
-        configStore.checkConfiguration();
+        // Just trigger validation, don't save automatically
     }
 
     function handleEnvironmentChange() {
-        configStore.updateField("environment", environment);
-
         // Update default contract address based on environment
         if (environment === "local") {
             contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
         } else {
             contractAddress = "";
         }
-        configStore.updateField("contractAddress", contractAddress);
+        // Just trigger validation, don't save automatically
     }
 
     function handleContractAddressChange() {
-        configStore.updateField("contractAddress", contractAddress);
-        configStore.checkConfiguration();
+        // Just trigger validation, don't save automatically
     }
 
-    function toggleExpanded() {
-        isExpanded = !isExpanded;
+    function checkAndNotifyCompletion() {
+        if (isConfigComplete && onConfigurationComplete) {
+            onConfigurationComplete();
+        }
+    }
+
+    function saveConfiguration() {
+        // Save the configuration
+        configStore.updateField("canisterId", canisterId);
+        configStore.updateField("environment", environment);
+        configStore.updateField("contractAddress", contractAddress);
+        configStore.checkConfiguration();
+
+        // Show success message
+        statusStore.add("Configuration saved successfully!", "success");
+
+        // Notify completion
+        checkAndNotifyCompletion();
     }
 
     function validateCanisterId(id) {
@@ -63,42 +83,63 @@
 </script>
 
 <div class="config-panel">
-    <div
-        class="config-header"
-        on:click={toggleExpanded}
-        on:keydown={(e) => e.key === "Enter" && toggleExpanded()}
-        role="button"
-        tabindex="0"
-    >
-        <div class="config-title">
-            <h3>⚙️ Configuration</h3>
-            <div class="config-status">
-                {#if isConfigComplete}
-                    <span class="status-badge success">✓ Configured</span>
-                {:else}
-                    <span class="status-badge warning">⚠ Setup Required</span>
-                {/if}
+    {#if !isExpanded}
+        <!-- Collapsible header - only show when not in standalone mode -->
+        <div
+            class="config-header"
+            on:click={() => (isExpanded = true)}
+            on:keydown={(e) => e.key === "Enter" && (isExpanded = true)}
+            role="button"
+            tabindex="0"
+        >
+            <div class="config-title">
+                <h3>⚙️ Configuration</h3>
+                <div class="config-status">
+                    {#if isConfigComplete}
+                        <span class="status-badge success">✓ Configured</span>
+                    {:else}
+                        <span class="status-badge warning"
+                            >⚠ Setup Required</span
+                        >
+                    {/if}
+                </div>
             </div>
+            <button class="expand-btn">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M6 9L12 15L18 9"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    />
+                </svg>
+            </button>
         </div>
-        <button class="expand-btn" class:expanded={isExpanded}>
-            <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-            >
-                <path
-                    d="M6 9L12 15L18 9"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                />
-            </svg>
-        </button>
-    </div>
+    {/if}
 
     {#if isExpanded}
         <div class="config-content">
+            {#if isExpanded === true}
+                <!-- Show status header when in standalone mode -->
+                <div class="standalone-header">
+                    <div class="config-status-large">
+                        {#if isConfigComplete}
+                            <span class="status-badge success large"
+                                >✓ Configuration Complete</span
+                            >
+                        {:else}
+                            <span class="status-badge warning large"
+                                >⚠ Setup Required</span
+                            >
+                        {/if}
+                    </div>
+                </div>
+            {/if}
             <div class="form-section">
                 <div class="input-group">
                     <label for="environment">Environment</label>
@@ -163,6 +204,47 @@
                             Contract address for the governance token
                         {/if}
                     </div>
+                </div>
+
+                <!-- Save Button -->
+                <div class="save-section">
+                    <button
+                        class="save-btn"
+                        on:click={saveConfiguration}
+                        disabled={!isConfigComplete}
+                        type="button"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <polyline
+                                points="17,21 17,13 7,13 7,21"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <polyline
+                                points="7,3 7,8 15,8"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                        {isConfigComplete
+                            ? "Save Configuration"
+                            : "Complete Setup to Save"}
+                    </button>
                 </div>
             </div>
         </div>
@@ -424,5 +506,102 @@
             padding: 0.75rem 1rem;
             font-size: 0.9rem;
         }
+    }
+
+    /* Standalone mode styles */
+    .standalone-header {
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+
+    .config-status-large {
+        display: flex;
+        justify-content: center;
+    }
+
+    .status-badge.large {
+        padding: 1rem 2rem;
+        font-size: 1.1rem;
+        font-weight: 700;
+    }
+
+    /* Save Button Styles */
+    .save-section {
+        margin-top: 2rem;
+        padding-top: 2rem;
+        border-top: 1px solid var(--color-border-light);
+        display: flex;
+        justify-content: center;
+    }
+
+    .save-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem 2rem;
+        background: linear-gradient(
+            135deg,
+            var(--color-primary) 0%,
+            var(--color-success) 100%
+        );
+        color: white;
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 1rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 4px 16px rgba(0, 210, 255, 0.3);
+        position: relative;
+        overflow: hidden;
+        min-width: 200px;
+        justify-content: center;
+    }
+
+    .save-btn::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.2),
+            transparent
+        );
+        transition: left 0.5s;
+    }
+
+    .save-btn:hover:not(:disabled)::before {
+        left: 100%;
+    }
+
+    .save-btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 210, 255, 0.4);
+    }
+
+    .save-btn:active:not(:disabled) {
+        transform: translateY(0);
+    }
+
+    .save-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: 0 2px 8px rgba(0, 210, 255, 0.2);
+        background: linear-gradient(
+            135deg,
+            var(--color-text-muted) 0%,
+            var(--color-border) 100%
+        );
+    }
+
+    .save-btn svg {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
     }
 </style>

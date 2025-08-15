@@ -90,6 +90,79 @@ export async function getTokenBalance(address, contractAddress, chainId) {
 }
 
 /**
+ * Get the total supply of a governance token
+ * @param {string} contractAddress - The token contract address
+ * @param {number} chainId - The chain ID
+ * @returns {Promise<string>} The total supply formatted with symbol
+ */
+export async function getTotalSupply(contractAddress, chainId) {
+    try {
+        if (!contractAddress || contractAddress === '0x...' || contractAddress.length !== 42) {
+            return '-';
+        }
+        
+        const chainConfig = NETWORKS[chainId];
+        if (!chainConfig) {
+            throw new Error(`Unknown chain ID: ${chainId}`);
+        }
+        
+        const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+        
+        const contract = new ethers.Contract(contractAddress, [
+            "function totalSupply() view returns (uint256)",
+            "function decimals() view returns (uint8)",
+            "function symbol() view returns (string)"
+        ], provider);
+        
+        const [totalSupply, decimals, symbol] = await Promise.all([
+            contract.totalSupply(),
+            contract.decimals(),
+            contract.symbol()
+        ]);
+        
+        const formattedSupply = ethers.formatUnits(totalSupply, decimals);
+        
+        // Format the number to show significant digits
+        const num = parseFloat(formattedSupply);
+        let formatted;
+        if (num >= 1_000_000) {
+            formatted = (num / 1_000_000).toFixed(1) + 'M';
+        } else if (num >= 1_000) {
+            formatted = (num / 1_000).toFixed(1) + 'K';
+        } else {
+            formatted = num.toFixed(0);
+        }
+        
+        return `${formatted} ${symbol}`;
+    } catch (error) {
+        console.error('Failed to get total supply:', error);
+        return 'Error';
+    }
+}
+
+/**
+ * Get the number of token holders (members with voting power)
+ * This is a simplified version - in a real implementation you'd need to
+ * track Transfer events or use a subgraph
+ * @param {string} contractAddress - The token contract address
+ * @param {number} chainId - The chain ID
+ * @returns {Promise<number>} Estimated number of token holders
+ */
+export async function getTokenHolderCount(contractAddress, chainId) {
+    try {
+        // For now, return a placeholder value
+        // In a real implementation, you would:
+        // 1. Use a subgraph to track Transfer events
+        // 2. Query a blockchain indexer service
+        // 3. Use the ERC20 contract events to count unique holders
+        return '-';
+    } catch (error) {
+        console.error('Failed to get token holder count:', error);
+        return 'Error';
+    }
+}
+
+/**
  * Get comprehensive balance information for an address
  * @param {string} address - The Ethereum address
  * @param {string} contractAddress - The token contract address

@@ -2,8 +2,8 @@
     import "../index.scss";
     import { onMount } from "svelte";
     import { browser } from "$app/environment";
+    import { goto } from "$app/navigation";
     import WalletConnector from "$lib/components/WalletConnector.svelte";
-    import ConfigurationPanel from "$lib/components/ConfigurationPanel.svelte";
     import BalanceDashboard from "$lib/components/BalanceDashboard.svelte";
     import StatusMessages from "$lib/components/StatusMessages.svelte";
     import ProposalForm from "$lib/components/ProposalForm.svelte";
@@ -12,14 +12,27 @@
     import { configStore } from "$lib/stores/config.js";
     import { proposalsStore, proposalStats } from "$lib/stores/proposals.js";
     import { autoUserStats } from "$lib/stores/userStats.js";
+    import {
+        autoGovernanceStats,
+        governanceStatsStore,
+    } from "$lib/stores/governance.js";
 
     let initialized = false;
     let activeTab = "dashboard"; // 'dashboard', 'proposals', 'create'
-    let configExpanded = false;
+
+    // Dashboard refresh functionality
+    let dashboardRefreshFn = null;
+    let isDashboardLoading = false;
 
     // Subscribe to proposal statistics
     $: stats = $proposalStats;
     $: userStats = $autoUserStats;
+    $: governanceStats = $autoGovernanceStats;
+
+    // Redirect to config page if not configured
+    $: if (initialized && !$configStore.isConfigured) {
+        goto("/config");
+    }
 
     onMount(() => {
         if (browser) {
@@ -41,13 +54,11 @@
         // Refresh proposals to include the new one
         proposalsStore.load();
 
+        // Refresh governance stats as well
+        governanceStatsStore.load();
+
         // Switch back to proposals tab to see the new proposal
         activeTab = "proposals";
-    }
-
-    // Auto-expand config if not configured
-    $: if (initialized && !$configStore.isConfigured) {
-        configExpanded = true;
     }
 
     // Auto-load proposals when configuration is complete (only once)
@@ -59,11 +70,29 @@
         $proposalsStore.proposals.length === 0
     ) {
         proposalsLoadAttempted = true;
-        proposalsStore.load().catch(error => {
+        proposalsStore.load().catch((error) => {
             console.error("Failed to load proposals:", error);
             // Reset flag on error so it can be retried
             proposalsLoadAttempted = false;
         });
+
+        // Also load governance stats
+        governanceStatsStore.load().catch((error) => {
+            console.error("Failed to load governance stats:", error);
+        });
+    }
+
+    // Handle dashboard refresh
+    function handleDashboardRefresh() {
+        if (dashboardRefreshFn) {
+            dashboardRefreshFn();
+        }
+        // Also refresh governance stats
+        governanceStatsStore.load().catch(console.error);
+    }
+
+    function setDashboardRefreshFn(refreshFn) {
+        dashboardRefreshFn = refreshFn;
     }
 </script>
 
@@ -93,12 +122,35 @@
 
                     <div class="header-actions">
                         <WalletConnector showNetworkInfo={true} />
+                        <a
+                            href="/config"
+                            class="config-btn"
+                            title="Configuration"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                                <circle
+                                    cx="12"
+                                    cy="12"
+                                    r="3"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                />
+                            </svg>
+                        </a>
                     </div>
                 </div>
             </header>
-
-            <!-- Configuration Panel -->
-            <ConfigurationPanel bind:isExpanded={configExpanded} />
 
             <!-- Main Content -->
             <div class="main-content">
@@ -136,7 +188,55 @@
                 <div class="content-area">
                     {#if activeTab === "dashboard"}
                         <div class="dashboard-view">
-                            <BalanceDashboard />
+                            <!-- Dashboard Controls -->
+                            <div class="dashboard-controls">
+                                <button
+                                    class="refresh-btn"
+                                    on:click={handleDashboardRefresh}
+                                    disabled={!$authStore.isAuthenticated ||
+                                        !$configStore.isConfigured ||
+                                        isDashboardLoading}
+                                    title="Refresh dashboard data"
+                                >
+                                    <svg
+                                        class="refresh-icon"
+                                        class:spinning={isDashboardLoading}
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                    >
+                                        <path
+                                            d="M1 4V10H7"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        />
+                                        <path
+                                            d="M23 20V14H17"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        />
+                                        <path
+                                            d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        />
+                                    </svg>
+                                    {isDashboardLoading
+                                        ? "Refreshing..."
+                                        : "Refresh"}
+                                </button>
+                            </div>
+
+                            <BalanceDashboard
+                                onRefresh={setDashboardRefreshFn}
+                                bind:isLoading={isDashboardLoading}
+                            />
 
                             <!-- Quick Stats -->
                             <div class="quick-stats">
@@ -144,7 +244,7 @@
                                     <h4>📊 Total Proposals</h4>
                                     <div class="stat-value">
                                         {#if $proposalsStore.loading}
-                                            <div class="stat-loading">⏳</div>
+                                            -
                                         {:else}
                                             {stats.total}
                                         {/if}
@@ -159,35 +259,34 @@
                                     </div>
                                 </div>
                                 <div class="stat-card">
-                                    <h4>✅ Executed</h4>
+                                    <h4>👥 Members</h4>
                                     <div class="stat-value">
-                                        {#if $proposalsStore.loading}
-                                            <div class="stat-loading">⏳</div>
+                                        {#if governanceStats.loading}
+                                            -
                                         {:else}
-                                            {stats.executed}
+                                            {governanceStats.memberCount}
                                         {/if}
                                     </div>
                                     <div class="stat-subtitle">
-                                        {#if !$proposalsStore.loading}
-                                            Successfully completed
+                                        {#if !governanceStats.loading}
+                                            Token holders
                                         {:else}
                                             Loading...
                                         {/if}
                                     </div>
                                 </div>
                                 <div class="stat-card">
-                                    <h4>🗳️ Your Votes</h4>
+                                    <h4>⚡ Total Voting Power</h4>
                                     <div class="stat-value">
-                                        {#if $proposalsStore.loading}
-                                            <div class="stat-loading">⏳</div>
+                                        {#if governanceStats.loading}
+                                            -
                                         {:else}
-                                            {userStats.votedOn}
+                                            {governanceStats.totalVotingPower}
                                         {/if}
                                     </div>
                                     <div class="stat-subtitle">
-                                        {#if !$proposalsStore.loading}
-                                            {userStats.participationRate}%
-                                            participation
+                                        {#if !governanceStats.loading}
+                                            Governance token supply
                                         {:else}
                                             Loading...
                                         {/if}
@@ -343,10 +442,16 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 1.5rem;
         position: relative;
         z-index: 1;
+        width: 100%;
+    }
+
+    .brand {
+        flex: 1;
+        min-width: 0;
     }
 
     .brand h1 {
@@ -376,6 +481,43 @@
         display: flex;
         align-items: center;
         gap: 1rem;
+        flex-shrink: 0;
+    }
+
+    .config-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        background: linear-gradient(
+            135deg,
+            var(--color-surface) 0%,
+            var(--color-surface-secondary) 100%
+        );
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        color: var(--color-text-secondary);
+        text-decoration: none;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .config-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 210, 255, 0.3);
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+    }
+
+    .config-btn svg {
+        width: 20px;
+        height: 20px;
+        transition: transform 0.3s ease;
+    }
+
+    .config-btn:hover svg {
+        transform: rotate(90deg);
     }
 
     /* Main Content */
@@ -471,6 +613,90 @@
         display: flex;
         flex-direction: column;
         gap: 2.5rem;
+        position: relative;
+    }
+
+    .dashboard-controls {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: -1rem; /* Negative margin to reduce gap with dashboard content */
+    }
+
+    .refresh-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1.5rem;
+        background: linear-gradient(
+            135deg,
+            var(--color-primary) 0%,
+            var(--color-primary-dark) 100%
+        );
+        color: white;
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 4px 16px rgba(0, 210, 255, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .refresh-btn::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(
+            90deg,
+            transparent,
+            rgba(255, 255, 255, 0.2),
+            transparent
+        );
+        transition: left 0.5s;
+    }
+
+    .refresh-btn:hover::before {
+        left: 100%;
+    }
+
+    .refresh-btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 210, 255, 0.4);
+    }
+
+    .refresh-btn:active:not(:disabled) {
+        transform: translateY(0);
+    }
+
+    .refresh-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: 0 2px 8px rgba(0, 210, 255, 0.2);
+    }
+
+    .refresh-icon {
+        width: 18px;
+        height: 18px;
+        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .refresh-icon.spinning {
+        animation: spin-counterclockwise 1s linear infinite;
+    }
+
+    @keyframes spin-counterclockwise {
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(-360deg);
+        }
     }
 
     .quick-stats {
@@ -625,12 +851,12 @@
         border: 3px solid var(--color-border);
         border-top: 3px solid var(--color-primary);
         border-radius: 50%;
-        animation: spin 1s linear infinite;
+        animation: spin-clockwise 1s linear infinite;
         margin-bottom: 2rem;
         box-shadow: 0 0 20px rgba(0, 210, 255, 0.3);
     }
 
-    @keyframes spin {
+    @keyframes spin-clockwise {
         from {
             transform: rotate(0deg);
         }
@@ -647,6 +873,22 @@
     }
 
     /* Responsive Design */
+    @media (min-width: 769px) {
+        .header-content {
+            flex-direction: row;
+            flex-wrap: nowrap;
+            text-align: left;
+        }
+
+        .header-actions {
+            justify-content: flex-end;
+        }
+
+        .brand {
+            text-align: left;
+        }
+    }
+
     @media (max-width: 768px) {
         .app-container {
             padding: 1rem;
@@ -659,6 +901,18 @@
 
         .header-content {
             flex-direction: column;
+            text-align: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .header-actions {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .brand {
+            width: 100%;
             text-align: center;
         }
 
