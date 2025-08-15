@@ -97,12 +97,6 @@
     function formatDate(date) {
         return date.toLocaleDateString() + " " + date.toLocaleTimeString();
     }
-
-    $: {
-        if (filter) {
-            loadProposals();
-        }
-    }
 </script>
 
 <div class="proposal-list">
@@ -116,14 +110,6 @@
                     <option value={option.value}>{option.label}</option>
                 {/each}
             </select>
-
-            <button
-                class="refresh-btn"
-                on:click={loadProposals}
-                disabled={loading}
-            >
-                {loading ? "Loading..." : "Refresh"}
-            </button>
         </div>
     </div>
 
@@ -302,26 +288,6 @@
         border: 1px solid var(--color-border, #ddd);
         border-radius: 4px;
         font-size: 0.9rem;
-    }
-
-    .refresh-btn {
-        padding: 0.5rem 1rem;
-        background: var(--color-primary, #007bff);
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 0.9rem;
-        transition: background-color 0.2s;
-    }
-
-    .refresh-btn:hover:not(:disabled) {
-        background: var(--color-primary-dark, #0056b3);
-    }
-
-    .refresh-btn:disabled {
-        background: var(--color-secondary, #6c757d);
-        cursor: not-allowed;
     }
 
     .alert {

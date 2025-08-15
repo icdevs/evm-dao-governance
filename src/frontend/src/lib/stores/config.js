@@ -30,6 +30,8 @@ function createConfigStore() {
                     console.error('Failed to load config from localStorage:', error);
                 }
             }
+            // Return a resolved promise for consistency
+            return Promise.resolve();
         },
         
         // Save config to localStorage

@@ -1,8 +1,10 @@
 <script>
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
+    import { backend } from "../canisters.js";
     import { onMount } from "svelte";
     import { createEventDispatcher } from "svelte";
+    import { browser } from "$app/environment";
 
     export let isExpanded = true; // Always expanded when used as standalone page
     export let onConfigurationComplete = null; // Callback for when config is complete
@@ -11,25 +13,223 @@
 
     let canisterId = "";
     let environment = "local";
-    let contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+    let contractAddress = ""; // Start empty, will be populated from backend contracts
 
-    // Subscribe to config store (only on initial load, not on every change)
-    let hasLoadedFromStore = false;
-    configStore.subscribe((config) => {
-        if (!hasLoadedFromStore) {
-            canisterId = config.canisterId;
-            environment = config.environment;
-            contractAddress = config.contractAddress;
-            hasLoadedFromStore = true;
+    // Available snapshot contracts from backend
+    let availableContracts = [];
+    let contractsLoading = false;
+
+    // Add new contract form state
+    let showAddContractForm = false;
+    let newContractAddress = "";
+    let newContractType = "ERC20";
+    let newContractChainId = "31337";
+    let newContractNetworkName = "anvil";
+    let newContractRpcType = "local";
+    let newContractStorageSlot = "1";
+    let addingContract = false;
+
+    // Config loading state
+    let configLoaded = false;
+
+    onMount(async () => {
+        if (browser) {
+            // Wait for config to load
+            await configStore.load();
+
+            // Load current config values
+            const currentConfig = $configStore;
+            canisterId = currentConfig.canisterId || "";
+            environment = currentConfig.environment || "local";
+            contractAddress = currentConfig.contractAddress || "";
+
+            configLoaded = true;
         }
     });
 
-    onMount(() => {
-        configStore.load();
-    });
+    async function loadAvailableContracts() {
+        if (!canisterId) {
+            console.log("loadAvailableContracts: No canister ID, skipping");
+            return; // Can't load contracts without canister ID
+        }
+
+        console.log(
+            "loadAvailableContracts: Loading contracts for canister:",
+            canisterId
+        );
+
+        try {
+            contractsLoading = true;
+            const contracts = await backend.icrc149_get_snapshot_contracts();
+            console.log(
+                "loadAvailableContracts: Received contracts:",
+                contracts
+            );
+            console.log(
+                "loadAvailableContracts: First contract structure:",
+                contracts[0]
+            );
+
+            availableContracts = contracts.map(([address, config]) => {
+                console.log("Raw contract data:", { address, config });
+                console.log(
+                    "Address type:",
+                    typeof address,
+                    "Value:",
+                    JSON.stringify(address)
+                );
+                console.log(
+                    "Config contract_address:",
+                    typeof config.contract_address,
+                    "Value:",
+                    JSON.stringify(config.contract_address)
+                );
+
+                // Use the address from the key, but fallback to config.contract_address if key is invalid
+                let contractAddress = address;
+                if (
+                    !contractAddress ||
+                    contractAddress === "" ||
+                    !contractAddress.startsWith("0x")
+                ) {
+                    contractAddress = config.contract_address;
+                }
+
+                console.log("Final contract address:", contractAddress);
+
+                // Check contract type safely
+                let contractType = "Unknown";
+                if (config.contract_type) {
+                    if (config.contract_type.ERC20 !== undefined) {
+                        contractType = "ERC20";
+                    } else if (config.contract_type.ERC721 !== undefined) {
+                        contractType = "ERC721";
+                    } else {
+                        contractType = "Other";
+                    }
+                }
+                console.log("Contract type:", contractType);
+
+                return {
+                    address: contractAddress,
+                    config,
+                    label: `(${contractType}) ${contractAddress}`,
+                };
+            });
+
+            console.log(
+                "loadAvailableContracts: Mapped contracts:",
+                availableContracts
+            );
+
+            // Check if current contract is valid (exists in the list)
+            const currentContractValid =
+                contractAddress &&
+                availableContracts.some(
+                    (contract) => contract.address === contractAddress
+                );
+
+            // If no contract is selected OR current contract is not in the list, select the first one
+            if (
+                (!contractAddress || !currentContractValid) &&
+                availableContracts.length > 0
+            ) {
+                contractAddress = availableContracts[0].address;
+                console.log(
+                    "loadAvailableContracts: Auto-selected first contract:",
+                    contractAddress
+                );
+                handleContractAddressChange(); // Trigger config update
+            } else if (
+                !currentContractValid &&
+                availableContracts.length === 0
+            ) {
+                // Clear invalid contract if no contracts are available
+                contractAddress = "";
+                console.log(
+                    "loadAvailableContracts: Cleared invalid contract, no contracts available"
+                );
+                handleContractAddressChange(); // Trigger config update
+            }
+        } catch (error) {
+            console.error("Failed to load available contracts:", error);
+            statusStore.add("Failed to load available contracts", "error");
+        } finally {
+            contractsLoading = false;
+        }
+    }
+
+    async function addNewContract() {
+        if (!newContractAddress || !isValidAddress(newContractAddress)) {
+            statusStore.add("Please enter a valid contract address", "error");
+            return;
+        }
+
+        try {
+            addingContract = true;
+
+            const contractConfig = {
+                contract_address: newContractAddress,
+                chain: {
+                    chain_id: parseInt(newContractChainId),
+                    network_name: newContractNetworkName,
+                },
+                rpc_service: {
+                    rpc_type: newContractRpcType,
+                    canister_id: "7hfb6-caaaa-aaaar-qadga-cai", // Default EVM RPC canister
+                    custom_config: [],
+                },
+                contract_type:
+                    newContractType === "ERC20"
+                        ? { ERC20: null }
+                        : { ERC721: null },
+                balance_storage_slot: parseInt(newContractStorageSlot),
+                enabled: true,
+            };
+
+            const result =
+                await backend.icrc149_update_snapshot_contract_config(
+                    newContractAddress,
+                    [contractConfig]
+                );
+
+            if ("Err" in result) {
+                throw new Error(result.Err);
+            }
+
+            statusStore.add("Contract added successfully!", "success");
+
+            // Reset form
+            newContractAddress = "";
+            newContractType = "ERC20";
+            newContractChainId = "31337";
+            newContractNetworkName = "anvil";
+            newContractRpcType = "local";
+            newContractStorageSlot = "1";
+            showAddContractForm = false;
+
+            // Reload contracts
+            await loadAvailableContracts();
+        } catch (error) {
+            console.error("Failed to add contract:", error);
+            statusStore.add(
+                `Failed to add contract: ${error.message}`,
+                "error"
+            );
+        } finally {
+            addingContract = false;
+        }
+    }
+
+    function isValidAddress(address) {
+        return /^0x[a-fA-F0-9]{40}$/.test(address);
+    }
 
     function handleCanisterIdChange() {
-        // Just trigger validation, don't save automatically
+        // Load available contracts when canister ID changes
+        if (canisterId && isCanisterValid) {
+            loadAvailableContracts();
+        }
     }
 
     function handleEnvironmentChange() {
@@ -80,6 +280,11 @@
     $: isCanisterValid = validateCanisterId(canisterId);
     $: isAddressValid = validateContractAddress(contractAddress);
     $: isConfigComplete = isCanisterValid && isAddressValid;
+
+    // Load contracts when canister ID changes and is valid
+    $: if (canisterId && isCanisterValid) {
+        loadAvailableContracts();
+    }
 </script>
 
 <div class="config-panel">
@@ -185,25 +390,191 @@
                     <label for="contractAddress"
                         >Governance Token Contract</label
                     >
-                    <input
-                        type="text"
-                        id="contractAddress"
-                        bind:value={contractAddress}
-                        on:input={handleContractAddressChange}
-                        placeholder="0x..."
-                        class="text-input mono"
-                        class:valid={isAddressValid}
-                        class:invalid={contractAddress && !isAddressValid}
-                    />
-                    <div class="input-hint">
-                        {#if contractAddress && !isAddressValid}
-                            <span class="error"
-                                >Invalid Ethereum address format</span
+                    {#if contractsLoading}
+                        <div class="loading-container">
+                            <div class="spinner-small"></div>
+                            <span>Loading available contracts...</span>
+                        </div>
+                    {:else}
+                        <div class="contract-selector-group">
+                            <select
+                                id="contractAddress"
+                                bind:value={contractAddress}
+                                on:change={handleContractAddressChange}
+                                class="select-input"
                             >
-                        {:else}
-                            Contract address for the governance token
-                        {/if}
-                    </div>
+                                <option value=""
+                                    >{availableContracts.length > 0
+                                        ? "Select a governance token..."
+                                        : "No contracts available - add one below"}</option
+                                >
+                                {#each availableContracts as contract}
+                                    <option value={contract.address}>
+                                        {contract.label}
+                                    </option>
+                                {/each}
+                            </select>
+                            <button
+                                type="button"
+                                class="add-contract-btn-inline"
+                                on:click={() => (showAddContractForm = true)}
+                                disabled={!canisterId || !isCanisterValid}
+                                title="Add New Governance Contract"
+                            >
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <path
+                                        d="M12 5V19M5 12H19"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="input-hint">
+                            {#if !contractAddress && availableContracts.length > 0}
+                                Choose the token contract for voting power
+                            {:else if !contractAddress && availableContracts.length === 0}
+                                Add a governance token contract to enable voting
+                            {/if}
+                        </div>
+                    {/if}
+                </div>
+
+                <!-- Add Contract Form (Hidden by default) -->
+                <div class="add-contract-section">
+                    {#if showAddContractForm}
+                        <div class="add-contract-form">
+                            <div class="form-header">
+                                <h4>Add New Governance Contract</h4>
+                                <button
+                                    type="button"
+                                    class="close-btn"
+                                    on:click={() =>
+                                        (showAddContractForm = false)}
+                                    disabled={addingContract}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            <div class="form-grid">
+                                <div class="input-group">
+                                    <label for="newContractAddress"
+                                        >Contract Address</label
+                                    >
+                                    <input
+                                        type="text"
+                                        id="newContractAddress"
+                                        bind:value={newContractAddress}
+                                        placeholder="0x..."
+                                        class="text-input mono"
+                                        class:valid={isValidAddress(
+                                            newContractAddress
+                                        )}
+                                        class:invalid={newContractAddress &&
+                                            !isValidAddress(newContractAddress)}
+                                        disabled={addingContract}
+                                    />
+                                </div>
+
+                                <div class="input-group">
+                                    <label for="newContractType"
+                                        >Contract Type</label
+                                    >
+                                    <select
+                                        id="newContractType"
+                                        bind:value={newContractType}
+                                        class="select-input"
+                                        disabled={addingContract}
+                                    >
+                                        <option value="ERC20"
+                                            >ERC20 Token</option
+                                        >
+                                        <option value="ERC721"
+                                            >ERC721 NFT</option
+                                        >
+                                    </select>
+                                </div>
+
+                                <div class="input-group">
+                                    <label for="newContractChainId"
+                                        >Chain ID</label
+                                    >
+                                    <input
+                                        type="number"
+                                        id="newContractChainId"
+                                        bind:value={newContractChainId}
+                                        class="text-input"
+                                        disabled={addingContract}
+                                    />
+                                </div>
+
+                                <div class="input-group">
+                                    <label for="newContractNetworkName"
+                                        >Network Name</label
+                                    >
+                                    <input
+                                        type="text"
+                                        id="newContractNetworkName"
+                                        bind:value={newContractNetworkName}
+                                        placeholder="anvil, mainnet, sepolia..."
+                                        class="text-input"
+                                        disabled={addingContract}
+                                    />
+                                </div>
+
+                                <div class="input-group">
+                                    <label for="newContractStorageSlot"
+                                        >Balance Storage Slot</label
+                                    >
+                                    <input
+                                        type="number"
+                                        id="newContractStorageSlot"
+                                        bind:value={newContractStorageSlot}
+                                        class="text-input"
+                                        disabled={addingContract}
+                                    />
+                                    <div class="input-hint">
+                                        Storage slot for balance mapping
+                                        (usually 1 for ERC20)
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-actions">
+                                <button
+                                    type="button"
+                                    class="cancel-btn"
+                                    on:click={() =>
+                                        (showAddContractForm = false)}
+                                    disabled={addingContract}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    class="add-btn"
+                                    on:click={addNewContract}
+                                    disabled={!isValidAddress(
+                                        newContractAddress
+                                    ) || addingContract}
+                                >
+                                    {#if addingContract}
+                                        <div class="spinner-small"></div>
+                                        Adding...
+                                    {:else}
+                                        Add Contract
+                                    {/if}
+                                </button>
+                            </div>
+                        </div>
+                    {/if}
                 </div>
 
                 <!-- Save Button -->
@@ -377,10 +748,6 @@
         height: 1.5rem;
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         filter: drop-shadow(0 2px 4px currentColor);
-    }
-
-    .expand-btn.expanded svg {
-        transform: rotate(180deg);
     }
 
     .config-content {
@@ -603,5 +970,231 @@
         width: 20px;
         height: 20px;
         flex-shrink: 0;
+    }
+
+    /* Additional styles for contract selection */
+    .input-hint .success {
+        color: var(--color-success, #28a745);
+    }
+
+    .loading-container {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: var(--color-surface-secondary, #f8f9fa);
+        border: 1px solid var(--color-border, #ddd);
+        border-radius: 8px;
+        color: var(--color-text-secondary, #666);
+    }
+
+    .spinner-small {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--color-border, #ddd);
+        border-top: 2px solid var(--color-primary, #007bff);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* Add Contract Form Styles */
+    .add-contract-section {
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--color-border-light, #e0e0e0);
+    }
+
+    .add-contract-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        background: transparent;
+        color: var(--color-primary, #007bff);
+        border: 2px dashed var(--color-primary, #007bff);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.2s ease;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .add-contract-btn:hover:not(:disabled) {
+        background: var(--color-primary-light, rgba(0, 123, 255, 0.1));
+        border-style: solid;
+    }
+
+    .add-contract-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .add-contract-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .add-contract-form {
+        background: var(--color-surface-secondary, #f8f9fa);
+        border: 1px solid var(--color-border, #ddd);
+        border-radius: 12px;
+        padding: 1.5rem;
+    }
+
+    .form-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .form-header h4 {
+        margin: 0;
+        color: var(--color-text-primary, #333);
+        font-size: 1.1rem;
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        color: var(--color-text-secondary, #666);
+        cursor: pointer;
+        font-size: 1.2rem;
+        padding: 0.25rem;
+        transition: color 0.2s ease;
+    }
+
+    .close-btn:hover:not(:disabled) {
+        color: var(--color-danger, #dc3545);
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .form-grid .input-group:first-child {
+        grid-column: 1 / -1;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 1rem;
+        justify-content: flex-end;
+    }
+
+    .cancel-btn {
+        padding: 0.75rem 1.5rem;
+        background: transparent;
+        color: var(--color-text-secondary, #666);
+        border: 1px solid var(--color-border, #ddd);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .cancel-btn:hover:not(:disabled) {
+        background: var(--color-surface-secondary, #f8f9fa);
+        border-color: var(--color-text-secondary, #666);
+    }
+
+    .add-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1.5rem;
+        background: var(--color-primary, #007bff);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.2s ease;
+    }
+
+    .add-btn:hover:not(:disabled) {
+        background: var(--color-primary-dark, #0056b3);
+    }
+
+    .add-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    /* Contract selector group with inline add button */
+    .contract-selector-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .contract-selector-group select,
+    .contract-selector-group input {
+        flex: 1;
+    }
+
+    .add-contract-btn-inline {
+        background: var(--color-primary, #007bff);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.2s ease;
+        min-width: fit-content;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .add-contract-btn-inline svg {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+    }
+
+    .add-contract-btn-inline:hover:not(:disabled) {
+        background: var(--color-primary-dark, #0056b3);
+        transform: translateY(-1px);
+    }
+
+    .add-contract-btn-inline:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+        .form-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .form-actions {
+            flex-direction: column;
+        }
+
+        .contract-selector-group {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.5rem;
+        }
+
+        .add-contract-btn-inline {
+            width: 100%;
+        }
     }
 </style>

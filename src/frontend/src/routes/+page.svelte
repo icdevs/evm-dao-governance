@@ -16,6 +16,7 @@
         autoGovernanceStats,
         governanceStatsStore,
     } from "$lib/stores/governance.js";
+    import { backend } from "$lib/canisters.js";
 
     let initialized = false;
     let activeTab = "dashboard"; // 'dashboard', 'proposals', 'create'
@@ -23,6 +24,14 @@
     // Dashboard refresh functionality
     let dashboardRefreshFn = null;
     let isDashboardLoading = false;
+
+    // Governance contract management
+    let availableContracts = [];
+    let selectedContract = "";
+    let contractsLoading = false;
+    let showContractDropdown = false;
+    let isGlobalRefreshing = false;
+    let contractsLoadAttempted = false;
 
     // Subscribe to proposal statistics
     $: stats = $proposalStats;
@@ -82,17 +91,110 @@
         });
     }
 
-    // Handle dashboard refresh
-    function handleDashboardRefresh() {
-        if (dashboardRefreshFn) {
-            dashboardRefreshFn();
+    // Handle comprehensive refresh of all data
+    async function handleGlobalRefresh() {
+        if (isGlobalRefreshing) return; // Prevent multiple simultaneous refreshes
+
+        try {
+            isGlobalRefreshing = true;
+
+            // Refresh dashboard
+            if (dashboardRefreshFn) {
+                dashboardRefreshFn();
+            }
+
+            // Refresh proposals
+            await proposalsStore.load().catch((error) => {
+                console.error("Failed to refresh proposals:", error);
+            });
+
+            // Refresh governance stats
+            await governanceStatsStore.load().catch((error) => {
+                console.error("Failed to refresh governance stats:", error);
+            });
+
+            // Reload available contracts (reset flag to allow reload)
+            contractsLoadAttempted = false;
+            await loadAvailableContracts();
+        } finally {
+            isGlobalRefreshing = false;
         }
-        // Also refresh governance stats
-        governanceStatsStore.load().catch(console.error);
+    }
+
+    // Handle dashboard refresh (legacy)
+    function handleDashboardRefresh() {
+        handleGlobalRefresh();
     }
 
     function setDashboardRefreshFn(refreshFn) {
         dashboardRefreshFn = refreshFn;
+    }
+
+    // Load available governance contracts
+    async function loadAvailableContracts() {
+        if (!$configStore.isConfigured || contractsLoading) return;
+
+        try {
+            contractsLoading = true;
+            const contracts = await backend.icrc149_get_snapshot_contracts();
+            availableContracts = contracts.map(([address, config]) => ({
+                address,
+                config,
+                label: `${address.slice(0, 6)}...${address.slice(-4)} - ${config.contract_type === "ERC20" ? "ERC20" : "ERC721"}`,
+            }));
+
+            // Set default selection if none selected
+            if (!selectedContract && availableContracts.length > 0) {
+                selectedContract = availableContracts[0].address;
+            }
+
+            contractsLoadAttempted = true;
+        } catch (error) {
+            console.error("Failed to load contracts:", error);
+        } finally {
+            contractsLoading = false;
+        }
+    }
+
+    // Handle contract selection change
+    function handleContractChange() {
+        console.log("Selected contract changed to:", selectedContract);
+
+        // Refresh dashboard with new contract
+        handleDashboardRefresh();
+
+        // Refresh proposals with new contract context
+        proposalsStore.load();
+
+        // Refresh governance stats
+        governanceStatsStore.load();
+    }
+
+    // Select contract and close dropdown
+    function selectContract(address) {
+        selectedContract = address;
+        showContractDropdown = false;
+        handleContractChange();
+    }
+
+    // Close dropdown when clicking outside
+    function handleClickOutside(event) {
+        if (
+            showContractDropdown &&
+            !event.target.closest(".selector-dropdown")
+        ) {
+            showContractDropdown = false;
+        }
+    }
+
+    // Load contracts when configuration is ready (only once)
+    $: if (
+        initialized &&
+        $configStore.isConfigured &&
+        !contractsLoadAttempted &&
+        availableContracts.length === 0
+    ) {
+        loadAvailableContracts();
     }
 </script>
 
@@ -103,6 +205,8 @@
         content="Decentralized governance for EVM-based DAOs using Internet Computer"
     />
 </svelte:head>
+
+<svelte:window on:click={handleClickOutside} />
 
 <!-- Status Messages (Toast notifications) -->
 <StatusMessages />
@@ -122,35 +226,183 @@
 
                     <div class="header-actions">
                         <WalletConnector showNetworkInfo={true} />
-                        <a
-                            href="/config"
-                            class="config-btn"
-                            title="Configuration"
-                        >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                            >
-                                <path
-                                    d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                />
-                                <circle
-                                    cx="12"
-                                    cy="12"
-                                    r="3"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                />
-                            </svg>
-                        </a>
                     </div>
                 </div>
             </header>
+
+            <!-- Governance Contract Selector (Inline) -->
+            <div class="governance-selector-bar">
+                <div class="governance-info">
+                    <span class="governance-label">Governance Token:</span>
+                    {#if contractsLoading}
+                        <div class="loading-inline">
+                            <div class="spinner-tiny"></div>
+                            <span>Loading...</span>
+                        </div>
+                    {:else if selectedContract}
+                        <div class="inline-address">
+                            <span class="address-full">
+                                {selectedContract}
+                            </span>
+                            <button
+                                class="inline-copy-btn"
+                                on:click={() =>
+                                    navigator.clipboard.writeText(
+                                        selectedContract
+                                    )}
+                                title="Copy address"
+                            >
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <rect
+                                        x="9"
+                                        y="9"
+                                        width="13"
+                                        height="13"
+                                        rx="2"
+                                        ry="2"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        fill="none"
+                                    />
+                                    <path
+                                        d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        fill="none"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+                    {:else}
+                        <span class="no-contract">Not configured</span>
+                    {/if}
+                </div>
+
+                <div class="governance-actions">
+                    <button
+                        class="refresh-btn-inline"
+                        on:click={handleGlobalRefresh}
+                        disabled={!$authStore.isAuthenticated ||
+                            !$configStore.isConfigured ||
+                            isGlobalRefreshing}
+                        title="Refresh all data"
+                    >
+                        <svg
+                            class="refresh-icon-inline"
+                            class:spinning={isGlobalRefreshing}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M1 4V10H7"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <path
+                                d="M23 20V14H17"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <path
+                                d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                    </button>
+
+                    {#if availableContracts.length > 1}
+                        <div
+                            class="selector-dropdown"
+                            class:open={showContractDropdown}
+                        >
+                            <button
+                                class="change-btn"
+                                on:click={() =>
+                                    (showContractDropdown =
+                                        !showContractDropdown)}
+                                disabled={!$authStore.isAuthenticated}
+                                title="Change governance contract"
+                            >
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <path
+                                        d="M6 9L12 15L18 9"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    />
+                                </svg>
+                            </button>
+
+                            {#if showContractDropdown}
+                                <div class="dropdown-menu">
+                                    {#each availableContracts as contract}
+                                        <button
+                                            class="dropdown-item"
+                                            class:selected={contract.address ===
+                                                selectedContract}
+                                            on:click={() =>
+                                                selectContract(
+                                                    contract.address
+                                                )}
+                                        >
+                                            <span class="contract-label"
+                                                >{contract.label}</span
+                                            >
+                                            <code class="contract-addr"
+                                                >{contract.address}</code
+                                            >
+                                        </button>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                    {/if}
+
+                    <a
+                        href="/config"
+                        class="config-btn-inline"
+                        title="Configuration"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <circle
+                                cx="12"
+                                cy="12"
+                                r="3"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            />
+                        </svg>
+                    </a>
+                </div>
+            </div>
 
             <!-- Main Content -->
             <div class="main-content">
@@ -188,51 +440,6 @@
                 <div class="content-area">
                     {#if activeTab === "dashboard"}
                         <div class="dashboard-view">
-                            <!-- Dashboard Controls -->
-                            <div class="dashboard-controls">
-                                <button
-                                    class="refresh-btn"
-                                    on:click={handleDashboardRefresh}
-                                    disabled={!$authStore.isAuthenticated ||
-                                        !$configStore.isConfigured ||
-                                        isDashboardLoading}
-                                    title="Refresh dashboard data"
-                                >
-                                    <svg
-                                        class="refresh-icon"
-                                        class:spinning={isDashboardLoading}
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                    >
-                                        <path
-                                            d="M1 4V10H7"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                        />
-                                        <path
-                                            d="M23 20V14H17"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                        />
-                                        <path
-                                            d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                        />
-                                    </svg>
-                                    {isDashboardLoading
-                                        ? "Refreshing..."
-                                        : "Refresh"}
-                                </button>
-                            </div>
-
                             <BalanceDashboard
                                 onRefresh={setDashboardRefreshFn}
                                 bind:isLoading={isDashboardLoading}
@@ -776,11 +983,6 @@
         font-weight: 500;
     }
 
-    .stat-loading {
-        animation: pulse 1.5s ease-in-out infinite;
-        color: var(--color-primary);
-    }
-
     @keyframes pulse {
         0%,
         100% {
@@ -872,7 +1074,337 @@
         color: var(--color-text-secondary);
     }
 
+    /* Governance Selector Bar - Inline */
+    .governance-selector-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 2rem;
+        background: var(--color-surface-secondary);
+        border-bottom: 1px solid var(--color-border);
+        font-size: 0.9rem;
+    }
+
+    .governance-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--color-text-secondary);
+        flex: 1;
+    }
+
+    .governance-info .inline-address {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.375rem 0.75rem;
+        background: rgba(0, 210, 255, 0.1);
+        border: 1px solid rgba(0, 210, 255, 0.2);
+        border-radius: 8px;
+        transition: all 0.3s ease;
+    }
+
+    .governance-info .inline-address:hover {
+        background: rgba(0, 210, 255, 0.15);
+        border-color: rgba(0, 210, 255, 0.3);
+    }
+
+    .governance-info .address-full {
+        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        font-size: 0.8rem;
+        color: var(--color-primary);
+        font-weight: 600;
+    }
+
+    .governance-info .inline-copy-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.25rem;
+        border-radius: 4px;
+        color: var(--color-primary);
+        transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .governance-info .inline-copy-btn:hover {
+        background: rgba(0, 210, 255, 0.2);
+        transform: scale(1.1);
+    }
+
+    .governance-info .inline-copy-btn svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .governance-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .governance-label {
+        font-weight: 500;
+    }
+
+    .contract-display {
+        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        background: var(--color-surface);
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+        font-size: 0.85rem;
+    }
+
+    .copy-btn-inline {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.25rem;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        color: var(--color-text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .copy-btn-inline:hover {
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+    }
+
+    .copy-btn-inline svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .refresh-btn-inline {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .refresh-btn-inline:hover:not(:disabled) {
+        background: var(--color-surface-secondary);
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+    }
+
+    .refresh-btn-inline:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .refresh-icon-inline {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.2s ease;
+    }
+
+    .refresh-icon-inline.spinning {
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        from {
+            transform: rotate(0deg);
+        }
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .config-btn-inline {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        color: var(--color-text-muted);
+        text-decoration: none;
+        transition: all 0.2s ease;
+    }
+
+    .config-btn-inline:hover {
+        background: var(--color-surface-secondary);
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+    }
+
+    .config-btn-inline svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    .loading-inline {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        color: var(--color-text-muted);
+    }
+
+    .spinner-tiny {
+        width: 12px;
+        height: 12px;
+        border: 1px solid var(--color-border);
+        border-top: 1px solid var(--color-primary);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    .copy-btn-inline {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.25rem;
+        border-radius: 3px;
+        transition: background 0.2s ease;
+        font-size: 0.8rem;
+        opacity: 0.7;
+    }
+
+    .copy-btn-inline:hover {
+        background: var(--color-surface);
+        opacity: 1;
+    }
+
+    .no-contract {
+        color: var(--color-text-muted);
+        font-style: italic;
+    }
+
+    .selector-dropdown {
+        position: relative;
+    }
+
+    .change-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        padding: 0.25rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+    }
+
+    .change-btn:hover:not(:disabled) {
+        background: var(--color-surface-secondary);
+        border-color: var(--color-primary);
+    }
+
+    .change-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .change-btn svg {
+        width: 14px;
+        height: 14px;
+        transition: transform 0.2s ease;
+    }
+
+    .selector-dropdown.open .change-btn svg {
+        transform: rotate(180deg);
+    }
+
+    .dropdown-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 1000;
+        min-width: 280px;
+        margin-top: 0.25rem;
+        overflow: hidden;
+    }
+
+    .dropdown-item {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: none;
+        border: none;
+        border-bottom: 1px solid var(--color-border);
+        cursor: pointer;
+        text-align: left;
+        transition: background 0.2s ease;
+    }
+
+    .dropdown-item:last-child {
+        border-bottom: none;
+    }
+
+    .dropdown-item:hover {
+        background: var(--color-surface-secondary);
+    }
+
+    .dropdown-item.selected {
+        background: var(--color-primary-light, rgba(0, 123, 255, 0.1));
+        border-left: 3px solid var(--color-primary);
+    }
+
+    .contract-label {
+        font-weight: 500;
+        color: var(--color-text-primary);
+        font-size: 0.9rem;
+    }
+
+    .contract-addr {
+        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        font-size: 0.8rem;
+        color: var(--color-text-secondary);
+    }
+
     /* Responsive Design */
+    @media (max-width: 768px) {
+        .governance-selector-bar {
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: flex-start;
+        }
+
+        .governance-info {
+            width: 100%;
+        }
+
+        .governance-actions {
+            width: 100%;
+            justify-content: flex-end;
+        }
+
+        .contract-display {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
     @media (min-width: 769px) {
         .header-content {
             flex-direction: row;

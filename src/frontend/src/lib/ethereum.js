@@ -108,7 +108,7 @@ export async function connectWallet(walletType = null) {
         signer = await provider.getSigner();
         const address = await signer.getAddress();
         
-        setAuth(address);
+        setAuth(address, walletType);
         return address;
     } catch (error) {
         console.error('Failed to connect wallet:', error);
@@ -153,6 +153,35 @@ export async function isWalletConnected() {
         return accounts.length > 0;
     } catch (error) {
         console.error('Failed to check wallet connection:', error);
+        return false;
+    }
+}
+
+// Check if a specific wallet type is connected
+export async function isSpecificWalletConnected(walletType) {
+    if (!browser) return false;
+    
+    try {
+        let provider = null;
+        
+        if (walletType === 'metamask') {
+            if (window.ethereum?.isMetaMask) {
+                provider = window.ethereum;
+            }
+        } else if (walletType === 'coinbase') {
+            if (window.ethereum?.isCoinbaseWallet || window.ethereum?.selectedProvider?.isCoinbaseWallet) {
+                provider = window.ethereum;
+            } else if (window.coinbaseWalletExtension) {
+                provider = window.coinbaseWalletExtension;
+            }
+        }
+        
+        if (!provider) return false;
+        
+        const accounts = await provider.request({ method: 'eth_accounts' });
+        return accounts.length > 0;
+    } catch (error) {
+        console.error(`Failed to check ${walletType} connection:`, error);
         return false;
     }
 }

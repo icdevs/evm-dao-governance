@@ -1,6 +1,6 @@
 <script>
     import { onMount } from "svelte";
-    import { authStore } from "../stores/auth.js";
+    import { authStore, getPreferredWallet } from "../stores/auth.js";
     import {
         connectWallet,
         disconnectWallet,
@@ -8,8 +8,10 @@
         getCurrentChainId,
         getCurrentWalletType,
         isWalletConnected,
+        isSpecificWalletConnected,
         getAvailableWallets,
         switchNetwork,
+        WALLET_TYPES,
     } from "../ethereum.js";
     import { getNetworkInfo, NETWORKS } from "../utils.js";
 
@@ -29,29 +31,80 @@
 
     onMount(async () => {
         availableWallets = getAvailableWallets();
+        console.log("Available wallets:", availableWallets);
 
-        // Check if wallet is already connected
-        try {
-            const connected = await isWalletConnected();
-            if (connected) {
-                const address = await getCurrentAddress();
-                const chainId = await getCurrentChainId();
-                connectedWalletType = getCurrentWalletType();
+        // Get preferred wallet first
+        const preferredWallet = getPreferredWallet();
+        console.log("Preferred wallet from storage:", preferredWallet);
 
-                if (address) {
-                    authStore.update((state) => ({
-                        ...state,
-                        isAuthenticated: true,
-                        walletAddress: address,
-                    }));
-                    currentChainId = chainId;
-                    networkInfo = getNetworkInfo(chainId);
+        // Check if preferred wallet is specifically connected
+        if (preferredWallet) {
+            try {
+                const preferredConnected =
+                    await isSpecificWalletConnected(preferredWallet);
+                console.log(
+                    `Preferred wallet (${preferredWallet}) connected:`,
+                    preferredConnected
+                );
+
+                if (preferredConnected) {
+                    const preferredWalletObj = availableWallets.find(
+                        (w) => w.type === preferredWallet
+                    );
+                    if (preferredWalletObj) {
+                        console.log(
+                            "Connecting to preferred wallet:",
+                            preferredWallet
+                        );
+                        await handleWalletSelected(preferredWalletObj);
+                        return; // Exit early if successful
+                    }
                 }
+            } catch (error) {
+                console.log(
+                    "Error checking preferred wallet connection:",
+                    error
+                );
+            }
+        }
+
+        // Fallback: check if any wallet is connected
+        try {
+            const anyConnected = await isWalletConnected();
+            console.log("Any wallet connected (fallback):", anyConnected);
+
+            if (anyConnected) {
+                await handleGenericConnection();
+            } else {
+                console.log("No wallet connected");
             }
         } catch (error) {
-            console.error("Failed to check wallet connection:", error);
+            console.error("Error checking wallet connection:", error);
         }
     });
+
+    async function handleGenericConnection() {
+        const address = await getCurrentAddress();
+        const chainId = await getCurrentChainId();
+        connectedWalletType = getCurrentWalletType();
+
+        console.log("Generic connection info:", {
+            address,
+            chainId,
+            connectedWalletType,
+        });
+
+        if (address) {
+            authStore.update((state) => ({
+                ...state,
+                isAuthenticated: true,
+                walletAddress: address,
+                walletType: connectedWalletType,
+            }));
+            currentChainId = chainId;
+            networkInfo = getNetworkInfo(chainId);
+        }
+    }
 
     function handleConnect() {
         availableWallets = getAvailableWallets();
@@ -79,6 +132,12 @@
             currentChainId = await getCurrentChainId();
             networkInfo = getNetworkInfo(currentChainId);
             showWalletSelector = false;
+
+            // Update auth store with wallet type (connectWallet already calls setAuth)
+            authStore.update((state) => ({
+                ...state,
+                walletType: wallet.type,
+            }));
         } catch (error) {
             console.error("Connection failed:", error);
         }
@@ -126,9 +185,9 @@
                 <span class="address"
                     >{formatAddress($authStore.walletAddress)}</span
                 >
-                {#if connectedWalletType}
+                {#if $authStore.walletType}
                     <span class="wallet-type-badge">
-                        {getWalletDisplayName(connectedWalletType)}
+                        {getWalletDisplayName($authStore.walletType)}
                     </span>
                 {/if}
                 <button class="disconnect-btn" on:click={handleDisconnect}>

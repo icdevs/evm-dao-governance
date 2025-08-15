@@ -47,25 +47,6 @@
 
     // General fields
     let metadata = "";
-    let snapshotContract = "";
-
-    // Available snapshot contracts (you might want to fetch these from the backend)
-    let availableContracts = [];
-
-    // Load available contracts on mount
-    import { onMount } from "svelte";
-
-    onMount(async () => {
-        try {
-            const contracts = await backend.icrc149_get_snapshot_contracts();
-            availableContracts = contracts.map(([address, config]) => ({
-                address,
-                config,
-            }));
-        } catch (error) {
-            console.error("Failed to load snapshot contracts:", error);
-        }
-    });
 
     // Update ERC20 data when helper fields change
     $: if (erc20Mode && proposalType === "eth_transaction") {
@@ -104,10 +85,15 @@
             const networkInfo = getNetworkInfo(chainId);
 
             // Create SIWE proof
+            // Get the selected contract from the main page's governance selector
+            const contracts = await backend.icrc149_get_snapshot_contracts();
             const contractAddress =
-                snapshotContract || availableContracts[0]?.address;
+                contracts.length > 0 ? contracts[0][0] : null;
+
             if (!contractAddress) {
-                throw new Error("No snapshot contract selected or available");
+                throw new Error(
+                    "No governance contract available. Please configure a contract in the settings first."
+                );
             }
 
             const siweProof = await createSiweProofForProposal(
@@ -567,24 +553,6 @@
                 rows="3"
                 disabled={isSubmitting}
             ></textarea>
-        </div>
-
-        <div class="form-group">
-            <label for="snapshotContract"
-                >Snapshot Contract (Voting Token)</label
-            >
-            <select
-                id="snapshotContract"
-                bind:value={snapshotContract}
-                disabled={isSubmitting}
-            >
-                <option value="">Select contract...</option>
-                {#each availableContracts as contract}
-                    <option value={contract.address}>
-                        {contract.address} - {contract.config.contract_type}
-                    </option>
-                {/each}
-            </select>
         </div>
 
         <!-- Submit Button -->

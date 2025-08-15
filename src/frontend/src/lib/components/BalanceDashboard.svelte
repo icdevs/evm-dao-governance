@@ -5,6 +5,7 @@
     import { statusStore } from "../stores/status.js";
     import { governanceStatsStore } from "../stores/governance.js";
     import { getCurrentChainId } from "../ethereum.js";
+    import { backend } from "../canisters.js";
     import {
         getCanisterEthereumAddress,
         getEthBalance,
@@ -15,9 +16,10 @@
     } from "../blockchain.js";
 
     let canisterAddress = "";
-    let ethBalance = "-";
-    let tokenBalance = "-";
+    let ethBalance = "0.0";
+    let tokenBalance = "0.0";
     let isLoading = false;
+    let isInitialLoad = true;
     let chainId = null;
 
     // Export the refresh function so parent can call it
@@ -38,58 +40,99 @@
         }
     });
 
-    async function refreshBalances() {
-        if (!isConnected || !isConfigured) {
-            statusStore.add(
-                "Please connect wallet and configure settings",
-                "warning"
-            );
-            return;
-        }
-
+    async function loadBalances() {
+        console.log("Loading balances...");
         isLoading = true;
 
         try {
-            // Get canister's derived Ethereum address
-            canisterAddress = await getCanisterEthereumAddress(canisterId);
+            const balances = await getBalances();
+            console.log("Balances loaded:", balances);
+            ethBalance = balances.ethBalance || "0.0";
+            tokenBalance = balances.tokenBalance || "0.0";
 
-            // Get current chain ID if not already set
-            if (!chainId) {
-                chainId = await getCurrentChainId();
-            }
-
-            // Get balances
-            const balanceInfo = await getBalanceInfo(
-                canisterAddress,
-                contractAddress,
-                chainId
-            );
-            ethBalance = balanceInfo.ethBalance;
-            tokenBalance = balanceInfo.tokenBalance;
-
-            // Also refresh governance stats
-            try {
-                await governanceStatsStore.load();
-            } catch (statsError) {
-                console.error(
-                    "Failed to refresh governance stats:",
-                    statsError
-                );
-                // Don't show error for governance stats as it's secondary data
-            }
+            // After first successful load, no longer initial load
+            isInitialLoad = false;
         } catch (error) {
-            console.error("Failed to refresh balances:", error);
+            console.error("Failed to load balances:", error);
             statusStore.add(
-                `Failed to refresh balances: ${error.message}`,
+                `Failed to load balances: ${error.message}`,
                 "error"
             );
-
-            // Reset on error
-            if (!canisterAddress) canisterAddress = "";
-            ethBalance = "Error";
-            tokenBalance = "Error";
         } finally {
             isLoading = false;
+        }
+    }
+
+    async function getBalances() {
+        if (!canisterId || !contractAddress) {
+            console.log("Missing configuration for balance loading");
+            return { ethBalance: "0.0", tokenBalance: "0.0" };
+        }
+
+        try {
+            // Get contract configuration from backend to get the correct chain ID
+            const contracts = await backend.icrc149_get_snapshot_contracts();
+            console.log("Available contracts:", contracts);
+
+            // Find the configuration for our selected contract
+            const contractConfig = contracts.find(
+                ([address, config]) =>
+                    address === contractAddress ||
+                    config.contract_address === contractAddress
+            );
+
+            if (!contractConfig) {
+                console.log(
+                    "Contract configuration not found for address:",
+                    contractAddress
+                );
+                return { ethBalance: "0.0", tokenBalance: "0.0" };
+            }
+
+            const [configAddress, config] = contractConfig;
+            const actualContractAddress = config.contract_address;
+            const configChainId = config.chain.chain_id;
+
+            console.log("Using contract config:", {
+                address: actualContractAddress,
+                chainId: configChainId,
+                networkName: config.chain.network_name,
+            });
+
+            // Use the chain ID from contract config
+            chainId = configChainId;
+
+            // Get canister address
+            if (!canisterAddress) {
+                canisterAddress = await getCanisterEthereumAddress(canisterId);
+            }
+
+            console.log(
+                "Getting balances for canister address:",
+                canisterAddress,
+                "on chain:",
+                chainId
+            );
+
+            // Get ETH balance using the correct chain ID
+            const ethBal = await getEthBalance(canisterAddress, configChainId);
+            console.log("ETH balance:", ethBal);
+
+            // Get token balance using the actual contract address from config
+            const tokenBal = await getTokenBalance(
+                canisterAddress,
+                actualContractAddress,
+                configChainId
+            );
+            console.log("Token balance:", tokenBal);
+
+            return {
+                ethBalance: ethBal || "0.0",
+                tokenBalance: tokenBal || "0.0",
+            };
+        } catch (error) {
+            console.error("Error getting balances:", error);
+            return { ethBalance: "0.0", tokenBalance: "0.0" };
         }
     }
 
@@ -121,14 +164,14 @@
         if (isConnected) {
             chainId = await getCurrentChainId();
             if (isConfigured) {
-                refreshBalances();
+                loadBalances();
             }
         }
         initialized = true;
 
         // Expose refresh function to parent
         if (onRefresh) {
-            onRefresh(refreshBalances);
+            onRefresh(loadBalances);
         }
     });
 
@@ -146,7 +189,7 @@
                 previousCanisterId !== canisterId && canisterId;
 
             if (connectionChanged || configChanged || canisterChanged) {
-                refreshBalances();
+                loadBalances();
             }
         }
         previousConnected = isConnected;
@@ -161,8 +204,8 @@
             <h3>💰 DAO Treasury</h3>
             {#if canisterAddress}
                 <div class="inline-address">
-                    <span class="address-short" title={canisterAddress}>
-                        {formatAddressLocal(canisterAddress)}
+                    <span class="address-full">
+                        {canisterAddress}
                     </span>
                     <button
                         class="inline-copy-btn"
@@ -207,12 +250,12 @@
                         : "ETH"}
                 </h4>
                 <div class="balance-value">
-                    {#if isLoading}
+                    {#if isInitialLoad && isLoading}
                         -
                     {:else}
                         {ethBalance}
                     {/if}
-                    {#if !isLoading}
+                    {#if !isInitialLoad || !isLoading}
                         {chainId ? getNativeCurrencySymbol(chainId) : "ETH"}
                     {/if}
                 </div>
@@ -224,7 +267,7 @@
             <div class="card-header">
                 <h4>🪙 Governance Tokens</h4>
                 <div class="balance-value">
-                    {#if isLoading}
+                    {#if isInitialLoad && isLoading}
                         -
                     {:else}
                         {tokenBalance}
@@ -323,12 +366,11 @@
         border-color: rgba(0, 210, 255, 0.3);
     }
 
-    .inline-address .address-short {
+    .inline-address .address-full {
         font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
         font-size: 0.8rem;
         color: var(--color-primary);
         font-weight: 600;
-        cursor: help;
     }
 
     .inline-copy-btn {
@@ -352,54 +394,6 @@
     .inline-copy-btn svg {
         width: 0.9rem;
         height: 0.9rem;
-    }
-
-    .refresh-btn {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.75rem 1.25rem;
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-primary-dark) 100%
-        );
-        color: white;
-        border: none;
-        border-radius: 10px;
-        cursor: pointer;
-        font-size: 0.9rem;
-        font-weight: 600;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 2px 8px rgba(0, 210, 255, 0.2);
-    }
-
-    .refresh-btn:hover:not(:disabled) {
-        background: linear-gradient(
-            135deg,
-            var(--color-primary-light) 0%,
-            var(--color-primary) 100%
-        );
-        transform: translateY(-1px);
-        box-shadow: 0 4px 16px rgba(0, 210, 255, 0.3);
-    }
-
-    .refresh-btn:disabled {
-        background: var(--color-border);
-        cursor: not-allowed;
-        transform: none;
-        opacity: 0.6;
-    }
-
-    .refresh-icon {
-        width: 1.2rem;
-        height: 1.2rem;
-        transition: transform 0.3s ease;
-        filter: drop-shadow(0 0 4px currentColor);
-    }
-
-    .refresh-icon.spinning {
-        animation: spin-counterclockwise 1s linear infinite;
     }
 
     @keyframes spin-counterclockwise {
@@ -496,43 +490,6 @@
         opacity: 0.9;
     }
 
-    .copy-btn {
-        background: var(--color-surface-hover);
-        border: 1px solid var(--color-border);
-        cursor: pointer;
-        padding: 0.5rem;
-        border-radius: 8px;
-        color: var(--color-text-secondary);
-        transition: all 0.3s ease;
-        width: 2.5rem;
-        height: 2.5rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .copy-btn:hover:not(:disabled) {
-        background: var(--color-primary);
-        color: white;
-        border-color: var(--color-primary);
-        transform: scale(1.05);
-    }
-
-    .copy-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-        transform: none;
-    }
-
-    .copy-btn svg {
-        width: 1.2rem;
-        height: 1.2rem;
-    }
-
-    .address-display {
-        position: relative;
-    }
-
     .address-short {
         display: inline;
         font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
@@ -540,30 +497,6 @@
         color: var(--color-primary);
         font-weight: 600;
         filter: drop-shadow(0 0 4px currentColor);
-    }
-
-    .address-full {
-        display: none;
-        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-        font-size: 0.85rem;
-        color: var(--color-text-secondary);
-        word-break: break-all;
-        line-height: 1.4;
-    }
-
-    .canister-address:hover .address-short {
-        display: none;
-    }
-
-    .canister-address:hover .address-full {
-        display: inline;
-    }
-
-    .placeholder {
-        color: var(--color-text-muted);
-        font-style: italic;
-        font-size: 0.9rem;
-        opacity: 0.8;
     }
 
     .status-message {
@@ -606,12 +539,8 @@
             align-self: flex-start;
         }
 
-        .inline-address .address-short {
+        .inline-address .address-full {
             font-size: 0.75rem;
-        }
-
-        .refresh-btn {
-            justify-content: center;
         }
 
         .balance-value {

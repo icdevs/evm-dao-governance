@@ -14,7 +14,6 @@ import Blob "mo:base/Blob";
 import Bool "mo:base/Bool";
 import Nat "mo:base/Nat";
 import Nat8 "mo:base/Nat8";
-import Float "mo:base/Float";
 import BTree "mo:stableheapbtreemap/BTree";
 import Text "mo:base/Text";
 import ExtendedProposalEngine "mo:dao-proposal-engine/ExtendedProposalEngine";
@@ -25,24 +24,21 @@ import ICPCall "mo:base/ExperimentalInternetComputer";
 import Error "mo:base/Error";
 import Cycles "mo:base/ExperimentalCycles";
 import SHA3 "mo:sha3";
-import SHA256 "mo:sha2/Sha256";
-import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
 import Debug "mo:base/Debug";
 import Utils "Utils";
 import BaseX "mo:base-x-encoder";
 import Order "mo:base/Order";
+import DateTime "mo:datetime/DateTime";
 
 // EVM Transaction Libraries
 import EVMAddress "mo:evm-txs/Address";
 import Transaction1559 "mo:evm-txs/transactions/EIP1559";
-import Contract "mo:evm-txs/Contract";
 import Ecmult "mo:libsecp256k1/core/ecmult";
 import ECDSA "mo:libsecp256k1/Ecdsa";
 import Signature "mo:libsecp256k1/Signature";
 import MessageLib "mo:libsecp256k1/Message";
 import RecoveryId "mo:libsecp256k1/RecoveryId";
-import PublicKey "mo:libsecp256k1/PublicKey";
 import PreG "/precompile/pre_g";
 
 // Import EVM RPC types from the official interface
@@ -98,11 +94,11 @@ module {
   public let ICRC85_Payment_Namespace = "com.evmdaobridge-org.libraries.evmdaobridge";
 
   // Centralized RPC service configuration helper
-  private func createRpcService(chain_id: Nat, canister_id: Principal) : MigrationTypes.Current.EthereumRPCService {
+  private func createRpcService(chain_id : Nat, canister_id : Principal) : MigrationTypes.Current.EthereumRPCService {
     {
       rpc_type = switch (chain_id) {
         case (1) "mainnet";
-        case (5) "goerli"; 
+        case (5) "goerli";
         case (11155111) "sepolia";
         case (_) "custom";
       };
@@ -111,36 +107,36 @@ module {
         case (31337 or 1337 or 1338) ?[("url", "http://127.0.0.1:8545")];
         case (_) null;
       };
-    }
+    };
   };
 
   // Enhanced helper with debug logging
-  private func createRpcServiceWithLogging(chain_id: Nat, canister_id: Principal, context: Text) : MigrationTypes.Current.EthereumRPCService {
+  private func createRpcServiceWithLogging(chain_id : Nat, canister_id : Principal, context : Text) : MigrationTypes.Current.EthereumRPCService {
     let service = createRpcService(chain_id, canister_id);
-    
+
     D.print("🔧 RPC_SERVICE_" # context # ": Chain ID: " # Nat.toText(chain_id));
     D.print("🔧 RPC_SERVICE_" # context # ": RPC Type: " # service.rpc_type);
     D.print("🔧 RPC_SERVICE_" # context # ": Canister ID: " # Principal.toText(service.canister_id));
-    D.print("🔧 RPC_SERVICE_" # context # ": Custom Config: " # debug_show(service.custom_config));
-    
+    D.print("🔧 RPC_SERVICE_" # context # ": Custom Config: " # debug_show (service.custom_config));
+
     service;
   };
 
-  public func Init<system>(config : {
-    manager: ClassPlusLib.ClassPlusInitializationManager;
-    initialState: State;
-    args : ?InitArgs;
-    pullEnvironment : ?(() -> Environment);
-    onInitialize: ?(EvmDaoBridge -> async*());
-    onStorageChange : ((State) ->())
-  }) : <system>() -> EvmDaoBridge {
+  public func Init<system>(
+    config : {
+      manager : ClassPlusLib.ClassPlusInitializationManager;
+      initialState : State;
+      args : ?InitArgs;
+      pullEnvironment : ?(() -> Environment);
+      onInitialize : ?(EvmDaoBridge -> async* ());
+      onStorageChange : ((State) -> ());
+    }
+  ) : <system>() -> EvmDaoBridge {
 
-    let instance = ClassPlusLib.ClassPlusSystem<system,
-      EvmDaoBridge, 
-      State,
-      InitArgs,
-      Environment>({config with constructor = EvmDaoBridge}).get;
-    
+    let instance = ClassPlusLib.ClassPlusSystem<system, EvmDaoBridge, State, InitArgs, Environment>({
+      config with constructor = EvmDaoBridge
+    }).get;
+
     ovsfixed.initialize_cycleShare<system>({
       namespace = ICRC85_Timer_Namespace;
       icrc_85_state = instance<system>().state.icrc85;
@@ -223,7 +219,6 @@ module {
     private var queueProcessingTimer : ?Nat = null; // Timer ID for single queue processing
     private var lastProcessedSequence : Nat = 0; // Track last processed transaction for restart recovery
     private let QUEUE_PROCESSING_DELAY_SECONDS : Nat = 10; // Wait 10 seconds before processing next item
-    private let MAX_PROCESSING_ATTEMPTS : Nat = 1; // Only try once as requested
 
     // Import types from EVMRPCService module
     type Block = EVMRPCService.Block;
@@ -301,10 +296,10 @@ module {
             case (?("url", value)) value;
             case (_) "http://127.0.0.1:8545"; // Default fallback
           };
-          
+
           D.print("🔧 GET_RPC_SERVICES: Using custom RPC with URL: " # url);
           D.print("🔧 GET_RPC_SERVICES: Chain ID for custom: " # Nat.toText(chain.chain_id));
-          
+
           #Custom({
             chainId = Nat64.fromNat(chain.chain_id); // Convert Nat to Nat64 for EVM RPC interface
             services = [{ url = url; headers = null }];
@@ -344,8 +339,8 @@ module {
         D.print("🔧 FINALIZED_BLOCK: Chain network name: " # chain.network_name);
         D.print("🔧 FINALIZED_BLOCK: RPC service type: " # rpc_service.rpc_type);
         D.print("🔧 FINALIZED_BLOCK: RPC canister ID: " # Principal.toText(rpc_service.canister_id));
-        D.print("🔧 FINALIZED_BLOCK: Custom config: " # debug_show(rpc_service.custom_config));
-        
+        D.print("🔧 FINALIZED_BLOCK: Custom config: " # debug_show (rpc_service.custom_config));
+
         let rpcActor = getEvmRpcActor(rpc_service);
         let rpcServices = getRpcServices(chain, rpc_service);
         let config : ?RpcConfig = ?{
@@ -550,21 +545,21 @@ module {
               };
 
               D.print("🔧 TOTAL_SUPPLY: Clean hex string: " # cleanHex);
-              
+
               // Convert hex string to Nat (optimized for large hex strings)
               D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(cleanHex.size()) # " characters");
-              
+
               // Remove leading zeros to reduce processing time
               let trimmedHex = Text.trimStart(cleanHex, #char('0'));
               let finalHex = if (trimmedHex.size() == 0) "0" else trimmedHex;
-              
+
               D.print("🔧 TOTAL_SUPPLY: Trimmed hex string: " # finalHex # " (removed leading zeros)");
-              
+
               var totalSupply : Nat = 0;
               let chars = Text.toArray(finalHex);
-              
+
               D.print("🔧 TOTAL_SUPPLY: Starting hex conversion loop, processing " # Nat.toText(chars.size()) # " characters");
-              
+
               // Process hex digits from left to right (more efficient for large numbers)
               var charIndex = 0;
               for (char in chars.vals()) {
@@ -660,16 +655,16 @@ module {
                       };
 
                       D.print("🔧 TOTAL_SUPPLY: Clean hex string: " # cleanHex);
-                      
+
                       // Convert hex string to Nat (optimized for large hex strings)
                       D.print("🔧 TOTAL_SUPPLY: Converting hex to number, " # Nat.toText(cleanHex.size()) # " characters");
-                      
+
                       // Remove leading zeros to reduce processing time
                       let trimmedHex = Text.trimStart(cleanHex, #char('0'));
                       let finalHex = if (trimmedHex.size() == 0) "0" else trimmedHex;
-                      
+
                       D.print("🔧 TOTAL_SUPPLY: Trimmed hex string: " # finalHex # " (removed leading zeros)");
-                      
+
                       var totalSupply : Nat = 0;
                       var multiplier : Nat = 1;
                       let chars = Text.toArray(cleanHex);
@@ -948,10 +943,10 @@ module {
             D.print("🔄 QUEUE_PROCESS: Getting Ethereum address for subaccount...");
             let ethAddress = await* getEthereumAddress(queueEntry.eth_tx.subaccount);
             D.print("🔄 QUEUE_PROCESS: Ethereum address: " # ethAddress);
-            
+
             // Configure RPC service using centralized function
             let rpc_service = createRpcServiceWithLogging(queueEntry.eth_tx.chain.chain_id, state.config.evm_rpc_canister_id, "QUEUE_PROCESS");
-            
+
             // Create derivation path
             let derivationPath = switch (queueEntry.eth_tx.subaccount) {
               case (?blob) [blob];
@@ -1675,15 +1670,6 @@ module {
       };
     };
 
-    // Convert Service vote choice to ExtendedProposalEngine vote choice
-    private func translateVoteChoiceFromService(choice : { #Yes; #No; #Abstain }) : MigrationTypes.Current.VoteChoice {
-      switch (choice) {
-        case (#Yes) #Yes;
-        case (#No) #No;
-        case (#Abstain) #Abstain;
-      };
-    };
-
     // Governance Config - Updated to support multiple contracts
     public func icrc149_governance_config() : MigrationTypes.Current.GovernanceConfigShared {
       MigrationTypes.Current.shareGovernanceConfig(state.config);
@@ -1869,10 +1855,10 @@ module {
       #Err : Text;
     } {
       D.print("🧪 TEST: Starting 3 simple parallel block requests");
-      
+
       // Use centralized RPC service creation for testing
       let rpc_service = createRpcServiceWithLogging(31337, rpc_canister_id, "TEST");
-      
+
       let chain = {
         chain_id = 31337;
         network_name = "local";
@@ -2091,24 +2077,40 @@ module {
           };
         };
       };
+      let isoFormat = "YYYY-MM-DDTHH:mm:ss.sssZ";
+      let expiration = if (expiration_time_nat < 1) {
+        let ?expiration = DateTime.fromText(expiration_time_iso, isoFormat) else return #Err("Invalid Expiration Time ISO format: " # expiration_time_iso);
+        expiration;
+      } else DateTime.DateTime(expiration_time_nat);
+
+      let issuedAt = if (issued_at_nat < 1) {
+        let ?issuedAt = DateTime.fromText(issued_at_iso, isoFormat) else return #Err("Invalid Issued At ISO format: " # issued_at_iso);
+        issuedAt;
+      } else DateTime.DateTime(issued_at_nat);
 
       // Validate time window (must be within 10 minutes = 600 seconds = 600_000_000_000 nanoseconds)
-      let currentTime = natNow();
+      let currentTime = DateTime.now();
       let maxWindowNanos = 600_000_000_000; // 10 minutes in nanoseconds
+      let maxExpiration = currentTime.add(#nanoseconds(maxWindowNanos));
 
-      D.print("🕐 SIWE: Time validation - Current: " # Nat.toText(currentTime) # ", Expiration: " # Nat.toText(expiration_time_nat) # ", IssuedAt: " # Nat.toText(issued_at_nat));
+      D.print("🕐 SIWE: Time validation - Current: " # currentTime.toText() # ", Expiration: " # expiration.toText() # ", IssuedAt: " # issuedAt.toText());
 
-      if (expiration_time_nat < currentTime) {
+      if (issuedAt.compare(currentTime) == #greater) {
+        D.print("❌ SIWE: Message has been issued in the future");
+        return #Err("SIWE message has been issued in the future");
+      };
+
+      if (expiration.compare(currentTime) == #less) {
         D.print("❌ SIWE: Message has expired");
         return #Err("SIWE message has expired");
       };
 
-      if (expiration_time_nat > (currentTime + maxWindowNanos)) {
+      if (expiration.compare(maxExpiration) == #greater) {
         D.print("❌ SIWE: Expiration time too far in future");
         return #Err("SIWE message expiration time too far in future");
       };
 
-      if (expiration_time_nat > issued_at_nat and (expiration_time_nat - issued_at_nat) > maxWindowNanos) {
+      if (expiration.compare(issuedAt) == #greater and (expiration.toTime() - issuedAt.toTime()) > maxWindowNanos) {
         D.print("❌ SIWE: Time window exceeds 10 minutes");
         return #Err("SIWE message time window exceeds 10 minutes");
       };
@@ -2702,69 +2704,72 @@ module {
       };
 
       // Validate EthTransaction actions against approved execution contracts
-      
-        
-        // Validate EthTransaction actions against approved execution contracts
+
+      // Validate EthTransaction actions against approved execution contracts
       let actionItem : ProposalAction = switch (proposal_args.action) {
-          case (#EthTransaction(eth_tx)) {
-              // Find execution contract by normalizing addresses for comparison
-              let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
-              var execution_contract_config: ?MigrationTypes.Current.ExecutionContractConfig = null;
-              for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
-                  if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
-                      execution_contract_config := ?config;
-                  };
+        case (#EthTransaction(eth_tx)) {
+          // Find execution contract by normalizing addresses for comparison
+          let normalizedToAddress = normalizeEthereumAddress(eth_tx.to);
+          var execution_contract_config : ?MigrationTypes.Current.ExecutionContractConfig = null;
+          for ((storedAddress, config) in BTree.entries(state.config.execution_contracts)) {
+            if (normalizeEthereumAddress(storedAddress) == normalizedToAddress) {
+              execution_contract_config := ?config;
+            };
+          };
+
+          switch (execution_contract_config) {
+            case (?contract_config) {
+              if (not contract_config.enabled) {
+                return #Err("Target execution contract is not enabled: " # eth_tx.to);
               };
-              
-              switch (execution_contract_config) {
-                  case (?contract_config) {
-                      if (not contract_config.enabled) {
-                          return #Err("Target execution contract is not enabled: " # eth_tx.to);
-                      };
-                  };
-                  case (null) {
-                      return #Err("Target execution contract is not approved: " # eth_tx.to);
-                  };
-              };
-              #EthTransaction({
-                  to = eth_tx.to;
-                  value = eth_tx.value;
-                  data = eth_tx.data;
-                  chain = eth_tx.chain;
-                  subaccount = eth_tx.subaccount;
-                  maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
-                  maxFeePerGas = eth_tx.maxFeePerGas;
-                  gasLimit = eth_tx.gasLimit;
-                  var signature = null; // Signature will be set after proposal creation
-                  var nonce = null; // Nonce will be set during execution
-              });
+            };
+            case (null) {
+              return #Err("Target execution contract is not approved: " # eth_tx.to);
+            };
           };
-          case (#Motion(a)) {
-              // Motions don't require execution contract validation
-              #Motion(a)
-          };
-          case(#ICPCall(call)) {
-              // ICP calls don't require execution contract validation
-              #ICPCall({call with
-                  var result : ?{#Err : Text; #Ok : Blob} = null; // Result will be set after proposal execution
-              });
-          };
-      
+          #EthTransaction({
+            to = eth_tx.to;
+            value = eth_tx.value;
+            data = eth_tx.data;
+            chain = eth_tx.chain;
+            subaccount = eth_tx.subaccount;
+            maxPriorityFeePerGas = eth_tx.maxPriorityFeePerGas;
+            maxFeePerGas = eth_tx.maxFeePerGas;
+            gasLimit = eth_tx.gasLimit;
+            var signature = null; // Signature will be set after proposal creation
+            var nonce = null; // Nonce will be set during execution
+          });
+        };
+        case (#Motion(a)) {
+          // Motions don't require execution contract validation
+          #Motion(a);
+        };
+        case (#ICPCall(call)) {
+          // ICP calls don't require execution contract validation
+          #ICPCall({
+            call with
+            var result : ?{
+              #Err : Text;
+              #Ok : Blob;
+            } = null; // Result will be set after proposal execution
+          });
+        };
+
       };
 
       let content : MigrationTypes.Current.ProposalContent = {
-          action = actionItem;
-          snapshot = null; // Will be set after creation
-          metadata = proposal_args.metadata;
+        action = actionItem;
+        snapshot = null; // Will be set after creation
+        metadata = proposal_args.metadata;
       };
 
       // Get the snapshot contract config for creating the snapshot
       let final_snapshot_contract_config = switch (snapshot_contract_config) {
-          case (?config) config;
-          case (null) {
-              // This shouldn't happen since we validated above
-              return #Err("Internal error: snapshot contract config not found");
-          };
+        case (?config) config;
+        case (null) {
+          // This shouldn't happen since we validated above
+          return #Err("Internal error: snapshot contract config not found");
+        };
       };
 
       // DEBUG: Log the snapshot contract configuration being used
@@ -2774,66 +2779,66 @@ module {
       D.print("🎯 PROPOSAL_CREATE: Chain network name: " # final_snapshot_contract_config.chain.network_name);
       D.print("🎯 PROPOSAL_CREATE: RPC service type: " # final_snapshot_contract_config.rpc_service.rpc_type);
       D.print("🎯 PROPOSAL_CREATE: RPC canister ID: " # Principal.toText(final_snapshot_contract_config.rpc_service.canister_id));
-      D.print("🎯 PROPOSAL_CREATE: Custom config: " # debug_show(final_snapshot_contract_config.rpc_service.custom_config));
+      D.print("🎯 PROPOSAL_CREATE: Custom config: " # debug_show (final_snapshot_contract_config.rpc_service.custom_config));
 
       // Create snapshot for this proposal using the specified snapshot contract
       // Get latest finalized block from RPC
       let blockResult = await* getLatestFinalizedBlock(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain);
       let (block_number, state_root, total_supply) = switch (blockResult) {
-          case (#ok(block)) {
-              // Validate and convert state root hex string to Blob
-              if (not validateStateRoot(block.stateRoot)) {
-                  return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
-              };
-              
-              switch (Utils.hexStringToBlob(block.stateRoot)) {
-                  case (#ok(state_root_blob)) {
-                      D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
-                      
-                      // Get total supply from the contract (for ERC20 tokens)
-                      D.print("🏁 SUPPLY_CALL: About to get total supply for contract type: ERC20/ERC721/Other");
-                      let total_supply = switch (final_snapshot_contract_config.contract_type) {
-                          case (#ERC20) {
-                              D.print("🏁 SUPPLY_CALL: Processing ERC20 contract, calling getTotalSupply for: " # snapshot_contract_address);
-                              let supplyResult = await* getTotalSupply(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain, snapshot_contract_address);
-                              D.print("🏁 SUPPLY_CALL: getTotalSupply call completed, processing result...");
-                              switch (supplyResult) {
-                                  case (#ok(supply)) {
-                                      D.print("🏁 SUPPLY_CALL: Successfully got total supply: " # Nat.toText(supply));
-                                      supply;
-                                  };
-                                  case (#err(errMsg)) {
-                                      D.print("🏁 SUPPLY_CALL: Failed to get total supply: " # errMsg);
-                                      // CRITICAL: totalSupply failure should cause proposal creation to FAIL, not use defaults  
-                                      return #Err("Failed to get totalSupply for snapshot: " # errMsg);
-                                  };
-                              };
-                          };
-                          case (#ERC721) {
-                              D.print("🏁 SUPPLY_CALL: ERC721 contract type detected - returning error");
-                              // CRITICAL: ERC721 total supply calculation MUST be implemented, not defaulted
-                              return #Err("ERC721 total supply calculation not implemented - this must be fixed before proposal creation");
-                          };
-                          case (#Other(_)) {
-                              D.print("🏁 SUPPLY_CALL: Other contract type detected - returning error");
-                              // CRITICAL: Custom contract types MUST have proper total supply calculation
-                              return #Err("Custom contract type total supply calculation not implemented - this must be fixed before proposal creation");
-                          };
-                      };
-                      
-                      D.print("🏁 SUPPLY_CALL: Total supply processing complete: " # Nat.toText(total_supply));
-                      
-                      (block.number, state_root_blob, total_supply);
-                  };
-                  case (#err(hexErr)) {
-                      return #Err("Failed to convert state root hex to blob: " # hexErr);
-                  };
-              };
+        case (#ok(block)) {
+          // Validate and convert state root hex string to Blob
+          if (not validateStateRoot(block.stateRoot)) {
+            return #Err("Invalid state root format from block " # Nat.toText(block.number) # ": " # block.stateRoot);
           };
-          case (#err(errMsg)) {
-              // CRITICAL: RPC failure should cause proposal creation to FAIL, not use defaults
-              return #Err("Failed to get latest block for snapshot: " # errMsg);
+
+          switch (Utils.hexStringToBlob(block.stateRoot)) {
+            case (#ok(state_root_blob)) {
+              D.print("Successfully got block " # Nat.toText(block.number) # " with state root: " # block.stateRoot);
+
+              // Get total supply from the contract (for ERC20 tokens)
+              D.print("🏁 SUPPLY_CALL: About to get total supply for contract type: ERC20/ERC721/Other");
+              let total_supply = switch (final_snapshot_contract_config.contract_type) {
+                case (#ERC20) {
+                  D.print("🏁 SUPPLY_CALL: Processing ERC20 contract, calling getTotalSupply for: " # snapshot_contract_address);
+                  let supplyResult = await* getTotalSupply(final_snapshot_contract_config.rpc_service, final_snapshot_contract_config.chain, snapshot_contract_address);
+                  D.print("🏁 SUPPLY_CALL: getTotalSupply call completed, processing result...");
+                  switch (supplyResult) {
+                    case (#ok(supply)) {
+                      D.print("🏁 SUPPLY_CALL: Successfully got total supply: " # Nat.toText(supply));
+                      supply;
+                    };
+                    case (#err(errMsg)) {
+                      D.print("🏁 SUPPLY_CALL: Failed to get total supply: " # errMsg);
+                      // CRITICAL: totalSupply failure should cause proposal creation to FAIL, not use defaults
+                      return #Err("Failed to get totalSupply for snapshot: " # errMsg);
+                    };
+                  };
+                };
+                case (#ERC721) {
+                  D.print("🏁 SUPPLY_CALL: ERC721 contract type detected - returning error");
+                  // CRITICAL: ERC721 total supply calculation MUST be implemented, not defaulted
+                  return #Err("ERC721 total supply calculation not implemented - this must be fixed before proposal creation");
+                };
+                case (#Other(_)) {
+                  D.print("🏁 SUPPLY_CALL: Other contract type detected - returning error");
+                  // CRITICAL: Custom contract types MUST have proper total supply calculation
+                  return #Err("Custom contract type total supply calculation not implemented - this must be fixed before proposal creation");
+                };
+              };
+
+              D.print("🏁 SUPPLY_CALL: Total supply processing complete: " # Nat.toText(total_supply));
+
+              (block.number, state_root_blob, total_supply);
+            };
+            case (#err(hexErr)) {
+              return #Err("Failed to convert state root hex to blob: " # hexErr);
+            };
           };
+        };
+        case (#err(errMsg)) {
+          // CRITICAL: RPC failure should cause proposal creation to FAIL, not use defaults
+          return #Err("Failed to get latest block for snapshot: " # errMsg);
+        };
       };
 
       D.print("🏁 PROPOSAL_CREATE: About to create proposal with total supply: " # Nat.toText(total_supply));
@@ -2842,51 +2847,51 @@ module {
 
       // Create a dynamic proposal with total supply as the total voting power
       let result = await* getProposalEngine().createProposal<system>(
-          caller, 
-          content, 
-          [], // No initial members - they will be added as they vote
-          #dynamic({ totalVotingPower = null })
+        caller,
+        content,
+        [], // No initial members - they will be added as they vote
+        #dynamic({ totalVotingPower = null }),
       );
-      
+
       D.print("🏁 PROPOSAL_CREATE: getProposalEngine().createProposal call completed");
-      
-      switch(result) {
-          case(#ok(proposal_id)) {
-              let snapshot : MigrationTypes.Current.ProposalSnapshot = {
-                  contract_address = snapshot_contract_address;
-                  chain = final_snapshot_contract_config.chain;
-                  block_number = block_number;
-                  state_root = state_root;
-                  total_supply = total_supply;
-                  snapshot_time = natNow();
-              };
 
-              ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
-              
-              // Add proposal to indexes for efficient filtering
-              switch(getProposalEngine().getProposal(proposal_id)) {
-                  case (?proposal) {
-                      addProposalToIndexes(proposal_id, proposal, content);
-                  };
-                  case (null) {
-                      // This shouldn't happen since we just created the proposal
-                      D.print("Warning: Could not find proposal " # Nat.toText(proposal_id) # " for indexing");
-                  };
-              };
+      switch (result) {
+        case (#ok(proposal_id)) {
+          let snapshot : MigrationTypes.Current.ProposalSnapshot = {
+            contract_address = snapshot_contract_address;
+            chain = final_snapshot_contract_config.chain;
+            block_number = block_number;
+            state_root = state_root;
+            total_supply = total_supply;
+            snapshot_time = natNow();
+          };
 
-              D.print("🏁 PROPOSAL_CREATE: Successfully created proposal with ID: saving engine state " # Nat.toText(proposal_id))  ;
-              
-              saveProposalEngineState();
-              #Ok(proposal_id);
+          ignore BTree.insert(state.snapshots, Nat.compare, proposal_id, snapshot);
+
+          // Add proposal to indexes for efficient filtering
+          switch (getProposalEngine().getProposal(proposal_id)) {
+            case (?proposal) {
+              addProposalToIndexes(proposal_id, proposal, content);
+            };
+            case (null) {
+              // This shouldn't happen since we just created the proposal
+              D.print("Warning: Could not find proposal " # Nat.toText(proposal_id) # " for indexing");
+            };
           };
-          case(#err(err)) {
-              D.print("❌ PROPOSAL_CREATE: " # debug_show(err));
-              switch(err) {
-                  
-                  case(#notEligible) #Err("Caller not eligible to create proposals");
-                  case(#invalid(errors)) #Err("Invalid proposal: " # Text.join(", ", errors.vals()));
-              };
+
+          D.print("🏁 PROPOSAL_CREATE: Successfully created proposal with ID: saving engine state " # Nat.toText(proposal_id));
+
+          saveProposalEngineState();
+          #Ok(proposal_id);
+        };
+        case (#err(err)) {
+          D.print("❌ PROPOSAL_CREATE: " # debug_show (err));
+          switch (err) {
+
+            case (#notEligible) #Err("Caller not eligible to create proposals");
+            case (#invalid(errors)) #Err("Invalid proposal: " # Text.join(", ", errors.vals()));
           };
+        };
       };
     };
 
@@ -3707,10 +3712,10 @@ module {
               D.print("🚀 QUEUE_PROCESSOR: Getting Ethereum address for subaccount...");
               let ethAddress = await* getEthereumAddress(queuedTransaction.eth_tx.subaccount);
               D.print("🚀 QUEUE_PROCESSOR: Ethereum address: " # ethAddress);
-              
+
               // Configure RPC service using centralized function
               let rpc_service = createRpcServiceWithLogging(queuedTransaction.eth_tx.chain.chain_id, state.config.evm_rpc_canister_id, "QUEUE_PROCESSOR");
-              
+
               // Create derivation path
               let derivationPath = switch (queuedTransaction.eth_tx.subaccount) {
                 case (?blob) [blob];
@@ -4165,22 +4170,22 @@ module {
     };
 
     // Debug function to show current RPC configuration
-    public func debug_rpc_configuration(chain_id: Nat) : {
-      rpc_type: Text;
-      canister_id: Text;
-      custom_config: ?[(Text, Text)];
-      resolved_rpc_services: Text;
+    public func debug_rpc_configuration(chain_id : Nat) : {
+      rpc_type : Text;
+      canister_id : Text;
+      custom_config : ?[(Text, Text)];
+      resolved_rpc_services : Text;
     } {
       let service = createRpcService(chain_id, state.config.evm_rpc_canister_id);
       let chain = { chain_id = chain_id; network_name = "debug" };
       let rpcServices = getRpcServices(chain, service);
-      
+
       {
         rpc_type = service.rpc_type;
         canister_id = Principal.toText(service.canister_id);
         custom_config = service.custom_config;
-        resolved_rpc_services = debug_show(rpcServices);
-      }
+        resolved_rpc_services = debug_show (rpcServices);
+      };
     };
 
   };
