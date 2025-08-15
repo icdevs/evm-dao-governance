@@ -14,6 +14,7 @@
         formatAddress,
         getNativeCurrencySymbol,
     } from "../blockchain.js";
+    import { CopyButton, Spinner } from "./ui/index.js";
 
     let canisterAddress = "";
     let ethBalance = "0.0";
@@ -136,23 +137,6 @@
         }
     }
 
-    function copyAddress() {
-        if (canisterAddress) {
-            navigator.clipboard
-                .writeText(canisterAddress)
-                .then(() => {
-                    statusStore.add(
-                        "Address copied to clipboard",
-                        "success",
-                        2000
-                    );
-                })
-                .catch(() => {
-                    statusStore.add("Failed to copy address", "error");
-                });
-        }
-    }
-
     function formatAddressLocal(address) {
         return formatAddress(address);
     }
@@ -207,35 +191,12 @@
                     <span class="address-full">
                         {canisterAddress}
                     </span>
-                    <button
-                        class="inline-copy-btn"
-                        on:click={copyAddress}
+                    <CopyButton
+                        value={canisterAddress}
+                        size="sm"
+                        variant="ghost"
                         title="Copy address"
-                    >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                        >
-                            <rect
-                                x="9"
-                                y="9"
-                                width="13"
-                                height="13"
-                                rx="2"
-                                ry="2"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                fill="none"
-                            />
-                            <path
-                                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                fill="none"
-                            />
-                        </svg>
-                    </button>
+                    />
                 </div>
             {/if}
         </div>
@@ -371,29 +332,6 @@
         font-size: 0.8rem;
         color: var(--color-primary);
         font-weight: 600;
-    }
-
-    .inline-copy-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 0.25rem;
-        border-radius: 4px;
-        color: var(--color-primary);
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .inline-copy-btn:hover {
-        background: rgba(0, 210, 255, 0.2);
-        transform: scale(1.1);
-    }
-
-    .inline-copy-btn svg {
-        width: 0.9rem;
-        height: 0.9rem;
     }
 
     @keyframes spin-counterclockwise {

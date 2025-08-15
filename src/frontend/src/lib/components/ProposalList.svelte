@@ -105,7 +105,7 @@
 
         <div class="filter-section">
             <label for="statusFilter">Filter by status:</label>
-            <select id="statusFilter" bind:value={filter}>
+            <select id="statusFilter" class="form-control" bind:value={filter}>
                 {#each filterOptions as option}
                     <option value={option.value}>{option.label}</option>
                 {/each}
@@ -293,39 +293,9 @@
         color: var(--color-text-primary, #333);
     }
 
-    select {
-        padding: 0.5rem 0.75rem;
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        color: var(--color-text-primary);
-        font-size: 0.9rem;
-        transition: all 0.3s ease;
-        cursor: pointer;
-    }
+    /* Form controls now use unified styles from index.scss */
 
-    select:hover {
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.1);
-    }
-
-    select:focus {
-        outline: none;
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.2);
-    }
-
-    .alert {
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-    }
-
-    .alert-error {
-        background: var(--color-danger-light, #f8d7da);
-        color: var(--color-danger, #721c24);
-        border: 1px solid var(--color-danger-border, #f5c6cb);
-    }
+    /* Use unified alert styles from index.scss */
 
     .loading {
         text-align: center;
@@ -333,23 +303,11 @@
         color: var(--color-text-secondary, #666);
     }
 
+    /* Use unified spinner styles from index.scss */
     .spinner {
+        margin: 0 auto 1rem;
         width: 40px;
         height: 40px;
-        border: 4px solid var(--color-border, #ddd);
-        border-top: 4px solid var(--color-primary, #007bff);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin: 0 auto 1rem;
-    }
-
-    @keyframes spin {
-        0% {
-            transform: rotate(0deg);
-        }
-        100% {
-            transform: rotate(360deg);
-        }
     }
 
     .empty-state {

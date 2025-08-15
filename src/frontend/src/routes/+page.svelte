@@ -543,44 +543,6 @@
 </main>
 
 <style>
-    /* Dark Theme Variables */
-    :global(:root) {
-        --color-bg-primary: #0a0b0d;
-        --color-bg-secondary: #1a1d21;
-        --color-bg-tertiary: #2a2d35;
-        --color-surface: #1e2126;
-        --color-surface-secondary: #262a30;
-        --color-surface-hover: #32363e;
-        --color-border: #3a3f47;
-        --color-border-light: #2a2f37;
-        --color-text-primary: #ffffff;
-        --color-text-secondary: #b4b8c0;
-        --color-text-muted: #8b909a;
-        --color-primary: #00d2ff;
-        --color-primary-dark: #00b8e6;
-        --color-primary-light: #33dbff;
-        --color-success: #00ff88;
-        --color-success-light: rgba(0, 255, 136, 0.1);
-        --color-warning: #ffb800;
-        --color-warning-light: rgba(255, 184, 0, 0.1);
-        --color-danger: #ff4757;
-        --color-danger-light: rgba(255, 71, 87, 0.1);
-        --color-info: #74b9ff;
-        --color-info-light: rgba(116, 185, 255, 0.1);
-    }
-
-    :global(body) {
-        background: var(--color-bg-primary);
-        color: var(--color-text-primary);
-        font-family:
-            "Inter",
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            Roboto,
-            sans-serif;
-    }
-
     /* App Layout */
     .app-container {
         min-height: 100vh;

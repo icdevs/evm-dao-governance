@@ -305,6 +305,7 @@
             <label for="proposalType">Proposal Type</label>
             <select
                 id="proposalType"
+                class="form-control"
                 bind:value={proposalType}
                 disabled={isSubmitting}
             >
@@ -322,6 +323,7 @@
                 <label for="motionText">Motion Text</label>
                 <textarea
                     id="motionText"
+                    class="form-control"
                     bind:value={motionText}
                     placeholder="Describe the motion for the DAO to vote on..."
                     rows="4"
@@ -678,50 +680,7 @@
         transform: scale(1.2);
     }
 
-    input,
-    select,
-    textarea {
-        width: 100%;
-        padding: 0.75rem;
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        color: var(--color-text-primary);
-        font-size: 1rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    input::placeholder,
-    textarea::placeholder {
-        color: var(--color-text-muted);
-        opacity: 0.8;
-    }
-
-    input:hover,
-    select:hover,
-    textarea:hover {
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.1);
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-        outline: none;
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.2);
-        background: var(--color-surface-secondary);
-    }
-
-    input:disabled,
-    select:disabled,
-    textarea:disabled {
-        background: var(--color-surface-secondary);
-        color: var(--color-text-muted);
-        border-color: var(--color-border-light);
-        cursor: not-allowed;
-        opacity: 0.6;
-    }
+    /* Form controls use unified .form-control class styles from index.scss */
 
     textarea {
         resize: vertical;

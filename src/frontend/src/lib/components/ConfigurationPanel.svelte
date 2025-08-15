@@ -25,7 +25,8 @@
     let newContractType = "ERC20";
     let newContractChainId = "31337";
     let newContractNetworkName = "anvil";
-    let newContractRpcType = "local";
+    let newContractRpcType = "custom"; // Changed from "local" to "custom"
+    let newContractCustomUrl = "http://127.0.0.1:8545"; // Add custom URL field
     let newContractStorageSlot = "1";
     let addingContract = false;
 
@@ -177,7 +178,9 @@
                 rpc_service: {
                     rpc_type: newContractRpcType,
                     canister_id: "7hfb6-caaaa-aaaar-qadga-cai", // Default EVM RPC canister
-                    custom_config: [],
+                    custom_config: newContractRpcType === "custom" 
+                        ? [["url", newContractCustomUrl]]
+                        : [],
                 },
                 contract_type:
                     newContractType === "ERC20"
@@ -204,7 +207,8 @@
             newContractType = "ERC20";
             newContractChainId = "31337";
             newContractNetworkName = "anvil";
-            newContractRpcType = "local";
+            newContractRpcType = "custom"; // Changed from "local" to "custom"
+            newContractCustomUrl = "http://127.0.0.1:8545"; // Reset custom URL
             newContractStorageSlot = "1";
             showAddContractForm = false;
 
@@ -528,6 +532,47 @@
                                         disabled={addingContract}
                                     />
                                 </div>
+
+                                <div class="input-group">
+                                    <label for="newContractRpcType"
+                                        >RPC Service Type</label
+                                    >
+                                    <select
+                                        id="newContractRpcType"
+                                        bind:value={newContractRpcType}
+                                        class="select-input"
+                                        disabled={addingContract}
+                                    >
+                                        <option value="default"
+                                            >Default (IC EVM RPC Service)</option
+                                        >
+                                        <option value="custom"
+                                            >Custom RPC URL</option
+                                        >
+                                    </select>
+                                    <div class="input-hint">
+                                        Use default for production, custom for local development
+                                    </div>
+                                </div>
+
+                                {#if newContractRpcType === "custom"}
+                                    <div class="input-group">
+                                        <label for="newContractCustomUrl"
+                                            >Custom RPC URL</label
+                                        >
+                                        <input
+                                            type="url"
+                                            id="newContractCustomUrl"
+                                            bind:value={newContractCustomUrl}
+                                            placeholder="http://127.0.0.1:8545"
+                                            class="text-input"
+                                            disabled={addingContract}
+                                        />
+                                        <div class="input-hint">
+                                            URL for custom Ethereum RPC endpoint
+                                        </div>
+                                    </div>
+                                {/if}
 
                                 <div class="input-group">
                                     <label for="newContractStorageSlot"

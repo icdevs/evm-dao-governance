@@ -284,7 +284,10 @@ module {
     };
 
     // Helper function to get RPC services based on chain and service configuration
-    private func getRpcServices(chain : MigrationTypes.Current.EthereumNetwork, rpc_service : MigrationTypes.Current.EthereumRPCService) : RpcServices {
+    private func getRpcServices(
+      chain : MigrationTypes.Current.EthereumNetwork,
+      rpc_service : MigrationTypes.Current.EthereumRPCService,
+    ) : RpcServices {
       switch (rpc_service.rpc_type) {
         case ("custom") {
           // Look for URL in custom_config
