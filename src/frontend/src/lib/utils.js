@@ -112,11 +112,16 @@ export function proposalToCandid(proposal) {
 
 // Network configurations
 export const NETWORKS = {
-    1: { name: 'Ethereum Mainnet', rpc: 'https://mainnet.infura.io/v3/', explorer: 'https://etherscan.io' },
-    5: { name: 'Goerli Testnet', rpc: 'https://goerli.infura.io/v3/', explorer: 'https://goerli.etherscan.io' },
-    11155111: { name: 'Sepolia Testnet', rpc: 'https://sepolia.infura.io/v3/', explorer: 'https://sepolia.etherscan.io' },
+    1: { name: 'Ethereum Mainnet', rpc: 'https://eth.llamarpc.com', explorer: 'https://etherscan.io' },
+    5: { name: 'Goerli Testnet', rpc: 'https://rpc.ankr.com/eth_goerli', explorer: 'https://goerli.etherscan.io' },
+    11155111: { name: 'Sepolia Testnet', rpc: 'https://rpc.ankr.com/eth_sepolia', explorer: 'https://sepolia.etherscan.io' },
     31337: { name: 'Anvil Local', rpc: 'http://127.0.0.1:8545', explorer: 'http://localhost:8545' },
-    137: { name: 'Polygon Mainnet', rpc: 'https://polygon-rpc.com/', explorer: 'https://polygonscan.com' }
+    137: { name: 'Polygon Mainnet', rpc: 'https://polygon-rpc.com/', explorer: 'https://polygonscan.com' },
+    80001: { name: 'Polygon Mumbai', rpc: 'https://rpc-mumbai.maticvigil.com', explorer: 'https://mumbai.polygonscan.com' },
+    42161: { name: 'Arbitrum One', rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io' },
+    421613: { name: 'Arbitrum Goerli', rpc: 'https://goerli-rollup.arbitrum.io/rpc', explorer: 'https://goerli.arbiscan.io' },
+    10: { name: 'Optimism', rpc: 'https://mainnet.optimism.io', explorer: 'https://optimistic.etherscan.io' },
+    420: { name: 'Optimism Goerli', rpc: 'https://goerli.optimism.io', explorer: 'https://goerli-optimism.etherscan.io' }
 };
 
 // Get network info

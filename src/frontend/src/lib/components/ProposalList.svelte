@@ -1,11 +1,8 @@
 <script>
     import { onMount } from "svelte";
-    import { backend } from "../canisters.js";
+    import { proposalsStore } from "../stores/proposals.js";
     import { getNetworkInfo } from "../utils.js";
 
-    let proposals = [];
-    let loading = true;
-    let error = null;
     let filter = "any"; // any, active, executed, expired, pending, rejected
 
     const filterOptions = [
@@ -17,33 +14,39 @@
         { value: "rejected", label: "Rejected" },
     ];
 
+    // Subscribe to proposals store
+    $: ({ proposals, loading, error } = $proposalsStore);
+
+    // Filter proposals based on selected filter
+    $: filteredProposals =
+        filter === "any"
+            ? proposals
+            : proposals.filter((proposal) => {
+                  switch (filter) {
+                      case "active":
+                          return proposal.isActive;
+                      case "executed":
+                          return proposal.isExecuted;
+                      case "pending":
+                          return proposal.isPending;
+                      case "expired":
+                          return proposal.isExpired;
+                      case "rejected":
+                          return proposal.isRejected;
+                      default:
+                          return true;
+                  }
+              });
+
     onMount(() => {
         loadProposals();
     });
 
     async function loadProposals() {
         try {
-            loading = true;
-            error = null;
-
-            const filters =
-                filter === "any" ? [] : [{ by_status: { [filter]: null } }];
-            const result = await backend.icrc149_get_proposals([], [], filters);
-
-            proposals = result.map((proposal) => ({
-                ...proposal,
-                createdAt: new Date(Number(proposal.created_at) / 1_000_000), // Convert from nanoseconds
-                deadline: new Date(Number(proposal.deadline) / 1_000_000),
-                isActive: proposal.status.hasOwnProperty("open"),
-                isExecuted: proposal.status.hasOwnProperty("executed"),
-                isFailed: proposal.status.hasOwnProperty("failed"),
-                isExecuting: proposal.status.hasOwnProperty("executing"),
-            }));
+            await proposalsStore.load();
         } catch (err) {
             console.error("Failed to load proposals:", err);
-            error = err.message || "Failed to load proposals";
-        } finally {
-            loading = false;
         }
     }
 
@@ -135,13 +138,13 @@
             <div class="spinner"></div>
             Loading proposals...
         </div>
-    {:else if proposals.length === 0}
+    {:else if filteredProposals.length === 0}
         <div class="empty-state">
             <p>No proposals found.</p>
         </div>
     {:else}
         <div class="proposals">
-            {#each proposals as proposal}
+            {#each filteredProposals as proposal}
                 <div class="proposal-card">
                     <div class="proposal-header">
                         <div class="proposal-id">
