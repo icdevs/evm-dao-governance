@@ -1,9 +1,11 @@
 <script>
     import { onMount } from "svelte";
+    import { browser } from "$app/environment";
     import { authStore } from "../stores/auth.js";
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { governanceStatsStore } from "../stores/governance.js";
+    import { balanceStore } from "../stores/balance.js";
     import { getCurrentChainId } from "../ethereum.js";
     import { backend } from "../canisters.js";
     import {
@@ -16,64 +18,84 @@
     } from "../blockchain.js";
     import { CopyButton, Spinner } from "./ui/index.js";
 
-    let canisterAddress = "";
-    let ethBalance = "0.0";
-    let tokenBalance = "0.0";
-    let isLoading = false;
-    let isInitialLoad = true;
-    let chainId = null;
-
     // Export the refresh function so parent can call it
     export let onRefresh = null;
 
-    // Export loading state so parent can show it
-    export { isLoading };
-
-    // Subscribe to auth and config stores
+    // Subscribe to stores
     $: isConnected = $authStore.isAuthenticated;
     $: isConfigured = $configStore.isConfigured;
     $: canisterId = $configStore.canisterId;
     $: contractAddress = $configStore.contractAddress;
+    $: balanceData = $balanceStore;
+
+    // Derive values from store
+    $: ethBalance = balanceData.ethBalance;
+    $: tokenBalance = balanceData.tokenBalance;
+    $: canisterAddress = balanceData.canisterAddress;
+    $: isLoading = balanceData.isLoading;
+    $: isInitialLoad = balanceData.isInitialLoad;
+    $: chainId = balanceData.chainId;
+
+    let initialized = false;
+    let previousConnected = false;
+    let previousConfigured = false;
+    let previousCanisterId = "";
 
     onMount(async () => {
-        if (isConnected) {
-            chainId = await getCurrentChainId();
+        if (isConnected && isConfigured) {
+            // Check if we should load balances
+            if (balanceStore.shouldLoad(balanceData)) {
+                console.log("Loading balances (initial)...");
+                try {
+                    await balanceStore.load(getBalancesWithChainId, false);
+                } catch (error) {
+                    console.error("Failed to load balances:", error);
+                    statusStore.add(`Failed to load balances: ${error.message}`, "error");
+                }
+            }
+        }
+
+        initialized = true;
+
+        // Expose refresh function to parent
+        if (onRefresh) {
+            onRefresh(() => refreshBalances());
         }
     });
 
-    async function loadBalances() {
-        console.log("Loading balances...");
-        isLoading = true;
-
+    async function refreshBalances() {
+        console.log("Refreshing balances (manual)...");
         try {
-            const balances = await getBalances();
-            console.log("Balances loaded:", balances);
-            ethBalance = balances.ethBalance || "0.0";
-            tokenBalance = balances.tokenBalance || "0.0";
-
-            // After first successful load, no longer initial load
-            isInitialLoad = false;
+            await balanceStore.load(getBalancesWithChainId, false);
         } catch (error) {
-            console.error("Failed to load balances:", error);
-            statusStore.add(
-                `Failed to load balances: ${error.message}`,
-                "error"
-            );
-        } finally {
-            isLoading = false;
+            console.error("Failed to refresh balances:", error);
+            statusStore.add(`Failed to refresh balances: ${error.message}`, "error");
         }
+    }
+
+    async function getBalancesWithChainId() {
+        const currentChainId = await getCurrentChainId();
+        const balances = await getBalances();
+        return {
+            ...balances,
+            chainId: currentChainId,
+            canisterAddress: balances.canisterAddress || await getCanisterEthereumAddress(canisterId)
+        };
     }
 
     async function getBalances() {
         if (!canisterId || !contractAddress) {
             console.log("Missing configuration for balance loading");
-            return { ethBalance: "0.0", tokenBalance: "0.0" };
+            return { 
+                ethBalance: "0.0", 
+                tokenBalance: "0.0",
+                canisterAddress: ""
+            };
         }
 
         try {
             // Get contract configuration from backend to get the correct chain ID
             const contracts = await backend.icrc149_get_snapshot_contracts();
-            console.log("Available contracts:", contracts);
 
             // Find the configuration for our selected contract
             const contractConfig = contracts.find(
@@ -83,102 +105,80 @@
             );
 
             if (!contractConfig) {
-                console.log(
-                    "Contract configuration not found for address:",
-                    contractAddress
-                );
-                return { ethBalance: "0.0", tokenBalance: "0.0" };
+                console.log("Contract configuration not found for address:", contractAddress);
+                return { 
+                    ethBalance: "0.0", 
+                    tokenBalance: "0.0",
+                    canisterAddress: ""
+                };
             }
 
             const [configAddress, config] = contractConfig;
             const actualContractAddress = config.contract_address;
             const configChainId = config.chain.chain_id;
 
-            console.log("Using contract config:", {
-                address: actualContractAddress,
-                chainId: configChainId,
-                networkName: config.chain.network_name,
-            });
-
-            // Use the chain ID from contract config
-            chainId = configChainId;
-
             // Get canister address
-            if (!canisterAddress) {
-                canisterAddress = await getCanisterEthereumAddress(canisterId);
-            }
-
-            console.log(
-                "Getting balances for canister address:",
-                canisterAddress,
-                "on chain:",
-                chainId
-            );
+            const canisterAddr = await getCanisterEthereumAddress(canisterId);
 
             // Get ETH balance using the correct chain ID
-            const ethBal = await getEthBalance(canisterAddress, configChainId);
-            console.log("ETH balance:", ethBal);
+            const ethBal = await getEthBalance(canisterAddr, configChainId);
 
             // Get token balance using the actual contract address from config
             const tokenBal = await getTokenBalance(
-                canisterAddress,
+                canisterAddr,
                 actualContractAddress,
                 configChainId
             );
-            console.log("Token balance:", tokenBal);
 
             return {
                 ethBalance: ethBal || "0.0",
                 tokenBalance: tokenBal || "0.0",
+                canisterAddress: canisterAddr
             };
         } catch (error) {
             console.error("Error getting balances:", error);
-            return { ethBalance: "0.0", tokenBalance: "0.0" };
+            return { 
+                ethBalance: "0.0", 
+                tokenBalance: "0.0",
+                canisterAddress: ""
+            };
         }
+    }
+
+    // Watch for auth and config changes to trigger refresh
+    $: {
+        if (initialized && isConnected && isConfigured) {
+            const connectionChanged = !previousConnected && isConnected;
+            const configChanged = !previousConfigured && isConfigured;
+            const canisterChanged = previousCanisterId !== canisterId && canisterId;
+
+            if (connectionChanged || configChanged || canisterChanged) {
+                // Use silent loading if we already have data and it's just a reconnection
+                const useSilentLoading = balanceData.lastUpdated && connectionChanged;
+                
+                if (useSilentLoading) {
+                    console.log("Updating balances silently...");
+                    balanceStore.load(getBalancesWithChainId, true).catch(error => {
+                        console.error("Silent balance update failed:", error);
+                    });
+                } else {
+                    refreshBalances();
+                }
+            }
+        }
+
+        // Clear balance data when user disconnects
+        if (previousConnected && !isConnected) {
+            balanceStore.clear();
+        }
+
+        previousConnected = isConnected;
+        previousConfigured = isConfigured;
+        previousCanisterId = canisterId || "";
     }
 
     function formatAddressLocal(address) {
         return formatAddress(address);
-    }
-
-    // Initialize balances when component mounts and conditions are met
-    let initialized = false;
-
-    onMount(async () => {
-        if (isConnected) {
-            chainId = await getCurrentChainId();
-            if (isConfigured) {
-                loadBalances();
-            }
-        }
-        initialized = true;
-
-        // Expose refresh function to parent
-        if (onRefresh) {
-            onRefresh(loadBalances);
-        }
-    });
-
-    // Watch for auth and config changes to trigger refresh (prevent loops)
-    let previousConnected = false;
-    let previousConfigured = false;
-    let previousCanisterId = "";
-
-    $: {
-        // Only refresh if we have meaningful state changes and component is initialized
-        if (initialized && isConnected && isConfigured) {
-            const connectionChanged = !previousConnected && isConnected;
-            const configChanged = !previousConfigured && isConfigured;
-            const canisterChanged =
-                previousCanisterId !== canisterId && canisterId;
-
-            if (connectionChanged || configChanged || canisterChanged) {
-                loadBalances();
-            }
-        }
-        previousConnected = isConnected;
-        previousConfigured = isConfigured;
-        previousCanisterId = canisterId || "";
     }
 </script>
 

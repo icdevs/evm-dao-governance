@@ -1,5 +1,6 @@
 <script>
     import { onMount } from "svelte";
+    import { goto } from "$app/navigation";
     import { proposalsStore } from "../stores/proposals.js";
     import { getNetworkInfo } from "../utils.js";
 
@@ -236,12 +237,12 @@
                                     .slice(0, 10)}...
                             </span>
 
-                            <a
-                                href="/proposal?id={proposal.id}"
+                            <button
                                 class="view-proposal-btn"
+                                on:click={() => goto(`/proposal?id=${proposal.id}`)}
                             >
                                 View Details
-                            </a>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -516,9 +517,11 @@
         background: var(--color-primary, #007bff);
         color: white;
         text-decoration: none;
+        border: none;
         border-radius: 4px;
         font-size: 0.85rem;
         font-weight: 600;
+        cursor: pointer;
         transition: background-color 0.2s;
         display: inline-block;
     }

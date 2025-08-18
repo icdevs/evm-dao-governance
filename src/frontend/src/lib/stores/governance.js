@@ -17,7 +17,23 @@ function createGovernanceStatsStore() {
         subscribe,
         
         // Load governance statistics
-        load: async () => {
+        load: async (forceReload = false) => {
+            // Check if we should skip loading
+            let currentState;
+            const unsubscribe = subscribe(state => currentState = state);
+            unsubscribe();
+            
+            // Skip loading if data exists and not forcing reload
+            if (!forceReload && currentState.lastUpdated && 
+                currentState.totalVotingPower !== '-' && 
+                currentState.memberCount !== '-' && 
+                !currentState.loading) {
+                return {
+                    totalVotingPower: currentState.totalVotingPower,
+                    memberCount: currentState.memberCount
+                };
+            }
+            
             update(state => ({ ...state, loading: true, error: null }));
             
             try {
@@ -75,15 +91,3 @@ function createGovernanceStatsStore() {
 }
 
 export const governanceStatsStore = createGovernanceStatsStore();
-
-// Derived store that auto-loads stats when config changes
-export const autoGovernanceStats = derived(
-    [governanceStatsStore, configStore], 
-    ([$stats, $config], set) => {
-        if ($config.isConfigured && $config.contractAddress && !$stats.lastUpdated && !$stats.loading) {
-            // Auto-load stats when configuration is available
-            governanceStatsStore.load().catch(console.error);
-        }
-        set($stats);
-    }
-);

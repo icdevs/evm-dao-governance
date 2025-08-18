@@ -14,7 +14,16 @@ function createProposalsStore() {
         subscribe,
         
         // Load proposals from backend
-        load: async (filters = []) => {
+        load: async (filters = [], forceReload = false) => {
+            // Skip loading if data is already loaded and not forcing reload
+            let currentState;
+            const unsubscribe = subscribe(state => currentState = state);
+            unsubscribe();
+            
+            if (!forceReload && currentState.proposals.length > 0 && !currentState.loading) {
+                return currentState.proposals;
+            }
+            
             update(state => ({ ...state, loading: true, error: null }));
             
             try {

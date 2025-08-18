@@ -37,7 +37,7 @@
                 </div>
 
                 {#if $configStore.isConfigured}
-                    <a href="/" class="back-btn">
+                    <button class="back-btn" on:click={() => goto('/')}>
                         <svg
                             viewBox="0 0 24 24"
                             fill="none"
@@ -59,7 +59,7 @@
                             />
                         </svg>
                         Back to Dashboard
-                    </a>
+                    </button>
                 {/if}
             </div>
         </header>
@@ -240,6 +240,7 @@
         border-radius: 12px;
         font-weight: 600;
         font-size: 0.95rem;
+        cursor: pointer;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
         flex-shrink: 0;

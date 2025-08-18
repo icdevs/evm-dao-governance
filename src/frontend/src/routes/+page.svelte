@@ -13,9 +13,9 @@
     import { proposalsStore, proposalStats } from "$lib/stores/proposals.js";
     import { autoUserStats } from "$lib/stores/userStats.js";
     import {
-        autoGovernanceStats,
         governanceStatsStore,
     } from "$lib/stores/governance.js";
+    import { contractsStore } from "$lib/stores/contracts.js";
     import { backend } from "$lib/canisters.js";
 
     let initialized = false;
@@ -25,18 +25,19 @@
     let dashboardRefreshFn = null;
     let isDashboardLoading = false;
 
-    // Governance contract management
-    let availableContracts = [];
-    let selectedContract = "";
-    let contractsLoading = false;
     let showContractDropdown = false;
     let isGlobalRefreshing = false;
-    let contractsLoadAttempted = false;
 
     // Subscribe to proposal statistics
     $: stats = $proposalStats;
     $: userStats = $autoUserStats;
-    $: governanceStats = $autoGovernanceStats;
+    $: governanceStats = $governanceStatsStore;
+    
+    // Subscribe to contracts store
+    $: contracts = $contractsStore;
+    $: availableContracts = contracts.contracts;
+    $: selectedContract = contracts.selectedContract;
+    $: contractsLoading = contracts.loading;
 
     // Redirect to config page if not configured
     $: if (initialized && !$configStore.isConfigured) {
@@ -49,9 +50,26 @@
             configStore.load();
             initialized = true;
 
-            // Load proposals when app initializes
+            // Only load data initially if configured and not already loaded
             if ($configStore.isConfigured) {
-                proposalsStore.load();
+                // Load proposals if not already loaded
+                if ($proposalsStore.proposals.length === 0 && !$proposalsStore.loading) {
+                    proposalsStore.load();
+                }
+                
+                // Load governance stats if not already loaded
+                if (!$governanceStatsStore.lastUpdated && !$governanceStatsStore.loading) {
+                    governanceStatsStore.load().catch((error) => {
+                        console.error("Failed to load governance stats:", error);
+                    });
+                }
+                
+                // Load contracts if not already loaded
+                if (!$contractsStore.lastUpdated && !$contractsStore.loading) {
+                    contractsStore.load().catch((error) => {
+                        console.error("Failed to load contracts:", error);
+                    });
+                }
             }
         }
     });
@@ -61,22 +79,23 @@
         console.log("Proposal created:", id, proposal);
 
         // Refresh proposals to include the new one
-        proposalsStore.load();
+        proposalsStore.load([], true);
 
         // Refresh governance stats as well
-        governanceStatsStore.load();
+        governanceStatsStore.load(true);
 
         // Switch back to proposals tab to see the new proposal
         activeTab = "proposals";
     }
 
-    // Auto-load proposals when configuration is complete (only once)
+    // Auto-load proposals when configuration is complete (only if not already loaded)
     let proposalsLoadAttempted = false;
     $: if (
         initialized &&
         $configStore.isConfigured &&
         !proposalsLoadAttempted &&
-        $proposalsStore.proposals.length === 0
+        $proposalsStore.proposals.length === 0 &&
+        !$proposalsStore.loading
     ) {
         proposalsLoadAttempted = true;
         proposalsStore.load().catch((error) => {
@@ -85,10 +104,19 @@
             proposalsLoadAttempted = false;
         });
 
-        // Also load governance stats
-        governanceStatsStore.load().catch((error) => {
-            console.error("Failed to load governance stats:", error);
-        });
+        // Also load governance stats only if not already loaded
+        if (!$governanceStatsStore.lastUpdated) {
+            governanceStatsStore.load().catch((error) => {
+                console.error("Failed to load governance stats:", error);
+            });
+        }
+        
+        // Also load contracts only if not already loaded
+        if (!$contractsStore.lastUpdated) {
+            contractsStore.load().catch((error) => {
+                console.error("Failed to load contracts:", error);
+            });
+        }
     }
 
     // Handle comprehensive refresh of all data
@@ -104,18 +132,19 @@
             }
 
             // Refresh proposals
-            await proposalsStore.load().catch((error) => {
+            await proposalsStore.load([], true).catch((error) => {
                 console.error("Failed to refresh proposals:", error);
             });
 
             // Refresh governance stats
-            await governanceStatsStore.load().catch((error) => {
+            await governanceStatsStore.load(true).catch((error) => {
                 console.error("Failed to refresh governance stats:", error);
             });
 
-            // Reload available contracts (reset flag to allow reload)
-            contractsLoadAttempted = false;
-            await loadAvailableContracts();
+            // Refresh contracts
+            await contractsStore.load(true).catch((error) => {
+                console.error("Failed to refresh contracts:", error);
+            });
         } finally {
             isGlobalRefreshing = false;
         }
@@ -130,32 +159,6 @@
         dashboardRefreshFn = refreshFn;
     }
 
-    // Load available governance contracts
-    async function loadAvailableContracts() {
-        if (!$configStore.isConfigured || contractsLoading) return;
-
-        try {
-            contractsLoading = true;
-            const contracts = await backend.icrc149_get_snapshot_contracts();
-            availableContracts = contracts.map(([address, config]) => ({
-                address,
-                config,
-                label: `${address.slice(0, 6)}...${address.slice(-4)} - ${config.contract_type === "ERC20" ? "ERC20" : "ERC721"}`,
-            }));
-
-            // Set default selection if none selected
-            if (!selectedContract && availableContracts.length > 0) {
-                selectedContract = availableContracts[0].address;
-            }
-
-            contractsLoadAttempted = true;
-        } catch (error) {
-            console.error("Failed to load contracts:", error);
-        } finally {
-            contractsLoading = false;
-        }
-    }
-
     // Handle contract selection change
     function handleContractChange() {
         console.log("Selected contract changed to:", selectedContract);
@@ -164,15 +167,15 @@
         handleDashboardRefresh();
 
         // Refresh proposals with new contract context
-        proposalsStore.load();
+        proposalsStore.load([], true);
 
         // Refresh governance stats
-        governanceStatsStore.load();
+        governanceStatsStore.load(true);
     }
 
     // Select contract and close dropdown
     function selectContract(address) {
-        selectedContract = address;
+        contractsStore.setSelectedContract(address);
         showContractDropdown = false;
         handleContractChange();
     }
@@ -185,16 +188,6 @@
         ) {
             showContractDropdown = false;
         }
-    }
-
-    // Load contracts when configuration is ready (only once)
-    $: if (
-        initialized &&
-        $configStore.isConfigured &&
-        !contractsLoadAttempted &&
-        availableContracts.length === 0
-    ) {
-        loadAvailableContracts();
     }
 </script>
 
@@ -375,9 +368,9 @@
                         </div>
                     {/if}
 
-                    <a
-                        href="/config"
+                    <button
                         class="config-btn-inline"
+                        on:click={() => goto('/config')}
                         title="Configuration"
                     >
                         <svg
@@ -400,7 +393,7 @@
                                 stroke-width="2"
                             />
                         </svg>
-                    </a>
+                    </button>
                 </div>
             </div>
 
@@ -1255,6 +1248,7 @@
         border: 1px solid var(--color-border);
         border-radius: 6px;
         color: var(--color-text-muted);
+        cursor: pointer;
         text-decoration: none;
         transition: all 0.2s ease;
     }
