@@ -2,19 +2,8 @@
 // This version works with ethers v6 from CDN without modules
 
 class MetaMaskBalanceProofGenerator {
-  constructor() {
-    if (!window.ethereum) {
-      throw new Error('MetaMask not found. Please install MetaMask to use this feature.');
-    }
-    // Use the global ethers from CDN (ethers v6 syntax)
-    if (typeof ethers === 'undefined') {
-      throw new Error('Ethers library not loaded. Please ensure ethers.js is included.');
-    }
-    this.provider = new ethers.BrowserProvider(window.ethereum);
-  }
-
-  static isMetaMaskAvailable() {
-    return typeof window !== 'undefined' && !!window.ethereum;
+  constructor(provider) {
+    this.provider = provider;
   }
 
   async connectWallet() {
@@ -881,7 +870,12 @@ class MetaMaskBalanceProofGenerator {
 }
 
 // Utility functions
-async function generateMetaMaskERC20Proof(contractAddress, blockTag = "latest", slotIndex = 0) {
+async function generateMetaMaskERC20Proof(
+  provider,
+  contractAddress,
+  blockTag = "latest",
+  slotIndex = 0
+) {
   const generator = new MetaMaskBalanceProofGenerator();
   return generator.generateERC20BalanceProof({
     contractAddress,
@@ -890,8 +884,14 @@ async function generateMetaMaskERC20Proof(contractAddress, blockTag = "latest", 
   });
 }
 
-async function generateMetaMaskERC721Proof(contractAddress, tokenId, blockTag = "latest", slotIndex = 2) {
-  const generator = new MetaMaskBalanceProofGenerator();
+async function generateMetaMaskERC721Proof(
+  provider,
+  contractAddress,
+  tokenId,
+  blockTag = "latest",
+  slotIndex = 2
+) {
+  const generator = new MetaMaskBalanceProofGenerator(provider);
   return generator.generateERC721OwnershipProof({
     contractAddress,
     tokenId,

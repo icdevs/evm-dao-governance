@@ -1,11 +1,10 @@
 <script>
     import { createEventDispatcher } from "svelte";
-    import { authStore } from "../stores/auth.js";
-    import { createProposal } from '../votingAPI.js';
-    import {
-        isValidAddress,
-        isValidAmount,
-    } from "../utils.js";
+    import { configStore } from "../stores/config.js";
+    import { walletStore } from "../stores/wallet.js";
+    import { backend } from "../canisters.js";
+    import { createProposal } from "../votingAPI.js";
+    import { isValidAddress } from "../utils.js";
 
     const dispatch = createEventDispatcher();
 
@@ -41,9 +40,33 @@
     // General fields
     let metadata = "";
 
+    // Subscribe to stores
+    $: config = $configStore;
+    $: currentProvider = $walletStore.provider;
+    $: currentSigner = $walletStore.signer;
+    $: currentChainId = $walletStore.chainId;
+    $: isAuthenticated = $walletStore.state === "connected";
+
+    // Check if all dependencies are available
+    $: hasAllDependencies = !!(
+        isAuthenticated &&
+        $walletStore.userAddress &&
+        config.contractAddress &&
+        currentProvider &&
+        currentSigner &&
+        currentChainId &&
+        backend
+    );
+
     async function handleSubmit() {
-        if (!$authStore.isAuthenticated) {
+        if (!isAuthenticated) {
             error = "Please connect your wallet first";
+            return;
+        }
+
+        if (!hasAllDependencies) {
+            error =
+                "Missing required dependencies. Please ensure wallet is connected and configuration is complete.";
             return;
         }
 
@@ -75,8 +98,9 @@
                     proposalData.ethData = ethData;
                     proposalData.ethGasLimit = ethGasLimit;
                     proposalData.ethMaxFeePerGas = ethMaxFeePerGas;
-                    proposalData.ethMaxPriorityFeePerGas = ethMaxPriorityFeePerGas;
-                    
+                    proposalData.ethMaxPriorityFeePerGas =
+                        ethMaxPriorityFeePerGas;
+
                     // ERC20 helper fields
                     if (erc20Mode) {
                         proposalData.erc20Mode = true;
@@ -94,8 +118,18 @@
                     break;
             }
 
-            // Create proposal using votingAPI
-            const result = await createProposal(proposalData);
+            // Prepare dependencies object for votingAPI
+            const dependencies = {
+                backendActor: backend,
+                userAddress: auth.userAddress,
+                contractAddress: config.contractAddress,
+                chainId: currentChainId,
+                signer: currentSigner,
+                provider: currentProvider,
+            };
+
+            // Create proposal using votingAPI with dependencies
+            const result = await createProposal(proposalData, dependencies);
 
             success = `Proposal created successfully! ID: ${result.id}`;
             dispatch("proposalCreated", result);
@@ -177,6 +211,15 @@
 <div class="proposal-form">
     <h2>Create New Proposal</h2>
 
+    {#if !hasAllDependencies}
+        <div class="alert alert-warning">
+            <p>
+                Please ensure wallet is connected and configuration is complete
+                before creating proposals.
+            </p>
+        </div>
+    {/if}
+
     {#if error}
         <div class="alert alert-error">
             {error}
@@ -197,7 +240,7 @@
                 id="proposalType"
                 class="form-control"
                 bind:value={proposalType}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !hasAllDependencies}
             >
                 <option value="motion"
                     >Motion (Text-only governance decision)</option
@@ -217,7 +260,7 @@
                     bind:value={motionText}
                     placeholder="Describe the motion for the DAO to vote on..."
                     rows="4"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !hasAllDependencies}
                     required
                 ></textarea>
             </div>
@@ -235,7 +278,7 @@
                             type="checkbox"
                             bind:checked={erc20Mode}
                             on:change={toggleErc20Mode}
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !hasAllDependencies}
                         />
                         Use ERC20 Token Transfer Helper
                     </label>
@@ -253,7 +296,7 @@
                                 type="text"
                                 bind:value={ethTo}
                                 placeholder="0x..."
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !hasAllDependencies}
                                 required
                             />
                         </div>
@@ -266,7 +309,7 @@
                                 type="text"
                                 bind:value={erc20Recipient}
                                 placeholder="0x..."
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !hasAllDependencies}
                                 required
                             />
                         </div>
@@ -281,7 +324,8 @@
                                     step="any"
                                     min="0"
                                     placeholder="1.0"
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting ||
+                                        !hasAllDependencies}
                                     required
                                 />
                             </div>
@@ -295,7 +339,8 @@
                                     bind:value={erc20Decimals}
                                     min="0"
                                     max="18"
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting ||
+                                        !hasAllDependencies}
                                 />
                             </div>
                         </div>
@@ -309,7 +354,7 @@
                             type="text"
                             bind:value={ethTo}
                             placeholder="0x..."
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !hasAllDependencies}
                             required
                         />
                     </div>
@@ -321,7 +366,7 @@
                             type="number"
                             bind:value={ethValue}
                             min="0"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !hasAllDependencies}
                         />
                     </div>
 
@@ -332,7 +377,7 @@
                             bind:value={ethData}
                             placeholder="0x... (leave empty for simple transfer)"
                             rows="3"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !hasAllDependencies}
                         ></textarea>
                     </div>
                 {/if}
@@ -348,7 +393,7 @@
                                 type="number"
                                 bind:value={ethGasLimit}
                                 min="21000"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !hasAllDependencies}
                             />
                         </div>
 
@@ -361,7 +406,7 @@
                                 type="number"
                                 bind:value={ethMaxFeePerGas}
                                 min="0"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !hasAllDependencies}
                             />
                         </div>
 
@@ -374,7 +419,7 @@
                                 type="number"
                                 bind:value={ethMaxPriorityFeePerGas}
                                 min="0"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !hasAllDependencies}
                             />
                         </div>
                     </div>
@@ -394,7 +439,7 @@
                         type="text"
                         bind:value={icpCanister}
                         placeholder="rdmx6-jaaaa-aaaaa-aaadq-cai"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !hasAllDependencies}
                         required
                     />
                 </div>
@@ -406,7 +451,7 @@
                         type="text"
                         bind:value={icpMethod}
                         placeholder="transfer"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !hasAllDependencies}
                         required
                     />
                 </div>
@@ -418,7 +463,7 @@
                         bind:value={icpArgs}
                         placeholder="4449444c..."
                         rows="3"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !hasAllDependencies}
                     ></textarea>
                 </div>
 
@@ -429,7 +474,7 @@
                         type="number"
                         bind:value={icpCycles}
                         min="0"
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !hasAllDependencies}
                     />
                 </div>
             </div>
@@ -443,7 +488,7 @@
                 bind:value={metadata}
                 placeholder="Provide additional context for this proposal..."
                 rows="3"
-                disabled={isSubmitting}
+                disabled={isSubmitting || !hasAllDependencies}
             ></textarea>
         </div>
 
@@ -452,10 +497,12 @@
             <button
                 type="submit"
                 class="submit-btn"
-                disabled={isSubmitting || !$authStore.isAuthenticated}
+                disabled={isSubmitting || !hasAllDependencies}
             >
                 {#if isSubmitting}
                     Creating Proposal...
+                {:else if !hasAllDependencies}
+                    Connect Wallet & Configure
                 {:else}
                     Create Proposal
                 {/if}
@@ -464,4 +511,202 @@
     </form>
 </div>
 
-<!-- CSS styles remain the same as in original file -->
+<style>
+    .proposal-form {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+    }
+
+    h2 {
+        margin: 0 0 2rem 0;
+        color: var(--color-text-primary);
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+
+    h3 {
+        margin: 0 0 1.5rem 0;
+        color: var(--color-text-primary);
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+
+    h4 {
+        margin: 0 0 1rem 0;
+        color: var(--color-text-secondary);
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    .alert {
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        font-weight: 500;
+    }
+
+    .alert-error {
+        background: var(--color-danger-light);
+        color: var(--color-danger);
+        border: 1px solid rgba(255, 71, 87, 0.3);
+    }
+
+    .alert-success {
+        background: var(--color-success-light);
+        color: var(--color-success);
+        border: 1px solid rgba(0, 255, 136, 0.3);
+    }
+
+    .alert-warning {
+        background: var(--color-warning-light);
+        color: var(--color-warning);
+        border: 1px solid rgba(255, 184, 0, 0.3);
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+
+    label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        font-size: 0.9rem;
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+        margin: 0;
+    }
+
+    .form-control,
+    input,
+    select,
+    textarea {
+        width: 100%;
+        padding: 0.75rem;
+        background: var(--color-surface-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        color: var(--color-text-primary);
+        font-size: 0.9rem;
+        transition: all 0.3s ease;
+    }
+
+    .form-control:focus,
+    input:focus,
+    select:focus,
+    textarea:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.2);
+    }
+
+    .form-control:disabled,
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
+        background: var(--color-bg-secondary);
+        color: var(--color-text-muted);
+        border-color: var(--color-border-light);
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .eth-transaction-section,
+    .icp-call-section {
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-light);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .erc20-helper {
+        background: rgba(0, 210, 255, 0.05);
+        border: 1px solid rgba(0, 210, 255, 0.2);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-top: 1rem;
+    }
+
+    .gas-settings {
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--color-border-light);
+    }
+
+    .form-actions {
+        display: flex;
+        justify-content: center;
+        margin-top: 2rem;
+        padding-top: 2rem;
+        border-top: 1px solid var(--color-border-light);
+    }
+
+    .submit-btn {
+        padding: 1rem 2rem;
+        background: linear-gradient(
+            135deg,
+            var(--color-primary) 0%,
+            var(--color-primary-dark) 100%
+        );
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 16px rgba(0, 210, 255, 0.3);
+        min-width: 200px;
+    }
+
+    .submit-btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 210, 255, 0.4);
+    }
+
+    .submit-btn:disabled {
+        background: var(--color-text-muted);
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+        opacity: 0.6;
+    }
+
+    @media (max-width: 768px) {
+        .proposal-form {
+            padding: 1.5rem;
+        }
+
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+
+        .eth-transaction-section,
+        .icp-call-section {
+            padding: 1rem;
+        }
+
+        .erc20-helper {
+            padding: 1rem;
+        }
+    }
+</style>

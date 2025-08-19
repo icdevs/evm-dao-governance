@@ -1,21 +1,28 @@
 <script>
     import { onMount } from "svelte";
-    import { authStore } from "../stores/auth.js";
+    import { walletStore } from "../stores/wallet.js";
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { balanceStore } from "../stores/balance.js";
-    import { getUserTokenBalance } from '../storageUtils.js';
-    import { getCurrentChainId } from '../stores/wallet.js';
+    import { getUserTokenBalance } from "../storageUtils.js";
 
     // Export the refresh function so parent can call it
     export let onRefresh = null;
-    $: isConnected = $authStore.isAuthenticated;
-    $: isConfigured = $configStore.isConfigured;
-    $: canisterId = $configStore.canisterId;
-    $: contractAddress = $configStore.contractAddress;
+
+    // Store subscriptions
+    $: walletData = $walletStore;
+    $: configData = $configStore;
     $: balanceData = $balanceStore;
 
-    // Derive values from store
+    // Derive reactive values
+    $: isConnected = walletData.state === "connected";
+    $: isConfigured = configData.isConfigured;
+    $: canisterId = configData.canisterId;
+    $: contractAddress = configData.contractAddress;
+    $: walletAddress = walletData.userAddress;
+    $: chainId = walletData.chainId;
+
+    // Balance data
     $: ethBalance = balanceData.ethBalance;
     $: tokenBalance = balanceData.tokenBalance;
     $: isLoading = balanceData.isLoading;
@@ -29,13 +36,16 @@
     onMount(async () => {
         if (isConnected && isConfigured) {
             // Check if we should load balances
-            if (balanceStore.shouldLoad(balanceData)) {
+            if (shouldLoadBalances(balanceData)) {
                 console.log("Loading balances (initial)...");
                 try {
                     await balanceStore.load(getBalancesWithChainId, false);
                 } catch (error) {
                     console.error("Failed to load balances:", error);
-                    statusStore.add(`Failed to load balances: ${error.message}`, "error");
+                    statusStore.add(
+                        `Failed to load balances: ${error.message}`,
+                        "error"
+                    );
                 }
             }
         }
@@ -48,51 +58,76 @@
         }
     });
 
+    // Helper function to check if we should load balances
+    function shouldLoadBalances(currentBalanceData) {
+        if (!currentBalanceData.lastUpdated) return true;
+        if (
+            currentBalanceData.ethBalance === "0.0" &&
+            currentBalanceData.tokenBalance === "0.0"
+        )
+            return true;
+
+        const age = Date.now() - currentBalanceData.lastUpdated.getTime();
+        return age > 60000; // 1 minute
+    }
+
     async function refreshBalances() {
         console.log("Refreshing balances (manual)...");
         try {
             await balanceStore.load(getBalancesWithChainId, false);
         } catch (error) {
             console.error("Failed to refresh balances:", error);
-            statusStore.add(`Failed to refresh balances: ${error.message}`, "error");
+            statusStore.add(
+                `Failed to refresh balances: ${error.message}`,
+                "error"
+            );
         }
     }
 
     async function getBalancesWithChainId() {
-        const currentChainId = getCurrentChainId();
         const balances = await getBalances();
         return {
             ...balances,
-            chainId: currentChainId,
-            canisterAddress: balances.canisterAddress || await getCanisterEthereumAddress(canisterId)
+            canisterAddress:
+                balances.canisterAddress ||
+                (await getCanisterEthereumAddress(canisterId)),
         };
     }
 
     async function getBalances() {
-        if (!canisterId || !contractAddress) {
+        if (!canisterId || !contractAddress || !walletAddress) {
             console.log("Missing configuration for balance loading");
-            return { 
-                ethBalance: "0.0", 
+            return {
+                ethBalance: "0.0",
                 tokenBalance: "0.0",
-                canisterAddress: ""
+                canisterAddress: "",
             };
         }
 
         try {
-            const tokenBal = await getUserTokenBalance(contractAddress, $authStore.walletAddress);
+            const tokenBal = await getUserTokenBalance(
+                contractAddress,
+                walletAddress
+            );
             return {
                 ethBalance: "0.0", // If you want ETH, add similar logic
                 tokenBalance: tokenBal.toString(),
-                canisterAddress: contractAddress
+                canisterAddress: contractAddress,
             };
         } catch (error) {
             console.error("Error getting balances:", error);
-            return { 
-                ethBalance: "0.0", 
+            return {
+                ethBalance: "0.0",
                 tokenBalance: "0.0",
-                canisterAddress: ""
+                canisterAddress: "",
             };
         }
+    }
+
+    // Get canister Ethereum address (placeholder - would need actual implementation)
+    async function getCanisterEthereumAddress(canisterId) {
+        // This would be implemented based on your canister setup
+        return contractAddress || "";
     }
 
     // Watch for auth and config changes to trigger refresh
@@ -100,17 +135,24 @@
         if (initialized && isConnected && isConfigured) {
             const connectionChanged = !previousConnected && isConnected;
             const configChanged = !previousConfigured && isConfigured;
-            const canisterChanged = previousCanisterId !== canisterId && canisterId;
+            const canisterChanged =
+                previousCanisterId !== canisterId && canisterId;
 
             if (connectionChanged || configChanged || canisterChanged) {
                 // Use silent loading if we already have data and it's just a reconnection
-                const useSilentLoading = balanceData.lastUpdated && connectionChanged;
-                
+                const useSilentLoading =
+                    balanceData.lastUpdated && connectionChanged;
+
                 if (useSilentLoading) {
                     console.log("Updating balances silently...");
-                    balanceStore.load(getBalancesWithChainId, true).catch(error => {
-                        console.error("Silent balance update failed:", error);
-                    });
+                    balanceStore
+                        .load(getBalancesWithChainId, true)
+                        .catch((error) => {
+                            console.error(
+                                "Silent balance update failed:",
+                                error
+                            );
+                        });
                 } else {
                     refreshBalances();
                 }

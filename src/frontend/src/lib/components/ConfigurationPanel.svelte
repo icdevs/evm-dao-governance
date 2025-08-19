@@ -1,6 +1,5 @@
 <script>
     import { configStore } from "../stores/config.js";
-    import { } from "../votingAPI.js";
     import { statusStore } from "../stores/status.js";
     import { backend } from "../canisters.js";
     import { onMount } from "svelte";
@@ -11,6 +10,9 @@
     export let onConfigurationComplete = null; // Callback for when config is complete
 
     const dispatch = createEventDispatcher();
+
+    // Store subscriptions
+    $: configData = $configStore;
 
     let canisterId = "";
     let environment = "local";
@@ -39,15 +41,28 @@
             // Wait for config to load
             await configStore.load();
 
-            // Load current config values
-            const currentConfig = $configStore;
-            canisterId = currentConfig.canisterId || "";
-            environment = currentConfig.environment || "local";
-            contractAddress = currentConfig.contractAddress || "";
+            // Load current config values from store
+            canisterId = configData.canisterId || "";
+            environment = configData.environment || "local";
+            contractAddress = configData.contractAddress || "";
 
             configLoaded = true;
         }
     });
+
+    // Reactive statement to update local values when store changes
+    $: if (configLoaded) {
+        // Only update if values have actually changed to avoid loops
+        if (canisterId !== configData.canisterId) {
+            canisterId = configData.canisterId || "";
+        }
+        if (environment !== configData.environment) {
+            environment = configData.environment || "local";
+        }
+        if (contractAddress !== configData.contractAddress) {
+            contractAddress = configData.contractAddress || "";
+        }
+    }
 
     async function loadAvailableContracts() {
         if (!canisterId) {
@@ -258,13 +273,16 @@
     }
 
     async function saveConfiguration() {
-        // Save the configuration
+        // Save the configuration using individual updateField calls
         configStore.updateField("canisterId", canisterId);
         configStore.updateField("environment", environment);
         configStore.updateField("contractAddress", contractAddress);
-        configStore.checkConfiguration();
+        
+        // The store will automatically calculate isConfigured
+        
         try {
-            await initializeCanister(canisterId, environment);
+            // Initialize canister if needed
+            // await initializeCanister(canisterId, environment);
             statusStore.add("Voting interface initialized!", "success");
         } catch (e) {
             statusStore.add(`Voting interface initialization failed: ${e.message}`, "error");
@@ -673,543 +691,3 @@
         </div>
     {/if}
 </div>
-
-<style>
-    .config-panel {
-        background: linear-gradient(
-            135deg,
-            var(--color-surface) 0%,
-            var(--color-surface-secondary) 100%
-        );
-        border: 1px solid var(--color-border);
-        border-radius: 16px;
-        margin-bottom: 2rem;
-        overflow: hidden;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        backdrop-filter: blur(10px);
-        position: relative;
-    }
-
-    .config-panel::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: linear-gradient(
-            90deg,
-            var(--color-primary),
-            var(--color-success)
-        );
-        opacity: 0.7;
-    }
-
-    .config-panel:hover {
-        box-shadow: 0 8px 32px rgba(0, 210, 255, 0.2);
-        border-color: var(--color-primary);
-    }
-
-    .config-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 1.5rem 2rem;
-        background: rgba(30, 33, 38, 0.5);
-        cursor: pointer;
-        transition: all 0.3s ease;
-        border-bottom: 1px solid var(--color-border-light);
-        backdrop-filter: blur(10px);
-    }
-
-    .config-header:hover {
-        background: rgba(50, 54, 62, 0.7);
-    }
-
-    .config-title {
-        display: flex;
-        align-items: center;
-        gap: 1.5rem;
-        flex: 1;
-    }
-
-    .config-title h3 {
-        margin: 0;
-        color: var(--color-text-primary);
-        font-size: 1.25rem;
-        font-weight: 700;
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-success) 100%
-        );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-
-    .config-status {
-        display: flex;
-        align-items: center;
-    }
-
-    .status-badge {
-        padding: 0.5rem 1rem;
-        border-radius: 1.5rem;
-        font-size: 0.8rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
-
-    .status-badge.success {
-        background: var(--color-success-light);
-        color: var(--color-success);
-        border: 1px solid rgba(0, 255, 136, 0.2);
-    }
-
-    .status-badge.warning {
-        background: var(--color-warning-light);
-        color: var(--color-warning);
-        border: 1px solid rgba(255, 184, 0, 0.2);
-    }
-
-    .expand-btn {
-        background: var(--color-surface-hover);
-        border: 1px solid var(--color-border);
-        cursor: pointer;
-        padding: 0.75rem;
-        border-radius: 10px;
-        color: var(--color-text-secondary);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .expand-btn:hover {
-        background: var(--color-primary);
-        color: white;
-        border-color: var(--color-primary);
-        transform: scale(1.05);
-    }
-
-    .expand-btn svg {
-        width: 1.5rem;
-        height: 1.5rem;
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        filter: drop-shadow(0 2px 4px currentColor);
-    }
-
-    .config-content {
-        padding: 2rem;
-        animation: slideDown 0.3s ease-out;
-        background: var(--color-bg-primary);
-    }
-
-    @keyframes slideDown {
-        from {
-            opacity: 0;
-            transform: translateY(-10px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-
-    .form-section {
-        display: grid;
-        gap: 2rem;
-    }
-
-    .input-group {
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-    }
-
-    label {
-        font-weight: 700;
-        color: var(--color-text-primary);
-        font-size: 1rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-
-    .text-input,
-    .select-input {
-        padding: 1rem 1.5rem;
-        border: 2px solid var(--color-border);
-        border-radius: 12px;
-        font-size: 1rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        background: var(--color-surface);
-        color: var(--color-text-primary);
-        font-weight: 500;
-    }
-
-    .text-input:focus,
-    .select-input:focus {
-        outline: none;
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 4px rgba(0, 210, 255, 0.2);
-        background: var(--color-surface-secondary);
-    }
-
-    .text-input::placeholder {
-        color: var(--color-text-muted);
-        opacity: 0.7;
-    }
-
-    .text-input.valid {
-        border-color: var(--color-success);
-        box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.2);
-    }
-
-    .text-input.invalid {
-        border-color: var(--color-danger);
-        box-shadow: 0 0 0 3px rgba(255, 71, 87, 0.2);
-    }
-
-    .mono {
-        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-        font-size: 0.9rem;
-        font-weight: 600;
-    }
-
-    .input-hint {
-        font-size: 0.85rem;
-        color: var(--color-text-muted);
-        font-weight: 500;
-        opacity: 0.9;
-    }
-
-    .input-hint .error {
-        color: var(--color-danger);
-        font-weight: 600;
-    }
-
-    .select-input {
-        cursor: pointer;
-    }
-
-    .select-input option {
-        background: var(--color-surface);
-        color: var(--color-text-primary);
-        padding: 0.5rem;
-    }
-
-    @media (max-width: 768px) {
-        .config-header {
-            padding: 1rem 1.5rem;
-        }
-
-        .config-content {
-            padding: 1.5rem;
-        }
-
-        .config-title {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 1rem;
-        }
-
-        .config-title h3 {
-            font-size: 1.1rem;
-        }
-
-        .text-input,
-        .select-input {
-            padding: 0.75rem 1rem;
-            font-size: 0.9rem;
-        }
-    }
-
-    /* Standalone mode styles */
-    .standalone-header {
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-
-    .config-status-large {
-        display: flex;
-        justify-content: center;
-    }
-
-    .status-badge.large {
-        padding: 1rem 2rem;
-        font-size: 1.1rem;
-        font-weight: 700;
-    }
-
-    /* Save Button Styles */
-    .save-section {
-        margin-top: 2rem;
-        padding-top: 2rem;
-        border-top: 1px solid var(--color-border-light);
-        display: flex;
-        justify-content: center;
-    }
-
-    .save-btn {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 1rem 2rem;
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-success) 100%
-        );
-        color: white;
-        border: none;
-        border-radius: 12px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 1rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 16px rgba(0, 210, 255, 0.3);
-        position: relative;
-        overflow: hidden;
-        min-width: 200px;
-        justify-content: center;
-    }
-
-    .save-btn::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(
-            90deg,
-            transparent,
-            rgba(255, 255, 255, 0.2),
-            transparent
-        );
-        transition: left 0.5s;
-    }
-
-    .save-btn:hover:not(:disabled)::before {
-        left: 100%;
-    }
-
-    .save-btn:hover:not(:disabled) {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0, 210, 255, 0.4);
-    }
-
-    .save-btn:active:not(:disabled) {
-        transform: translateY(0);
-    }
-
-    .save-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none;
-        box-shadow: 0 2px 8px rgba(0, 210, 255, 0.2);
-        background: linear-gradient(
-            135deg,
-            var(--color-text-muted) 0%,
-            var(--color-border) 100%
-        );
-    }
-
-    .save-btn svg {
-        width: 20px;
-        height: 20px;
-        flex-shrink: 0;
-    }
-
-    .loading-container {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem;
-        background: var(--color-surface-secondary, #f8f9fa);
-        border: 1px solid var(--color-border, #ddd);
-        border-radius: 8px;
-        color: var(--color-text-secondary, #666);
-    }
-
-    .spinner-small {
-        width: 16px;
-        height: 16px;
-        border: 2px solid var(--color-border, #ddd);
-        border-top: 2px solid var(--color-primary, #007bff);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-        0% {
-            transform: rotate(0deg);
-        }
-        100% {
-            transform: rotate(360deg);
-        }
-    }
-
-    /* Add Contract Form Styles */
-    .add-contract-section {
-        margin-top: 1.5rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid var(--color-border-light, #e0e0e0);
-    }
-
-    .add-contract-form {
-        background: var(--color-surface-secondary, #f8f9fa);
-        border: 1px solid var(--color-border, #ddd);
-        border-radius: 12px;
-        padding: 1.5rem;
-    }
-
-    .form-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1.5rem;
-    }
-
-    .form-header h4 {
-        margin: 0;
-        color: var(--color-text-primary, #333);
-        font-size: 1.1rem;
-    }
-
-    .close-btn {
-        background: none;
-        border: none;
-        color: var(--color-text-secondary, #666);
-        cursor: pointer;
-        font-size: 1.2rem;
-        padding: 0.25rem;
-        transition: color 0.2s ease;
-    }
-
-    .close-btn:hover:not(:disabled) {
-        color: var(--color-danger, #dc3545);
-    }
-
-    .form-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-    }
-
-    .form-grid .input-group:first-child {
-        grid-column: 1 / -1;
-    }
-
-    .form-actions {
-        display: flex;
-        gap: 1rem;
-        justify-content: flex-end;
-    }
-
-    .cancel-btn {
-        padding: 0.75rem 1.5rem;
-        background: transparent;
-        color: var(--color-text-secondary, #666);
-        border: 1px solid var(--color-border, #ddd);
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-
-    .cancel-btn:hover:not(:disabled) {
-        background: var(--color-surface-secondary, #f8f9fa);
-        border-color: var(--color-text-secondary, #666);
-    }
-
-    .add-btn {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 1.5rem;
-        background: var(--color-primary, #007bff);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        font-weight: 600;
-        transition: all 0.2s ease;
-    }
-
-    .add-btn:hover:not(:disabled) {
-        background: var(--color-primary-dark, #0056b3);
-    }
-
-    .add-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    /* Contract selector group with inline add button */
-    .contract-selector-group {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }
-
-    .contract-selector-group select {
-        flex: 1;
-    }
-
-    .add-contract-btn-inline {
-        background: var(--color-primary, #007bff);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
-        font-size: 0.9rem;
-        font-weight: 500;
-        cursor: pointer;
-        white-space: nowrap;
-        transition: all 0.2s ease;
-        min-width: fit-content;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .add-contract-btn-inline svg {
-        width: 16px;
-        height: 16px;
-        stroke: currentColor;
-    }
-
-    .add-contract-btn-inline:hover:not(:disabled) {
-        background: var(--color-primary-dark, #0056b3);
-        transform: translateY(-1px);
-    }
-
-    .add-contract-btn-inline:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-
-    @media (max-width: 768px) {
-        .form-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .form-actions {
-            flex-direction: column;
-        }
-
-        .contract-selector-group {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 0.5rem;
-        }
-
-        .add-contract-btn-inline {
-            width: 100%;
-        }
-    }
-</style>

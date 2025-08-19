@@ -1,109 +1,130 @@
-import { writable, derived } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
 
-// Core wallet state stores
-export const provider = writable(null);
-export const signer = writable(null);
-export const userAddress = writable(null);
-export const chainId = writable(null);
+function createWalletStore() {
+    const { subscribe, set, update } = writable({
+        provider: null,
+        signer: null,
+        userAddress: null,
+        chainId: null,
+        state: 'disconnected', // 'disconnected', 'connecting', 'connected', 'error'
+        error: null
+    });
 
-// Derived store for connection status
-export const isConnected = derived(userAddress, $userAddress => !!$userAddress);
+    // Removed getBrowserProvider; provider is now passed in
 
-// Helper functions for updating wallet state
-export function setProvider(providerInstance) {
-    provider.set(providerInstance);
-}
+    const store = {
+        subscribe,
+        // Initialize provider and event listeners
+        initialize: (ethereum) => {
+            if (!ethereum) throw new Error('Ethereum provider must be passed to initialize');
+            const provider = new ethers.BrowserProvider(ethereum);
+            update(state => ({ ...state, provider }));
 
-export function setSigner(signerInstance) {
-    signer.set(signerInstance);
-}
+            // Account changes
+            window.ethereum.on('accountsChanged', async (accounts) => {
+                if (accounts.length === 0) {
+                    store.clear();
+                } else {
+                    try {
+                        const signerInstance = await provider.getSigner();
+                        update(state => ({
+                            ...state,
+                            userAddress: accounts[0],
+                            signer: signerInstance,
+                            state: 'connected'
+                        }));
+                    } catch (error) {
+                        update(state => ({
+                            ...state,
+                            signer: null,
+                            state: 'error',
+                            error: 'Failed to get signer'
+                        }));
+                    }
+                }
+            });
 
-export function setUserAddress(address) {
-    userAddress.set(address);
-}
+            window.ethereum.on('chainChanged', (newChainId) => {
+                update(state => ({
+                    ...state,
+                    chainId: parseInt(newChainId, 16)
+                }));
+                window.location.reload();
+            });
+        },
+        // Connect wallet
+        connect: async () => {
+            const state = get({ subscribe });
+            const provider = state.provider;
+            if (!provider) throw new Error('Provider not initialized. Call initialize(provider) first.');
 
-export function setChainId(id) {
-    chainId.set(id);
-}
+            update(s => ({ ...s, state: 'connecting', error: null }));
+            try {
+                await provider.send("eth_requestAccounts", []);
+                const signerInstance = await provider.getSigner();
+                const address = await signerInstance.getAddress();
+                const network = await provider.getNetwork();
 
-export function clearWallet() {
-    provider.set(null);
-    signer.set(null);
-    userAddress.set(null);
-    chainId.set(null);
-}
-
-// Connection function that returns values instead of storing them
-export async function connectWallet() {
-    if (typeof window === 'undefined' || !window.ethereum) {
-        throw new Error('MetaMask not available');
-    }
-    
-    const metamaskProvider = new ethers.BrowserProvider(window.ethereum);
-    
-    await metamaskProvider.send("eth_requestAccounts", []);
-    const signerInstance = await metamaskProvider.getSigner();
-    const address = await signerInstance.getAddress();
-    const network = await metamaskProvider.getNetwork();
-    
-    // Update stores
-    setProvider(metamaskProvider);
-    setSigner(signerInstance);
-    setUserAddress(address);
-    setChainId(Number(network.chainId));
-    
-    return {
-        address,
-        chainId: Number(network.chainId),
-        provider: metamaskProvider,
-        signer: signerInstance
-    };
-}
-
-// Initialize provider and set up event listeners
-export function initializeProvider() {
-    if (typeof window !== 'undefined' && window.ethereum) {
-        const metamaskProvider = new ethers.BrowserProvider(window.ethereum);
-        setProvider(metamaskProvider);
-        
-        // Listen for account changes
-        window.ethereum.on('accountsChanged', (accounts) => {
-            if (accounts.length === 0) {
-                clearWallet();
-            } else {
-                setUserAddress(accounts[0]);
-                updateSigner(metamaskProvider);
+                const walletData = {
+                    provider,
+                    signer: signerInstance,
+                    userAddress: address,
+                    chainId: Number(network.chainId),
+                    state: 'connected',
+                    error: null
+                };
+                set(walletData);
+                return walletData;
+            } catch (error) {
+                update(s => ({
+                    ...s,
+                    state: 'error',
+                    error: error.message || 'Failed to connect wallet'
+                }));
+                throw error;
             }
-        });
-        
-        // Listen for chain changes
-        window.ethereum.on('chainChanged', (newChainId) => {
-            setChainId(parseInt(newChainId, 16));
-            // Reload the page as recommended by MetaMask
-            window.location.reload();
-        });
-        
-        return metamaskProvider;
-    }
-    return null;
+        },
+
+        // Sign message
+        signMessage: async (message) => {
+            const state = get({ subscribe });
+            if (!state.signer) throw new Error('No signer available');
+            return await state.signer.signMessage(message);
+        },
+
+        // Update specific fields
+        changeChain: async (targetChainId) => {
+            const state = get({ subscribe });
+            const provider = state.provider;
+            if (!provider) throw new Error('Provider not initialized. Call initialize(provider) first.');
+            try {
+                await provider.send("wallet_switchEthereumChain", [
+                    { chainId: "0x" + targetChainId.toString(16) }
+                ]);
+                update(s => ({
+                    ...s,
+                    chainId: targetChainId
+                }));
+            } catch (error) {
+                console.error("Failed to switch network:", error);
+            }
+        },
+
+        // Clear all wallet data
+        disconnect: () => {
+            set({
+                provider: null,
+                signer: null,
+                userAddress: null,
+                chainId: null,
+                state: 'disconnected',
+                error: null
+            });
+        }
+    };
+
+    return store;
 }
 
-// Helper function to update signer
-async function updateSigner(metamaskProvider) {
-    try {
-        const signerInstance = await metamaskProvider.getSigner();
-        setSigner(signerInstance);
-    } catch (error) {
-        console.error('Failed to get signer:', error);
-        setSigner(null);
-    }
-}
-
-// Utility function to sign a message (requires signer to be passed in)
-export async function signMessage(signerInstance, message) {
-    if (!signerInstance) {
-        throw new Error('No signer available');
-    }
-    return await signerInstance.signMessage(message);
-}
+export const walletStore = createWalletStore();

@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../stores/auth.js";
-    import { hasUserVoted, castVote, getContractConfig } from '../votingAPI.js';
+    import { hasUserVoted, castVote, getContractConfig } from "../votingAPI.js";
 
     export let proposal;
 
@@ -21,7 +21,7 @@
 
     async function loadUserVote() {
         try {
-            hasVoted = await hasUserVoted(proposal.id, $authStore.walletAddress);
+            hasVoted = await hasUserVoted(proposal.id, $authStore.userAddress);
             // Optionally, fetch vote details if available
         } catch (err) {
             console.error("Failed to load user vote:", err);
@@ -44,9 +44,9 @@
             error = null;
             success = null;
 
-
             // Get snapshot contract from proposal (if available)
-            const snapshotContract = proposal.snapshot?.contract_address || null;
+            const snapshotContract =
+                proposal.snapshot?.contract_address || null;
             if (!snapshotContract) {
                 throw new Error("No snapshot contract available for voting");
             }
@@ -69,7 +69,6 @@
             isVoting = false;
         }
     }
-
 
     function isProposalActive() {
         return proposal && "open" in proposal.status;

@@ -1,21 +1,14 @@
 <script>
-    import { authStore } from "../stores/auth.js";
-    import { connectWallet } from '../stores/wallet.js';
-    import { getNetworkInfo, NETWORKS } from "../utils.js";
+    import { walletStore } from "../stores/wallet.js";
+    import { getNetworkInfo, NETWORKS, formatAddress } from "../utils.js";
 
     export let showNetworkInfo = true;
 
-    let currentChainId = null;
+    $: currentChainId = $walletStore.chainId;
     let networkInfo = null;
     let showWalletSelector = false;
     let showNetworkSelector = false;
     let availableWallets = [{ type: "metamask", name: "MetaMask", icon: "🦊" }];
-    let connectedWalletType = null;
-
-    function formatAddress(address) {
-        if (!address) return "";
-        return `${address.slice(0, 6)}...${address.slice(-4)}`;
-    }
 
     function handleConnect() {
         // Only MetaMask supported
@@ -24,18 +17,9 @@
 
     async function handleWalletSelected(wallet) {
         try {
-            const result = await connectWallet();
-            connectedWalletType = wallet.type;
-            currentChainId = result.chainId;
-            networkInfo = getNetworkInfo(currentChainId);
+            const walletData = await walletStore.connect();
+            networkInfo = getNetworkInfo(walletData.chainId);
             showWalletSelector = false;
-
-            authStore.update((state) => ({
-                ...state,
-                isAuthenticated: true,
-                walletAddress: result.address,
-                walletType: wallet.type,
-            }));
         } catch (error) {
             console.error("Connection failed:", error);
         }
@@ -43,60 +27,30 @@
 
     function handleDisconnect() {
         // MetaMask disconnect is not programmatic; just clear state
-        authStore.update((state) => ({
-            ...state,
-            isAuthenticated: false,
-            walletAddress: null,
-            walletType: null,
-        }));
-        currentChainId = null;
+        walletStore.disconnect();
         networkInfo = null;
-        connectedWalletType = null;
         showWalletSelector = false;
     }
 
     async function handleSwitchNetwork(targetChainId) {
-        try {
-            await window.ethereum.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: '0x' + targetChainId.toString(16) }],
-            });
-            currentChainId = targetChainId;
-            networkInfo = getNetworkInfo(targetChainId);
-        } catch (error) {
-            console.error("Failed to switch network:", error);
-        }
+        walletStore.switchChain(targetChainId);
+        networkInfo = getNetworkInfo(targetChainId);
+        showWalletSelector = false;
     }
 
     async function handleNetworkSelected(chainId) {
         showNetworkSelector = false;
         await handleSwitchNetwork(chainId);
     }
-
-    function getWalletDisplayName(walletType) {
-        switch (walletType) {
-            case "metamask":
-                return "🦊 MetaMask";
-            case "coinbase":
-                return "🔵 Coinbase";
-            default:
-                return "💼 Wallet";
-        }
-    }
 </script>
 
 <div class="wallet-connector">
-    {#if $authStore.isAuthenticated}
+    {#if $walletStore.state === "connected"}
         <div class="wallet-info">
             <div class="address-display">
                 <span class="address"
-                    >{formatAddress($authStore.walletAddress)}</span
+                    >{formatAddress($walletStore.userAddress)}</span
                 >
-                {#if $authStore.walletType}
-                    <span class="wallet-type-badge">
-                        {getWalletDisplayName($authStore.walletType)}
-                    </span>
-                {/if}
                 <button class="disconnect-btn" on:click={handleDisconnect}>
                     Disconnect
                 </button>
@@ -191,19 +145,19 @@
                         Back
                     </button>
                 </div>
-            {:else if $authStore.isConnecting}
+            {:else if $walletStore.state === "connecting"}
                 <button class="connect-btn connecting" disabled>
                     Connecting...
                 </button>
-            {:else}
+            {:else if $walletStore.state === "disconnected"}
                 <button class="connect-btn" on:click={handleConnect}>
                     Connect Wallet
                 </button>
             {/if}
 
-            {#if $authStore.error}
+            {#if $walletStore.error}
                 <div class="error-message">
-                    {$authStore.error}
+                    {$walletStore.error}
                 </div>
             {/if}
         </div>
@@ -249,22 +203,6 @@
         font-size: 0.95rem;
         color: var(--color-text-primary);
         font-weight: 500;
-    }
-
-    .wallet-type-badge {
-        padding: 0.375rem 0.75rem;
-        background: linear-gradient(
-            135deg,
-            var(--color-info) 0%,
-            var(--color-info-light) 100%
-        );
-        color: white;
-        border-radius: 8px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        box-shadow: 0 2px 8px rgba(116, 185, 255, 0.3);
     }
 
     .disconnect-btn {

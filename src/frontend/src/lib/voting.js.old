@@ -91,7 +91,7 @@ export async function submitVote(proposalId, choice) {
     const config = get(configStore);
     const auth = get(authStore);
     
-    if (!auth.isAuthenticated || !auth.walletAddress) {
+    if (!auth.isAuthenticated || !auth.userAddress) {
       throw new Error('User not authenticated');
     }
     
@@ -140,14 +140,14 @@ export async function submitVote(proposalId, choice) {
     const witness = await generateWitness(
       provider,
       config.contractAddress,
-      auth.walletAddress,
+      auth.userAddress,
       currentBlock
     );
     
     // Prepare vote arguments
     const voteArgs = {
       proposal_id: BigInt(proposalId),
-      voter: ethers.getBytes(auth.walletAddress),
+      voter: ethers.getBytes(auth.userAddress),
       choice: voteChoice,
       siwe: siweProof,
       witness: witness
@@ -180,7 +180,7 @@ export async function getUserVote(proposalId) {
   try {
     const auth = get(authStore);
     
-    if (!auth.isAuthenticated || !auth.walletAddress) {
+    if (!auth.isAuthenticated || !auth.userAddress) {
       return { hasVoted: false, vote: null };
     }
     

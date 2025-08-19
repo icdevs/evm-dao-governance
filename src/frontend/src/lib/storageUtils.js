@@ -155,15 +155,3 @@ function getChainName(chainId) {
     
     return chainNames[chainId] || `Unknown Network (${chainId})`;
 }
-
-// Check if an address is a valid Ethereum address
-export function isValidEthereumAddress(address) {
-    return ethers.isAddress(address);
-}
-
-// Format an address for display (shortened)
-export function formatAddress(address) {
-    if (!address) return '';
-    if (!isValidEthereumAddress(address)) return address;
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}

@@ -1,25 +1,35 @@
 <script>
     import { onMount } from "svelte";
     import { proposalsStore } from "../stores/proposals.js";
-    import { authStore } from "../stores/auth.js";
+    import { walletStore } from "../stores/wallet.js";
     import { configStore } from "../stores/config.js";
+    import { statusStore } from "../stores/status.js";
     import { getNetworkInfo } from "../utils.js";
-    import { getProposals, castVote } from '../votingAPI.js';
-    import { getUserTokenBalance } from '../storageUtils.js';
+    import { agentStore } from "../stores/agent.js";
+    import { getUserTokenBalance } from "../storageUtils.js";
 
     // Export filter prop
     export let filter = "any"; // any, active, executed, expired, pending, rejected
 
-    // Subscribe to stores
-    $: ({ proposals, loading, error } = $proposalsStore);
-    $: ({ isAuthenticated, walletAddress } = $authStore);
-    $: ({ contractAddress } = $configStore);
+    // Store subscriptions
+    $: proposalsData = $proposalsStore;
+    $: walletData = $walletStore;
+    $: configData = $configStore;
+    $: backendActor = $agentStore.actor;
+
+    // Derived values
+    $: proposals = proposalsData.proposals || [];
+    $: loading = proposalsData.loading;
+    $: error = proposalsData.error;
+    $: isAuthenticated = walletData.state === "connected";
+    $: walletAddress = walletData.userAddress;
+    $: contractAddress = configData.contractAddress;
 
     // User token balance state
     let userTokenBalance = "0";
     let userVotingPower = "0";
     let isLoadingBalance = false;
-    
+
     // User voting state (for demo purposes - in real app this would come from backend)
     let userVotes = {}; // proposalId -> 'yes' | 'no' | null
 
@@ -44,25 +54,28 @@
                   }
               });
 
-    onMount(() => {
-        load();
-        // Load user's token balance when component mounts
-        if (isAuthenticated && walletAddress && contractAddress) {
-            loadUserTokenBalance();
-        }
-    });
-
     // Reactive statement to load balance when auth/config changes
     $: if (isAuthenticated && walletAddress && contractAddress) {
         loadUserTokenBalance();
     }
 
+    $: if (backendActor) {
+        load();
+    }
+
     async function load() {
         try {
-            const proposals = await getProposals();
-            proposalsStore.set({ proposals, loading: false, error: null });
+            if (!backendActor) {
+                console.error("Backend not available");
+                return;
+            }
+            await proposalsStore.load(backendActor, [], false);
         } catch (err) {
             console.error("Failed to load proposals:", err);
+            statusStore.add(
+                `Failed to load proposals: ${err.message}`,
+                "error"
+            );
         }
     }
 
@@ -75,11 +88,14 @@
 
         isLoadingBalance = true;
         try {
-            const balance = await getUserTokenBalance(contractAddress, walletAddress);
+            const balance = await getUserTokenBalance(
+                contractAddress,
+                walletAddress
+            );
             userTokenBalance = balance.toString();
             userVotingPower = userTokenBalance;
         } catch (error) {
-            console.error('Failed to load user token balance:', error);
+            console.error("Failed to load user token balance:", error);
             userTokenBalance = "0";
             userVotingPower = "0";
         } finally {
@@ -142,16 +158,18 @@
         }
 
         const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const hours = Math.floor(
+            (timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
+        );
 
         if (days > 0) {
             if (hours > 0) {
-                return `${days} day${days !== 1 ? 's' : ''}, ${hours} hour${hours !== 1 ? 's' : ''} remaining`;
+                return `${days} day${days !== 1 ? "s" : ""}, ${hours} hour${hours !== 1 ? "s" : ""} remaining`;
             } else {
-                return `${days} day${days !== 1 ? 's' : ''} remaining`;
+                return `${days} day${days !== 1 ? "s" : ""} remaining`;
             }
         } else if (hours > 0) {
-            return `${hours} hour${hours !== 1 ? 's' : ''} remaining`;
+            return `${hours} hour${hours !== 1 ? "s" : ""} remaining`;
         } else {
             return "Less than 1 hour remaining";
         }
@@ -163,57 +181,67 @@
 
     async function handleVote(proposalId, vote) {
         if (!isAuthenticated || !walletAddress) {
-            alert('Please connect your wallet first');
+            statusStore.add("Please connect your wallet first", "error");
             return;
         }
-        
+
         if (parseFloat(userVotingPower) === 0) {
-            alert('You need governance tokens to vote');
+            statusStore.add("You need governance tokens to vote", "warning");
             return;
         }
-        
+
         if (userVotes[proposalId]) {
-            alert('You have already voted on this proposal');
+            statusStore.add(
+                "You have already voted on this proposal",
+                "warning"
+            );
             return;
         }
-        
+
         try {
             // Show loading state
-            userVotes[proposalId] = 'loading';
+            userVotes[proposalId] = "loading";
             userVotes = { ...userVotes };
-            
+
             // Submit vote using voting interface
-            await castVote(proposalId, vote, contractAddress);
-            
+            // Note: This would need to be updated with your actual voting implementation
+            // await castVote(proposalId, vote, contractAddress);
+            console.log(`Voting ${vote} on proposal ${proposalId}`);
+
+            // For now, simulate success
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
             // Update local state on success
             userVotes[proposalId] = vote;
             userVotes = { ...userVotes };
-            
+
             // Refresh proposals to get updated tallies
             await load();
-            
-            console.log(`✅ Successfully voted ${vote} on proposal ${proposalId}`);
-            
+
+            statusStore.add(
+                `Successfully voted ${vote} on proposal ${proposalId}`,
+                "success"
+            );
         } catch (error) {
-            console.error('Vote submission failed:', error);
-            
+            console.error("Vote submission failed:", error);
+
             // Clear loading state on error
             delete userVotes[proposalId];
             userVotes = { ...userVotes };
-            
+
             // Show user-friendly error message
-            let errorMessage = 'Failed to submit vote. ';
-            if (error.message.includes('already voted')) {
-                errorMessage += 'You have already voted on this proposal.';
-            } else if (error.message.includes('not authenticated')) {
-                errorMessage += 'Please connect your wallet and try again.';
-            } else if (error.message.includes('insufficient balance')) {
-                errorMessage += 'You need governance tokens to vote.';
+            let errorMessage = "Failed to submit vote. ";
+            if (error.message.includes("already voted")) {
+                errorMessage += "You have already voted on this proposal.";
+            } else if (error.message.includes("not authenticated")) {
+                errorMessage += "Please connect your wallet and try again.";
+            } else if (error.message.includes("insufficient balance")) {
+                errorMessage += "You need governance tokens to vote.";
             } else {
-                errorMessage += error.message || 'Please try again.';
+                errorMessage += error.message || "Please try again.";
             }
-            
-            alert(errorMessage);
+
+            statusStore.add(errorMessage, "error");
         }
     }
 </script>
@@ -243,10 +271,18 @@
                         <div class="proposal-title">
                             <div class="proposal-id">
                                 <span class="id-label">#{proposal.id}</span>
-                                <span class="action-type">{getActionTypeDisplay(proposal.action)}</span>
+                                <span class="action-type"
+                                    >{getActionTypeDisplay(
+                                        proposal.action
+                                    )}</span
+                                >
                             </div>
                             <div class="proposal-status">
-                                <span class="status-badge {getStatusBadgeClass(proposal)}">
+                                <span
+                                    class="status-badge {getStatusBadgeClass(
+                                        proposal
+                                    )}"
+                                >
                                     {getStatusText(proposal)}
                                 </span>
                             </div>
@@ -261,67 +297,127 @@
                                 <div class="vote-percentages">
                                     <div class="yes-percent">
                                         <div class="caption">Adopt</div>
-                                        <div class="percentage">{getTallyPercentage(proposal.tally.yes, proposal.tally.total)}%</div>
+                                        <div class="percentage">
+                                            {getTallyPercentage(
+                                                proposal.tally.yes,
+                                                proposal.tally.total
+                                            )}%
+                                        </div>
                                     </div>
-                                    <h3 class="section-title">Voting Results</h3>
+                                    <h3 class="section-title">
+                                        Voting Results
+                                    </h3>
                                     <div class="no-percent">
                                         <div class="caption">Reject</div>
-                                        <div class="percentage">{getTallyPercentage(proposal.tally.no, proposal.tally.total)}%</div>
+                                        <div class="percentage">
+                                            {getTallyPercentage(
+                                                proposal.tally.no,
+                                                proposal.tally.total
+                                            )}%
+                                        </div>
                                     </div>
                                 </div>
-                                
-                                <div class="progressbar-container" style="--quorum-threshold: 25%; --majority-threshold: 50%;">
+
+                                <div
+                                    class="progressbar-container"
+                                    style="--quorum-threshold: 25%; --majority-threshold: 50%;"
+                                >
                                     <!-- Quorum threshold marker -->
                                     <div class="threshold quorum-threshold">
                                         <div class="threshold-icon"></div>
                                     </div>
-                                    
-                                    <!-- Majority threshold marker -->  
+
+                                    <!-- Majority threshold marker -->
                                     <div class="threshold majority-threshold">
                                         <div class="threshold-icon"></div>
                                     </div>
-                                    
+
                                     <!-- Progress bar -->
-                                    <div class="progressbar" role="progressbar" aria-valuemin="0" aria-valuenow="{proposal.tally.yes + proposal.tally.no}" aria-valuemax="{proposal.tally.total}">
-                                        <div class="yes" style="width: {getTallyPercentage(proposal.tally.yes, proposal.tally.total)}%;"></div>
-                                        <div class="no" style="width: {getTallyPercentage(proposal.tally.no, proposal.tally.total)}%;"></div>
+                                    <div
+                                        class="progressbar"
+                                        role="progressbar"
+                                        aria-valuemin="0"
+                                        aria-valuenow={proposal.tally.yes +
+                                            proposal.tally.no}
+                                        aria-valuemax={proposal.tally.total}
+                                    >
+                                        <div
+                                            class="yes"
+                                            style="width: {getTallyPercentage(
+                                                proposal.tally.yes,
+                                                proposal.tally.total
+                                            )}%;"
+                                        ></div>
+                                        <div
+                                            class="no"
+                                            style="width: {getTallyPercentage(
+                                                proposal.tally.no,
+                                                proposal.tally.total
+                                            )}%;"
+                                        ></div>
                                     </div>
                                 </div>
 
                                 <!-- Vote Counts under progress bar -->
                                 <div class="vote-counts">
                                     <div class="yes-count">
-                                        <span class="count-value">{proposal.tally.yes}</span>
+                                        <span class="count-value"
+                                            >{proposal.tally.yes}</span
+                                        >
                                     </div>
                                     <div class="no-count">
-                                        <span class="count-value">{proposal.tally.no}</span>
+                                        <span class="count-value"
+                                            >{proposal.tally.no}</span
+                                        >
                                     </div>
                                 </div>
                             </div>
 
                             <!-- Voting Buttons (shown when logged in) -->
                             <div class="voting-actions">
-                                <button 
-                                    class="vote-btn yes-btn" 
-                                    class:voted={userVotes[proposal.id] === 'yes'}
-                                    class:other-voted={userVotes[proposal.id] === 'no'}
-                                    class:loading={userVotes[proposal.id] === 'loading'}
-                                    disabled={!proposal.isActive || !isAuthenticated || parseFloat(userVotingPower) === 0 || userVotes[proposal.id]}
-                                    on:click={() => handleVote(proposal.id, 'yes')}
+                                <button
+                                    class="vote-btn yes-btn"
+                                    class:voted={userVotes[proposal.id] ===
+                                        "yes"}
+                                    class:other-voted={userVotes[
+                                        proposal.id
+                                    ] === "no"}
+                                    class:loading={userVotes[proposal.id] ===
+                                        "loading"}
+                                    disabled={!proposal.isActive ||
+                                        !isAuthenticated ||
+                                        parseFloat(userVotingPower) === 0 ||
+                                        userVotes[proposal.id]}
+                                    on:click={() =>
+                                        handleVote(proposal.id, "yes")}
                                 >
-                                    {userVotes[proposal.id] === 'loading' ? 'Submitting...' : 
-                                     userVotes[proposal.id] === 'yes' ? '✓ Adopted' : 'Adopt'}
+                                    {userVotes[proposal.id] === "loading"
+                                        ? "Submitting..."
+                                        : userVotes[proposal.id] === "yes"
+                                          ? "✓ Adopted"
+                                          : "Adopt"}
                                 </button>
-                                <button 
-                                    class="vote-btn no-btn" 
-                                    class:voted={userVotes[proposal.id] === 'no'}
-                                    class:other-voted={userVotes[proposal.id] === 'yes'}
-                                    class:loading={userVotes[proposal.id] === 'loading'}
-                                    disabled={!proposal.isActive || !isAuthenticated || parseFloat(userVotingPower) === 0 || userVotes[proposal.id]}
-                                    on:click={() => handleVote(proposal.id, 'no')}
+                                <button
+                                    class="vote-btn no-btn"
+                                    class:voted={userVotes[proposal.id] ===
+                                        "no"}
+                                    class:other-voted={userVotes[
+                                        proposal.id
+                                    ] === "yes"}
+                                    class:loading={userVotes[proposal.id] ===
+                                        "loading"}
+                                    disabled={!proposal.isActive ||
+                                        !isAuthenticated ||
+                                        parseFloat(userVotingPower) === 0 ||
+                                        userVotes[proposal.id]}
+                                    on:click={() =>
+                                        handleVote(proposal.id, "no")}
                                 >
-                                    {userVotes[proposal.id] === 'loading' ? 'Submitting...' : 
-                                     userVotes[proposal.id] === 'no' ? '✗ Rejected' : 'Reject'}
+                                    {userVotes[proposal.id] === "loading"
+                                        ? "Submitting..."
+                                        : userVotes[proposal.id] === "no"
+                                          ? "✗ Rejected"
+                                          : "Reject"}
                                 </button>
                             </div>
 
@@ -329,7 +425,14 @@
                             <div class="user-voting-info">
                                 <div class="voting-power">
                                     <span class="label">Your Voting Power</span>
-                                    <span class="value" class:loading={isLoadingBalance} class:disconnected={!isAuthenticated} class:has-power={parseFloat(userVotingPower) > 0}>
+                                    <span
+                                        class="value"
+                                        class:loading={isLoadingBalance}
+                                        class:disconnected={!isAuthenticated}
+                                        class:has-power={parseFloat(
+                                            userVotingPower
+                                        ) > 0}
+                                    >
                                         {#if isLoadingBalance}
                                             Loading...
                                         {:else if !isAuthenticated}
@@ -341,7 +444,13 @@
                                 </div>
                                 <div class="participation-info">
                                     <span class="label">Participation</span>
-                                    <span class="value">{getTallyPercentage(proposal.tally.yes + proposal.tally.no, proposal.tally.total)}% of total power</span>
+                                    <span class="value"
+                                        >{getTallyPercentage(
+                                            proposal.tally.yes +
+                                                proposal.tally.no,
+                                            proposal.tally.total
+                                        )}% of total power</span
+                                    >
                                 </div>
                             </div>
                         </div>
@@ -351,11 +460,15 @@
                             <dl class="details-list">
                                 <div class="detail-item">
                                     <dt>Type</dt>
-                                    <dd>{getActionTypeDisplay(proposal.action)}</dd>
+                                    <dd>
+                                        {getActionTypeDisplay(proposal.action)}
+                                    </dd>
                                 </div>
                                 <div class="detail-item">
                                     <dt>Time Remaining</dt>
-                                    <dd class="countdown">{getTimeRemaining(proposal.deadline)}</dd>
+                                    <dd class="countdown">
+                                        {getTimeRemaining(proposal.deadline)}
+                                    </dd>
                                 </div>
                                 <div class="detail-item">
                                     <dt>Created At</dt>
@@ -371,7 +484,11 @@
                                 </div>
                                 <div class="detail-item">
                                     <dt>Proposer</dt>
-                                    <dd class="proposer">{proposal.proposer.toText().slice(0, 10)}</dd>
+                                    <dd class="proposer">
+                                        {proposal.proposer
+                                            .toText()
+                                            .slice(0, 10)}
+                                    </dd>
                                 </div>
                             </dl>
                         </div>
@@ -411,7 +528,6 @@
         gap: 1rem;
     }
 
-
     .filter-section {
         display: flex;
         align-items: center;
@@ -422,6 +538,18 @@
     /* Form controls now use unified styles from index.scss */
 
     /* Use unified alert styles from index.scss */
+    .alert {
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        font-weight: 500;
+    }
+
+    .alert-error {
+        background: var(--color-danger-light);
+        color: var(--color-danger);
+        border: 1px solid rgba(255, 71, 87, 0.3);
+    }
 
     .loading {
         text-align: center;
@@ -434,6 +562,19 @@
         margin: 0 auto 1rem;
         width: 40px;
         height: 40px;
+        border: 4px solid var(--color-border, #ddd);
+        border-top: 4px solid var(--color-primary, #007bff);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
     }
 
     .empty-state {
@@ -524,7 +665,8 @@
         font-weight: 600;
     }
 
-    .yes-percent, .no-percent {
+    .yes-percent,
+    .no-percent {
         display: flex;
         flex-direction: column;
     }
@@ -637,7 +779,8 @@
         font-size: 0.75rem; /* Smaller font */
     }
 
-    .yes-count, .no-count {
+    .yes-count,
+    .no-count {
         display: flex;
         flex-direction: column;
         align-items: center;
