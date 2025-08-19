@@ -5,6 +5,8 @@
     import { goto } from "$app/navigation";
     import WalletConnector from "$lib/components/WalletConnector.svelte";
     import BalanceDashboard from "$lib/components/BalanceDashboard.svelte";
+    import TreasuryAddress from "$lib/components/TreasuryAddress.svelte";
+    import BalanceDisplay from "$lib/components/BalanceDisplay.svelte";
     import StatusMessages from "$lib/components/StatusMessages.svelte";
     import ProposalForm from "$lib/components/ProposalForm.svelte";
     import ProposalList from "$lib/components/ProposalList.svelte";
@@ -19,7 +21,7 @@
     import { backend } from "$lib/canisters.js";
 
     let initialized = false;
-    let activeTab = "dashboard"; // 'dashboard', 'proposals', 'create'
+    let showCreateProposal = false;
 
     // Dashboard refresh functionality
     let dashboardRefreshFn = null;
@@ -27,6 +29,7 @@
 
     let showContractDropdown = false;
     let isGlobalRefreshing = false;
+    let proposalFilter = "any";
 
     // Subscribe to proposal statistics
     $: stats = $proposalStats;
@@ -84,8 +87,8 @@
         // Refresh governance stats as well
         governanceStatsStore.load(true);
 
-        // Switch back to proposals tab to see the new proposal
-        activeTab = "proposals";
+        // Close create proposal form
+        showCreateProposal = false;
     }
 
     // Auto-load proposals when configuration is complete (only if not already loaded)
@@ -223,307 +226,303 @@
                 </div>
             </header>
 
-            <!-- Governance Contract Selector (Inline) -->
-            <div class="governance-selector-bar">
-                <div class="governance-info">
-                    <span class="governance-label">Governance Token:</span>
-                    {#if contractsLoading}
-                        <div class="loading-inline">
-                            <div class="spinner-tiny"></div>
-                            <span>Loading...</span>
-                        </div>
-                    {:else if selectedContract}
-                        <div class="inline-address">
-                            <span class="address-full">
-                                {selectedContract}
-                            </span>
-                            <button
-                                class="inline-copy-btn"
-                                on:click={() =>
-                                    navigator.clipboard.writeText(
-                                        selectedContract
-                                    )}
-                                title="Copy address"
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                >
-                                    <rect
-                                        x="9"
-                                        y="9"
-                                        width="13"
-                                        height="13"
-                                        rx="2"
-                                        ry="2"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        fill="none"
-                                    />
-                                    <path
-                                        d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        fill="none"
-                                    />
-                                </svg>
-                            </button>
-                        </div>
-                    {:else}
-                        <span class="no-contract">Not configured</span>
-                    {/if}
-                </div>
-
-                <div class="governance-actions">
-                    <button
-                        class="refresh-btn-inline"
-                        on:click={handleGlobalRefresh}
-                        disabled={!$authStore.isAuthenticated ||
-                            !$configStore.isConfigured ||
-                            isGlobalRefreshing}
-                        title="Refresh all data"
-                    >
-                        <svg
-                            class="refresh-icon-inline"
-                            class:spinning={isGlobalRefreshing}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                        >
-                            <path
-                                d="M1 4V10H7"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                            <path
-                                d="M23 20V14H17"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                            <path
-                                d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                        </svg>
-                    </button>
-
-                    {#if availableContracts.length > 1}
-                        <div
-                            class="selector-dropdown"
-                            class:open={showContractDropdown}
-                        >
-                            <button
-                                class="change-btn"
-                                on:click={() =>
-                                    (showContractDropdown =
-                                        !showContractDropdown)}
-                                disabled={!$authStore.isAuthenticated}
-                                title="Change governance contract"
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                >
-                                    <path
-                                        d="M6 9L12 15L18 9"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                    />
-                                </svg>
-                            </button>
-
-                            {#if showContractDropdown}
-                                <div class="dropdown-menu">
-                                    {#each availableContracts as contract}
-                                        <button
-                                            class="dropdown-item"
-                                            class:selected={contract.address ===
-                                                selectedContract}
-                                            on:click={() =>
-                                                selectContract(
-                                                    contract.address
-                                                )}
-                                        >
-                                            <span class="contract-label"
-                                                >{contract.label}</span
-                                            >
-                                            <code class="contract-addr"
-                                                >{contract.address}</code
-                                            >
-                                        </button>
-                                    {/each}
+            <!-- Compact Dashboard Bar -->
+            <div class="compact-dashboard">
+                <div class="dashboard-left">
+                    <!-- Contract Addresses Section -->
+                    <div class="addresses-section">
+                        <div class="governance-info">
+                            <span class="governance-label">Governance Token:</span>
+                            {#if contractsLoading}
+                                <div class="loading-inline">
+                                    <div class="spinner-tiny"></div>
+                                    <span>Loading...</span>
                                 </div>
+                            {:else if selectedContract}
+                                <div class="inline-address">
+                                    <span class="address-full">
+                                        {selectedContract}
+                                    </span>
+                                    <button
+                                        class="inline-copy-btn"
+                                        on:click={() =>
+                                            navigator.clipboard.writeText(
+                                                selectedContract
+                                            )}
+                                        title="Copy address"
+                                    >
+                                        <svg
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                        >
+                                            <rect
+                                                x="9"
+                                                y="9"
+                                                width="13"
+                                                height="13"
+                                                rx="2"
+                                                ry="2"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                fill="none"
+                                            />
+                                            <path
+                                                d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                fill="none"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                            {:else}
+                                <span class="no-contract">Not configured</span>
                             {/if}
                         </div>
-                    {/if}
+                        
+                        <!-- Treasury Address -->
+                        <TreasuryAddress />
+                    </div>
+                </div>
 
-                    <button
-                        class="config-btn-inline"
-                        on:click={() => goto('/config')}
-                        title="Configuration"
-                    >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
+                                <div class="dashboard-center">
+                    <!-- Balance Information -->
+                    <BalanceDisplay 
+                        onRefresh={setDashboardRefreshFn}
+                        bind:isLoading={isDashboardLoading}
+                    />
+                </div>
+
+                <div class="dashboard-right">
+                    <div class="compact-actions">
+                        <button
+                            class="refresh-btn-inline"
+                            on:click={handleGlobalRefresh}
+                            disabled={!$authStore.isAuthenticated ||
+                                !$configStore.isConfigured ||
+                                isGlobalRefreshing}
+                            title="Refresh all data"
                         >
-                            <path
-                                d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                            <circle
-                                cx="12"
-                                cy="12"
-                                r="3"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            />
-                        </svg>
-                    </button>
+                            <svg
+                                class="refresh-icon-inline"
+                                class:spinning={isGlobalRefreshing}
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    d="M1 4V10H7"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                                <path
+                                    d="M23 20V14H17"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                                <path
+                                    d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                        </button>
+
+                        {#if availableContracts.length > 1}
+                            <div
+                                class="selector-dropdown"
+                                class:open={showContractDropdown}
+                            >
+                                <button
+                                    class="change-btn"
+                                    on:click={() =>
+                                        (showContractDropdown =
+                                            !showContractDropdown)}
+                                    disabled={!$authStore.isAuthenticated}
+                                    title="Change governance contract"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                    >
+                                        <path
+                                            d="M6 9L12 15L18 9"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        />
+                                    </svg>
+                                </button>
+
+                                {#if showContractDropdown}
+                                    <div class="dropdown-menu">
+                                        {#each availableContracts as contract}
+                                            <button
+                                                class="dropdown-item"
+                                                class:selected={contract.address ===
+                                                    selectedContract}
+                                                on:click={() =>
+                                                    selectContract(
+                                                        contract.address
+                                                    )}
+                                            >
+                                                <span class="contract-label"
+                                                    >{contract.label}</span
+                                                >
+                                                <code class="contract-addr"
+                                                    >{contract.address}</code
+                                                >
+                                            </button>
+                                        {/each}
+                                    </div>
+                                {/if}
+                            </div>
+                        {/if}
+
+                        <button
+                            class="config-btn-inline"
+                            on:click={() => goto('/config')}
+                            title="Configuration"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                                <circle
+                                    cx="12"
+                                    cy="12"
+                                    r="3"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
 
             <!-- Main Content -->
             <div class="main-content">
-                <!-- Navigation Tabs -->
-                <nav class="tab-navigation">
-                    <button
-                        class="tab-btn {activeTab === 'dashboard'
-                            ? 'active'
-                            : ''}"
-                        on:click={() => (activeTab = "dashboard")}
-                    >
-                        <span class="tab-icon">📊</span>
-                        Dashboard
-                    </button>
-                    <button
-                        class="tab-btn {activeTab === 'proposals'
-                            ? 'active'
-                            : ''}"
-                        on:click={() => (activeTab = "proposals")}
-                    >
-                        <span class="tab-icon">📋</span>
-                        Proposals
-                    </button>
-                    <button
-                        class="tab-btn {activeTab === 'create' ? 'active' : ''}"
-                        on:click={() => (activeTab = "create")}
-                        disabled={!$authStore.isAuthenticated}
-                    >
-                        <span class="tab-icon">✨</span>
-                        Create
-                    </button>
-                </nav>
-
-                <!-- Content Area -->
-                <div class="content-area">
-                    {#if activeTab === "dashboard"}
-                        <div class="dashboard-view">
-                            <BalanceDashboard
-                                onRefresh={setDashboardRefreshFn}
-                                bind:isLoading={isDashboardLoading}
-                            />
-
-                            <!-- Quick Stats -->
-                            <div class="quick-stats">
-                                <div class="stat-card">
-                                    <h4>📊 Total Proposals</h4>
-                                    <div class="stat-value">
+                <!-- Proposals Section -->
+                <div class="proposals-section">
+                    <div class="proposals-header">
+                        <div class="section-title">
+                            <h2>📋 Proposals</h2>
+                            <div class="proposals-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">Total:</span>
+                                    <span class="stat-value">
                                         {#if $proposalsStore.loading}
                                             -
                                         {:else}
                                             {stats.total}
                                         {/if}
-                                    </div>
-                                    <div class="stat-subtitle">
-                                        {#if !$proposalsStore.loading}
-                                            {stats.active} active, {stats.executed}
-                                            executed
-                                        {:else}
-                                            Loading...
-                                        {/if}
-                                    </div>
+                                    </span>
                                 </div>
-                                <div class="stat-card">
-                                    <h4>👥 Members</h4>
-                                    <div class="stat-value">
+                                <div class="stat-item">
+                                    <span class="stat-label">Active:</span>
+                                    <span class="stat-value">
+                                        {#if $proposalsStore.loading}
+                                            -
+                                        {:else}
+                                            {stats.active}
+                                        {/if}
+                                    </span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Members:</span>
+                                    <span class="stat-value">
                                         {#if governanceStats.loading}
                                             -
                                         {:else}
                                             {governanceStats.memberCount}
                                         {/if}
-                                    </div>
-                                    <div class="stat-subtitle">
-                                        {#if !governanceStats.loading}
-                                            Token holders
-                                        {:else}
-                                            Loading...
-                                        {/if}
-                                    </div>
+                                    </span>
                                 </div>
-                                <div class="stat-card">
-                                    <h4>⚡ Total Voting Power</h4>
-                                    <div class="stat-value">
+                                <div class="stat-item">
+                                    <span class="stat-label">Voting Power:</span>
+                                    <span class="stat-value">
                                         {#if governanceStats.loading}
                                             -
                                         {:else}
                                             {governanceStats.totalVotingPower}
                                         {/if}
-                                    </div>
-                                    <div class="stat-subtitle">
-                                        {#if !governanceStats.loading}
-                                            Governance token supply
-                                        {:else}
-                                            Loading...
-                                        {/if}
-                                    </div>
+                                    </span>
                                 </div>
                             </div>
                         </div>
-                    {:else if activeTab === "proposals"}
-                        <div class="proposals-view">
-                            <div class="proposals-container">
-                                <ProposalList />
+                        
+                        <div class="proposals-actions">
+                            <!-- Filter Section -->
+                            <div class="filter-section">
+                                <label for="statusFilter">Filter:</label>
+                                <select id="statusFilter" class="form-control" bind:value={proposalFilter}>
+                                    <option value="any">All Proposals</option>
+                                    <option value="active">Active</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="executed">Executed</option>
+                                    <option value="expired">Expired</option>
+                                    <option value="rejected">Rejected</option>
+                                </select>
                             </div>
-                        </div>
-                    {:else if activeTab === "create"}
-                        {#if $authStore.isAuthenticated}
-                            <div class="create-view">
-                                <ProposalForm
-                                    on:proposalCreated={handleProposalCreated}
-                                />
-                            </div>
-                        {:else}
-                            <div class="create-view">
-                                <div class="auth-required">
-                                    <div class="auth-icon">🔒</div>
-                                    <h3>Wallet Connection Required</h3>
-                                    <p>
-                                        Connect your wallet to create and vote
-                                        on proposals.
-                                    </p>
-                                    <div class="auth-hint">
-                                        Use the wallet connector in the header
-                                        to get started.
-                                    </div>
+
+                            {#if $authStore.isAuthenticated}
+                                <button
+                                    class="create-proposal-btn"
+                                    on:click={() => (showCreateProposal = !showCreateProposal)}
+                                    class:active={showCreateProposal}
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                    >
+                                        <path
+                                            d="M12 5V19M5 12H19"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        />
+                                    </svg>
+                                    {showCreateProposal ? 'Cancel' : 'Create Proposal'}
+                                </button>
+                            {:else}
+                                <div class="auth-hint-compact">
+                                    🔒 Connect wallet to create proposals
                                 </div>
-                            </div>
-                        {/if}
+                            {/if}
+                        </div>
+                    </div>
+
+                    {#if showCreateProposal}
+                        <div class="create-proposal-form">
+                            <ProposalForm
+                                on:proposalCreated={handleProposalCreated}
+                            />
+                        </div>
                     {/if}
+
+                    <div class="proposals-list">
+                        <ProposalList filter={proposalFilter} />
+                    </div>
                 </div>
             </div>
         </div>
@@ -1083,18 +1082,52 @@
         color: var(--color-text-secondary);
     }
 
-    /* Governance Selector Bar - Inline */
-    .governance-selector-bar {
+    /* Compact Dashboard */
+    .compact-dashboard {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0.75rem 2rem;
+        padding: 1rem 2rem;
         background: var(--color-surface-secondary);
         border: 1px solid var(--color-border);
         border-radius: 12px;
         margin-bottom: 1.5rem;
         font-size: 0.9rem;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        gap: 2rem;
+    }
+
+    .dashboard-left {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        flex-shrink: 0;
+    }
+
+    .dashboard-center {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .dashboard-right {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+    }
+
+    .addresses-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .compact-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
     }
 
     .governance-info {
@@ -1155,6 +1188,199 @@
         display: flex;
         align-items: center;
         gap: 0.5rem;
+    }
+
+    /* Proposals Section */
+    .proposals-section {
+        background: rgba(30, 33, 38, 0.6);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--color-border);
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        position: relative;
+    }
+
+    .proposals-section::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(
+            90deg,
+            transparent 0%,
+            var(--color-primary) 50%,
+            transparent 100%
+        );
+        opacity: 0.5;
+    }
+
+    .proposals-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 2rem 2.5rem 1.5rem;
+        background: var(--color-bg-secondary);
+        border-bottom: 1px solid var(--color-border);
+        gap: 2rem;
+    }
+
+    .section-title {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .section-title h2 {
+        margin: 0 0 1rem 0;
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(
+            135deg,
+            var(--color-primary) 0%,
+            var(--color-success) 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .proposals-stats {
+        display: flex;
+        gap: 2rem;
+        flex-wrap: wrap;
+    }
+
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .stat-label {
+        font-size: 0.8rem;
+        color: var(--color-text-secondary);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .stat-value {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--color-primary);
+    }
+
+    .proposals-actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-shrink: 0;
+    }
+
+    .filter-section {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .filter-section label {
+        color: var(--color-text-secondary);
+        font-weight: 500;
+        font-size: 0.85rem;
+    }
+
+    .filter-section select {
+        padding: 0.5rem 0.75rem;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        color: var(--color-text-primary);
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .filter-section select:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px rgba(0, 210, 255, 0.2);
+    }
+
+    .filter-section select:hover {
+        border-color: var(--color-primary);
+        background: var(--color-surface-secondary);
+    }
+
+    .create-proposal-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.875rem 1.5rem;
+        background: linear-gradient(
+            135deg,
+            var(--color-success) 0%,
+            var(--color-success-dark, #16a34a) 100%
+        );
+        color: white;
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.3);
+    }
+
+    .create-proposal-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4);
+    }
+
+    .create-proposal-btn.active {
+        background: linear-gradient(
+            135deg,
+            var(--color-danger) 0%,
+            var(--color-danger-dark, #dc2626) 100%
+        );
+        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+    }
+
+    .create-proposal-btn.active:hover {
+        box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+    }
+
+    .create-proposal-btn svg {
+        width: 18px;
+        height: 18px;
+        transition: transform 0.3s ease;
+    }
+
+    .create-proposal-btn.active svg {
+        transform: rotate(45deg);
+    }
+
+    .auth-hint-compact {
+        font-size: 0.85rem;
+        color: var(--color-text-muted);
+        font-style: italic;
+        padding: 0.5rem 1rem;
+        background: rgba(239, 68, 68, 0.1);
+        border-radius: 8px;
+        border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    .create-proposal-form {
+        padding: 2rem 2.5rem;
+        background: var(--color-bg-primary);
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .proposals-list {
+        padding: 2rem 2.5rem;
+        background: var(--color-bg-primary);
     }
 
     .governance-label {
@@ -1395,26 +1621,49 @@
 
     /* Responsive Design */
     @media (max-width: 768px) {
-        .governance-selector-bar {
+        .compact-dashboard {
             flex-direction: column;
-            gap: 0.5rem;
+            gap: 1rem;
             align-items: flex-start;
+        }
+
+        .dashboard-left {
+            width: 100%;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .dashboard-right {
+            width: 100%;
+            justify-content: flex-end;
         }
 
         .governance-info {
             width: 100%;
         }
 
-        .governance-actions {
-            width: 100%;
-            justify-content: flex-end;
+        .proposals-header {
+            flex-direction: column;
+            gap: 1.5rem;
+            align-items: flex-start;
+            padding: 1.5rem 1.5rem 1rem;
         }
 
-        .contract-display {
-            max-width: 200px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+        .proposals-stats {
+            gap: 1rem;
+        }
+
+        .stat-item {
+            min-width: 80px;
+        }
+
+        .create-proposal-form,
+        .proposals-list {
+            padding: 1.5rem;
+        }
+
+        .section-title h2 {
+            font-size: 1.25rem;
         }
     }
 

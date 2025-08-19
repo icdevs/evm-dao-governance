@@ -299,3 +299,13 @@ export async function createSiweProofForVoting(proposalId, choice, contractAddre
 export function getCurrentWalletType() {
     return currentWalletType;
 }
+
+// Get the current provider (if connected)
+export function getProvider() {
+    return provider;
+}
+
+// Get the current signer (if connected)
+export function getSigner() {
+    return signer;
+}
