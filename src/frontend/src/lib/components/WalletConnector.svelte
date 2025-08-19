@@ -1,7 +1,6 @@
 <script>
-    import { onMount } from "svelte";
-    import { authStore, getPreferredWallet } from "../stores/auth.js";
-    import { } from '../votingAPI.js';
+    import { authStore } from "../stores/auth.js";
+    import { connectWallet } from '../stores/wallet.js';
     import { getNetworkInfo, NETWORKS } from "../utils.js";
 
     export let showNetworkInfo = true;
@@ -18,36 +17,6 @@
         return `${address.slice(0, 6)}...${address.slice(-4)}`;
     }
 
-    onMount(async () => {
-        // Listen for account/chain changes
-        votingInterface.onAccountChange = (address) => {
-            authStore.update((state) => ({
-                ...state,
-                walletAddress: address,
-                isAuthenticated: !!address,
-                walletType: "metamask",
-            }));
-        };
-        votingInterface.onChainChange = (chainId) => {
-            currentChainId = chainId;
-            networkInfo = getNetworkInfo(chainId);
-        };
-
-        // If wallet already connected, update state
-        if (votingInterface.userAddress) {
-            authStore.update((state) => ({
-                ...state,
-                walletAddress: votingInterface.userAddress,
-                isAuthenticated: true,
-                walletType: "metamask",
-            }));
-            currentChainId = votingInterface.currentChainId;
-            networkInfo = getNetworkInfo(currentChainId);
-        }
-    });
-
-    // No longer needed: handleGenericConnection
-
     function handleConnect() {
         // Only MetaMask supported
         handleWalletSelected(availableWallets[0]);
@@ -55,7 +24,7 @@
 
     async function handleWalletSelected(wallet) {
         try {
-            const result = await votingInterface.connectWallet();
+            const result = await connectWallet();
             connectedWalletType = wallet.type;
             currentChainId = result.chainId;
             networkInfo = getNetworkInfo(currentChainId);

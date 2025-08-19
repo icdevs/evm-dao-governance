@@ -1,6 +1,6 @@
 <script>
     import { onMount } from "svelte";
-    import { } from '../votingAPI.js';
+    import { connectWallet } from '../stores/wallet.js';
     import { authStore } from "../stores/auth.js";
 
     export let onWalletSelected = null; // Callback function
@@ -17,7 +17,7 @@
             isConnecting = true;
             error = null;
 
-            const result = await votingInterface.connectWallet();
+            const result = await connectWallet();
 
             if (onWalletSelected) {
                 onWalletSelected(wallet, result.address);

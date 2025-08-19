@@ -1,6 +1,10 @@
 // STORAGE SLOT VARIANCE ANALYSIS
 // Real examples of ERC20 contracts with different balance storage slots
 
+import { provider } from './stores/wallet.js';
+import { get } from 'svelte/store';
+import { ethers } from 'ethers';
+
 /*
 === STORAGE SLOT VARIANCE EXAMPLES ===
 
@@ -65,7 +69,13 @@ const VERIFIED_STORAGE_SLOTS = {
 };
 
 // SECURE: Multi-point validation function
-async function validateBalanceSlotSecurity(contractAddress, userAddress, claimedSlot, provider) {
+export async function validateBalanceSlotSecurity(contractAddress, userAddress, claimedSlot) {
+  const metamaskProvider = get(provider);
+  
+  if (!metamaskProvider) {
+    throw new Error('Wallet provider not available. Please connect your wallet.');
+  }
+
   const results = {
     securityLevel: 'UNKNOWN',
     warnings: [],
@@ -85,8 +95,8 @@ async function validateBalanceSlotSecurity(contractAddress, userAddress, claimed
   }
   
   // 2. Cross-validate with balanceOf() 
-  const actualBalance = await getBalanceOf(contractAddress, userAddress, provider);
-  const storageBalance = await getStorageBalance(contractAddress, userAddress, claimedSlot, provider);
+  const actualBalance = await getBalanceOf(contractAddress, userAddress, metamaskProvider);
+  const storageBalance = await getStorageBalance(contractAddress, userAddress, claimedSlot, metamaskProvider);
   
   if (actualBalance !== storageBalance) {
     results.securityLevel = 'DANGEROUS';
@@ -97,7 +107,7 @@ async function validateBalanceSlotSecurity(contractAddress, userAddress, claimed
   
   // 3. Check for suspiciously high values compared to total supply
   try {
-    const totalSupply = await getTotalSupply(contractAddress, provider);
+    const totalSupply = await getTotalSupply(contractAddress);
     const balanceRatio = BigInt(storageBalance) * 100n / BigInt(totalSupply);
     
     if (balanceRatio > 50n) { // More than 50% of total supply
@@ -113,7 +123,7 @@ async function validateBalanceSlotSecurity(contractAddress, userAddress, claimed
     if (testSlot === claimedSlot) continue;
     
     try {
-      const testBalance = await getStorageBalance(contractAddress, userAddress, testSlot, provider);
+      const testBalance = await getStorageBalance(contractAddress, userAddress, testSlot, metamaskProvider);
       if (testBalance !== '0' && BigInt(testBalance) > BigInt(storageBalance)) {
         suspiciousSlots.push({ slot: testSlot, balance: testBalance });
       }
@@ -129,13 +139,13 @@ async function validateBalanceSlotSecurity(contractAddress, userAddress, claimed
   return results;
 }
 
-// Helper functions (implement these in your main code)
-async function getBalanceOf(contractAddress, userAddress, provider) {
+// Helper function to get balance using balanceOf() call
+async function getBalanceOf(contractAddress, userAddress, metamaskProvider) {
   const balanceOfSelector = "0x70a08231";
   const paddedAddress = userAddress.toLowerCase().replace('0x', '').padStart(64, '0');
   const callData = balanceOfSelector + paddedAddress;
   
-  const result = await provider.send("eth_call", [
+  const result = await metamaskProvider.send("eth_call", [
     { to: contractAddress, data: callData },
     "latest"
   ]);
@@ -143,7 +153,8 @@ async function getBalanceOf(contractAddress, userAddress, provider) {
   return ethers.getBigInt(result || '0x0').toString();
 }
 
-async function getStorageBalance(contractAddress, userAddress, slot, provider) {
+// Helper function to get balance from storage slot
+async function getStorageBalance(contractAddress, userAddress, slot, metamaskProvider) {
   const storageKey = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       ["address", "uint256"],
@@ -151,7 +162,7 @@ async function getStorageBalance(contractAddress, userAddress, slot, provider) {
     )
   );
   
-  const proof = await provider.send("eth_getProof", [
+  const proof = await metamaskProvider.send("eth_getProof", [
     contractAddress,
     [storageKey],
     "latest"
@@ -160,13 +171,103 @@ async function getStorageBalance(contractAddress, userAddress, slot, provider) {
   return ethers.getBigInt(proof.storageProof[0]?.value || '0x0').toString();
 }
 
-async function getTotalSupply(contractAddress, provider) {
+// Helper function to get total supply
+export async function getTotalSupply(contractAddress) {
+  
+  const metamaskProvider = get(provider);
   const totalSupplySelector = "0x18160ddd"; // totalSupply()
   
-  const result = await provider.send("eth_call", [
+  const result = await metamaskProvider.send("eth_call", [
     { to: contractAddress, data: totalSupplySelector },
     "latest"
   ]);
   
   return ethers.getBigInt(result || '0x0').toString();
+}
+
+// Enhanced storage slot discovery with security validation
+export async function discoverStorageSlotSecurely(contractAddress, userAddress) {
+  const metamaskProvider = get(provider);
+  
+  if (!metamaskProvider) {
+    throw new Error('Wallet provider not available. Please connect your wallet.');
+  }
+
+  // Get current balance via balanceOf call
+  const actualBalance = await getBalanceOf(contractAddress, userAddress, metamaskProvider);
+  
+  if (actualBalance === '0') {
+    throw new Error('User has 0 tokens. Storage slot discovery requires a non-zero balance.');
+  }
+  
+  console.log(`🔍 Discovering storage slot for balance: ${actualBalance}`);
+  
+  // Check verified contracts first
+  const verified = VERIFIED_STORAGE_SLOTS[contractAddress.toLowerCase()];
+  if (verified) {
+    console.log(`✅ Found verified contract: ${verified.name}, slot: ${verified.slot}`);
+    
+    // Validate the verified slot
+    const validation = await validateBalanceSlotSecurity(contractAddress, userAddress, verified.slot);
+    if (validation.securityLevel === 'SECURE') {
+      return {
+        slot: verified.slot,
+        found: true,
+        source: 'verified_database',
+        validation,
+        actualBalance
+      };
+    } else {
+      console.log(`⚠️ Verified slot validation failed:`, validation.warnings);
+    }
+  }
+  
+  // Try common storage slots (0-20) with security validation
+  for (let slot = 0; slot <= 20; slot++) {
+    try {
+      const storageBalance = await getStorageBalance(contractAddress, userAddress, slot, metamaskProvider);
+      
+      if (storageBalance === actualBalance) {
+        console.log(`✅ Found matching slot: ${slot}`);
+        
+        // Validate the discovered slot
+        const validation = await validateBalanceSlotSecurity(contractAddress, userAddress, slot);
+        
+        return {
+          slot,
+          found: true,
+          source: 'systematic_search',
+          validation,
+          actualBalance,
+          storageBalance
+        };
+      }
+    } catch (error) {
+      console.log(`❌ Error checking slot ${slot}:`, error.message);
+    }
+  }
+  
+  throw new Error('Could not find storage slot in range 0-20. The contract may use a non-standard storage layout.');
+}
+
+// Validate a specific slot with comprehensive security checks
+export async function validateSlotWithSecurityChecks(contractAddress, userAddress, slot) {
+  const metamaskProvider = get(provider);
+  
+  if (!metamaskProvider) {
+    throw new Error('Wallet provider not available. Please connect your wallet.');
+  }
+
+  console.log(`🔒 Running security validation for slot ${slot}...`);
+  
+  const validation = await validateBalanceSlotSecurity(contractAddress, userAddress, slot);
+  
+  console.log(`🔒 Security validation results:`, validation);
+  
+  if (validation.securityLevel === 'DANGEROUS') {
+    const warningsText = validation.warnings.join('\n');
+    throw new Error(`SECURITY VALIDATION FAILED:\n${warningsText}`);
+  }
+  
+  return validation;
 }

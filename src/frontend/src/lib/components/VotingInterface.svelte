@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../stores/auth.js";
-    import { } from '../votingAPI.js';
+    import { hasUserVoted, castVote, getContractConfig } from '../votingAPI.js';
 
     export let proposal;
 
@@ -21,7 +21,7 @@
 
     async function loadUserVote() {
         try {
-            hasVoted = await votingInterface.hasUserVoted(proposal.id, $authStore.walletAddress);
+            hasVoted = await hasUserVoted(proposal.id, $authStore.walletAddress);
             // Optionally, fetch vote details if available
         } catch (err) {
             console.error("Failed to load user vote:", err);
@@ -44,8 +44,6 @@
             error = null;
             success = null;
 
-            // Initialize canister if not already done (provide canisterId and environment as needed)
-            // await votingInterface.initializeCanister(canisterId, environment);
 
             // Get snapshot contract from proposal (if available)
             const snapshotContract = proposal.snapshot?.contract_address || null;
@@ -54,7 +52,7 @@
             }
 
             // Cast vote using the voting interface
-            await votingInterface.castVote(proposal.id, selectedChoice, snapshotContract);
+            await castVote(proposal.id, selectedChoice, snapshotContract);
 
             success = `Vote submitted successfully! Choice: ${selectedChoice}`;
             hasVoted = true;
@@ -72,32 +70,6 @@
         }
     }
 
-    async function getDefaultSnapshotContract() {
-        try {
-            const contracts = await votingInterface.getContractConfig();
-            if (contracts && contracts.length > 0) {
-                return contracts[0].contract_address;
-            }
-        } catch (err) {
-            console.error("Failed to get snapshot contracts:", err);
-        }
-        return null;
-    }
-
-    // Witness generation is now handled by votingInterface.generateWitnessProof
-
-    function getChoiceVariant(choice) {
-        switch (choice) {
-            case "Yes":
-                return { Yes: null };
-            case "No":
-                return { No: null };
-            case "Abstain":
-                return { Abstain: null };
-            default:
-                return { Yes: null };
-        }
-    }
 
     function isProposalActive() {
         return proposal && "open" in proposal.status;

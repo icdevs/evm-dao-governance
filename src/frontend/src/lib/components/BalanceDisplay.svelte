@@ -4,7 +4,8 @@
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { balanceStore } from "../stores/balance.js";
-    import { getUserTokenBalance } from '../votingAPI.js';
+    import { getUserTokenBalance } from '../storageUtils.js';
+    import { getCurrentChainId } from '../stores/wallet.js';
 
     // Export the refresh function so parent can call it
     export let onRefresh = null;
@@ -58,7 +59,7 @@
     }
 
     async function getBalancesWithChainId() {
-        const currentChainId = votingInterface.currentChainId;
+        const currentChainId = getCurrentChainId();
         const balances = await getBalances();
         return {
             ...balances,
@@ -78,7 +79,6 @@
         }
 
         try {
-            // Use votingInterface to get token balance
             const tokenBal = await getUserTokenBalance(contractAddress, $authStore.walletAddress);
             return {
                 ethBalance: "0.0", // If you want ETH, add similar logic

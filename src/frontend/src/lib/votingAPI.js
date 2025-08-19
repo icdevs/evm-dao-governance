@@ -6,6 +6,8 @@ import { userAddress } from './stores/wallet.js';
 import { canisterActor, storageSlot } from './stores/canister.js';
 import { generateSIWEProof, generateWitnessProof } from './proofUtils.js';
 import { CHAIN_CONFIGS } from './chainConfig.js';
+import { createTransferData, parseTokenAmount, getNetworkInfo } from './utils.js';
+import { getCurrentChainId } from './stores/wallet.js';
 
 // Get contract configuration from canister
 export async function getContractConfig(contractAddress) {
@@ -25,6 +27,157 @@ export async function getContractConfig(contractAddress) {
         return config;
     } else {
         throw new Error(`Contract ${contractAddress} not found in snapshot contracts`);
+    }
+}
+
+// Create a new proposal
+export async function createProposal(proposalData) {
+    const actor = get(canisterActor);
+    const address = get(userAddress);
+    
+    if (!address) {
+        throw new Error('Wallet not connected');
+    }
+    
+    if (!actor) {
+        throw new Error('Canister not initialized');
+    }
+    
+    // Get contract config and chain info
+    const contractConfig = await getContractConfig();
+    const contractAddress = contractConfig?.contract_address || null;
+    if (!contractAddress) {
+        throw new Error('No governance contract available. Please configure a contract in the settings first.');
+    }
+    
+    // Get current chain ID from voting interface
+    const chainId = getCurrentChainId();
+    const networkInfo = getNetworkInfo(chainId);
+    
+    // Generate SIWE proof
+    const siweProof = await generateSIWEProof(contractAddress, chainId);
+    
+    // Build proposal object based on type
+    let proposal = {
+        metadata: proposalData.metadata || '',
+        snapshotContract: contractAddress,
+        siweProof,
+    };
+    
+    // Process proposal data based on type
+    switch (proposalData.type) {
+        case 'motion':
+            proposal.type = 'motion';
+            proposal.motion = proposalData.motionText;
+            break;
+            
+        case 'eth_transaction':
+            // Handle ERC20 transfer helper if enabled
+            let ethData = proposalData.ethData || '0x';
+            let ethValue = proposalData.ethValue || '0';
+            
+            if (proposalData.erc20Mode && proposalData.erc20Recipient && proposalData.erc20Amount) {
+                const amount = parseTokenAmount(
+                    proposalData.erc20Amount,
+                    parseInt(proposalData.erc20Decimals || '18')
+                );
+                ethData = createTransferData(proposalData.erc20Recipient, amount);
+                ethValue = '0'; // ERC20 transfers don't send ETH value
+            }
+            
+            proposal.type = 'eth_transaction';
+            proposal.to = proposalData.ethTo;
+            proposal.value = ethValue;
+            proposal.data = ethData;
+            proposal.chainId = chainId;
+            proposal.networkName = networkInfo.name.toLowerCase().replace(/\s+/g, '_');
+            proposal.gasLimit = proposalData.ethGasLimit || '100000';
+            proposal.maxFeePerGas = proposalData.ethMaxFeePerGas || '2000000000';
+            proposal.maxPriorityFeePerGas = proposalData.ethMaxPriorityFeePerGas || '1000000000';
+            break;
+            
+        case 'icp_call':
+            proposal.type = 'icp_call';
+            proposal.canister = proposalData.icpCanister;
+            proposal.method = proposalData.icpMethod;
+            proposal.args = proposalData.icpArgs.startsWith('0x') 
+                ? proposalData.icpArgs 
+                : `0x${proposalData.icpArgs}`;
+            proposal.cycles = proposalData.icpCycles || '0';
+            break;
+            
+        default:
+            throw new Error(`Unknown proposal type: ${proposalData.type}`);
+    }
+    
+    // Convert to Candid format and submit
+    const candidProposal = {
+        action: getActionVariant(proposal),
+        metadata: proposal.metadata ? [proposal.metadata] : [],
+        siwe: {
+            message: proposal.siweProof.message,
+            signature: proposal.siweProof.signature,
+        },
+        snapshot_contract: proposal.snapshotContract ? [proposal.snapshotContract] : [],
+    };
+    
+    console.log('Submitting proposal:', candidProposal);
+    
+    const result = await actor.icrc149_create_proposal(candidProposal);
+    
+    if ('Err' in result) {
+        throw new Error(result.Err);
+    }
+    
+    return {
+        id: result.Ok,
+        proposal: proposal
+    };
+}
+
+// Helper function to convert proposal to Candid action variant
+function getActionVariant(proposal) {
+    switch (proposal.type) {
+        case 'motion':
+            return { Motion: proposal.motion };
+            
+        case 'eth_transaction':
+            return {
+                EthTransaction: {
+                    to: proposal.to,
+                    value: BigInt(proposal.value),
+                    data: new Uint8Array(
+                        Buffer.from(proposal.data.slice(2), 'hex')
+                    ),
+                    chain: {
+                        chain_id: BigInt(proposal.chainId),
+                        network_name: proposal.networkName,
+                    },
+                    subaccount: [],
+                    maxPriorityFeePerGas: BigInt(proposal.maxPriorityFeePerGas),
+                    maxFeePerGas: BigInt(proposal.maxFeePerGas),
+                    gasLimit: BigInt(proposal.gasLimit),
+                    signature: [],
+                    nonce: [],
+                },
+            };
+            
+        case 'icp_call':
+            return {
+                ICPCall: {
+                    canister: proposal.canister,
+                    method: proposal.method,
+                    args: new Uint8Array(
+                        Buffer.from(proposal.args.replace('0x', ''), 'hex')
+                    ),
+                    cycles: BigInt(proposal.cycles),
+                    best_effort_timeout: [],
+                    result: [],
+                },
+            };
+            
+        default:
+            throw new Error(`Unknown proposal type: ${proposal.type}`);
     }
 }
 

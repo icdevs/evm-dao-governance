@@ -2,7 +2,7 @@
     import { onMount } from "svelte";
     import { getProposal, hasUserVoted, executeProposal } from '../votingAPI.js';
     import { authStore } from "../stores/auth.js";
-    import { getNetworkInfo, formatTokenAmount } from "../utils.js";
+    import { getNetworkInfo } from "../utils.js";
     import VotingInterface from "./VotingInterface.svelte";
 
     export let proposalId;

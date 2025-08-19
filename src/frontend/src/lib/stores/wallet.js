@@ -70,6 +70,48 @@ export async function connectWallet() {
     };
 }
 
+// Get current chain ID
+export async function getCurrentChainId() {
+    // First try to get from store (most reliable if already connected)
+    let currentChainId;
+    const unsubscribe = chainId.subscribe(value => currentChainId = value);
+    unsubscribe();
+    
+    if (currentChainId) {
+        return currentChainId;
+    }
+    
+    // If not in store, try to get from provider
+    let currentProvider;
+    const unsubscribeProvider = provider.subscribe(value => currentProvider = value);
+    unsubscribeProvider();
+    
+    if (currentProvider) {
+        try {
+            const network = await currentProvider.getNetwork();
+            const networkChainId = Number(network.chainId);
+            chainId.set(networkChainId); // Update store
+            return networkChainId;
+        } catch (error) {
+            console.error('Failed to get chain ID from provider:', error);
+        }
+    }
+    
+    // Last resort: try MetaMask directly
+    if (typeof window !== 'undefined' && window.ethereum) {
+        try {
+            const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+            const directChainId = parseInt(chainIdHex, 16);
+            chainId.set(directChainId); // Update store
+            return directChainId;
+        } catch (error) {
+            console.error('Failed to get chain ID from MetaMask:', error);
+        }
+    }
+    
+    throw new Error('Unable to get chain ID. Please connect your wallet.');
+}
+
 // Disconnect wallet
 export function disconnectWallet() {
     userAddress.set(null);
@@ -79,9 +121,12 @@ export function disconnectWallet() {
 
 // Sign message utility
 export async function signMessage(message) {
-    const signerInstance = await signer;
-    if (!signerInstance) {
+    let currentSigner;
+    const unsubscribe = signer.subscribe(value => currentSigner = value);
+    unsubscribe();
+    
+    if (!currentSigner) {
         throw new Error('No signer available');
     }
-    return await signerInstance.signMessage(message);
+    return await currentSigner.signMessage(message);
 }

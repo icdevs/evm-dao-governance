@@ -1,12 +1,11 @@
 <script>
     import { onMount } from "svelte";
-    import { goto } from "$app/navigation";
     import { proposalsStore } from "../stores/proposals.js";
     import { authStore } from "../stores/auth.js";
     import { configStore } from "../stores/config.js";
     import { getNetworkInfo } from "../utils.js";
-    import { } from '../votingAPI.js';
-    import { ethers } from 'ethers';
+    import { getProposals, castVote } from '../votingAPI.js';
+    import { getUserTokenBalance } from '../storageUtils.js';
 
     // Export filter prop
     export let filter = "any"; // any, active, executed, expired, pending, rejected
@@ -46,7 +45,7 @@
               });
 
     onMount(() => {
-        loadProposals();
+        load();
         // Load user's token balance when component mounts
         if (isAuthenticated && walletAddress && contractAddress) {
             loadUserTokenBalance();
@@ -58,9 +57,9 @@
         loadUserTokenBalance();
     }
 
-    async function loadProposals() {
+    async function load() {
         try {
-            const proposals = await votingInterface.loadProposals();
+            const proposals = await getProposals();
             proposalsStore.set({ proposals, loading: false, error: null });
         } catch (err) {
             console.error("Failed to load proposals:", err);
@@ -76,7 +75,7 @@
 
         isLoadingBalance = true;
         try {
-            const balance = await votingInterface.getUserTokenBalance(contractAddress, walletAddress);
+            const balance = await getUserTokenBalance(contractAddress, walletAddress);
             userTokenBalance = balance.toString();
             userVotingPower = userTokenBalance;
         } catch (error) {
@@ -184,14 +183,14 @@
             userVotes = { ...userVotes };
             
             // Submit vote using voting interface
-            await votingInterface.castVote(proposalId, vote, contractAddress);
+            await castVote(proposalId, vote, contractAddress);
             
             // Update local state on success
             userVotes[proposalId] = vote;
             userVotes = { ...userVotes };
             
             // Refresh proposals to get updated tallies
-            await loadProposals();
+            await load();
             
             console.log(`✅ Successfully voted ${vote} on proposal ${proposalId}`);
             
