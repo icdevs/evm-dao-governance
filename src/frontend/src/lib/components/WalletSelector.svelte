@@ -1,32 +1,26 @@
 <script>
     import { onMount } from "svelte";
-    import {
-        getAvailableWallets,
-        connectWallet,
-        WALLET_TYPES,
-    } from "../ethereum.js";
+    import { } from '../votingAPI.js';
     import { authStore } from "../stores/auth.js";
 
     export let onWalletSelected = null; // Callback function
     export let showTitle = true;
 
-    let availableWallets = [];
+    let availableWallets = [{ type: "metamask", name: "MetaMask", icon: "🦊" }];
     let isConnecting = false;
     let error = null;
 
-    onMount(() => {
-        availableWallets = getAvailableWallets();
-    });
+    // No longer needed: onMount for getAvailableWallets
 
     async function handleWalletSelect(wallet) {
         try {
             isConnecting = true;
             error = null;
 
-            const address = await connectWallet(wallet.type);
+            const result = await votingInterface.connectWallet();
 
             if (onWalletSelected) {
-                onWalletSelected(wallet, address);
+                onWalletSelected(wallet, result.address);
             }
         } catch (err) {
             console.error("Failed to connect to wallet:", err);

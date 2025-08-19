@@ -1,6 +1,6 @@
 <script>
     import { configStore } from "../stores/config.js";
-    import { votingInterface } from "../icrc149-voting-interface.js";
+    import { } from "../votingAPI.js";
     import { statusStore } from "../stores/status.js";
     import { backend } from "../canisters.js";
     import { onMount } from "svelte";
@@ -264,7 +264,7 @@
         configStore.updateField("contractAddress", contractAddress);
         configStore.checkConfiguration();
         try {
-            await votingInterface.initializeCanister(canisterId, environment);
+            await initializeCanister(canisterId, environment);
             statusStore.add("Voting interface initialized!", "success");
         } catch (e) {
             statusStore.add(`Voting interface initialization failed: ${e.message}`, "error");

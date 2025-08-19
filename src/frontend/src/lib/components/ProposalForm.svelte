@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../stores/auth.js";
-    import { votingInterface } from '../icrc149-voting-interface.js';
+    import { getContractConfig } from '../votingAPI.js';
     import {
         createTransferData,
         parseTokenAmount,
@@ -77,7 +77,7 @@
             }
 
             // Get contract config and chain info
-            const contractConfig = await votingInterface.getContractConfig();
+            const contractConfig = await getContractConfig();
             const contractAddress = contractConfig?.contract_address || null;
             if (!contractAddress) {
                 throw new Error("No governance contract available. Please configure a contract in the settings first.");

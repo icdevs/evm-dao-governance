@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../stores/auth.js";
-    import { votingInterface } from '../icrc149-voting-interface.js';
+    import { } from '../votingAPI.js';
 
     export let proposal;
 

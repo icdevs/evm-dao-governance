@@ -1,18 +1,7 @@
 <script>
     import { onMount } from "svelte";
     import { authStore, getPreferredWallet } from "../stores/auth.js";
-    import {
-        connectWallet,
-        disconnectWallet,
-        getCurrentAddress,
-        getCurrentChainId,
-        getCurrentWalletType,
-        isWalletConnected,
-        isSpecificWalletConnected,
-        getAvailableWallets,
-        switchNetwork,
-        WALLET_TYPES,
-    } from "../ethereum.js";
+    import { } from '../votingAPI.js';
     import { getNetworkInfo, NETWORKS } from "../utils.js";
 
     export let showNetworkInfo = true;
@@ -21,7 +10,7 @@
     let networkInfo = null;
     let showWalletSelector = false;
     let showNetworkSelector = false;
-    let availableWallets = [];
+    let availableWallets = [{ type: "metamask", name: "MetaMask", icon: "🦊" }];
     let connectedWalletType = null;
 
     function formatAddress(address) {
@@ -30,112 +19,52 @@
     }
 
     onMount(async () => {
-        availableWallets = getAvailableWallets();
-        console.log("Available wallets:", availableWallets);
+        // Listen for account/chain changes
+        votingInterface.onAccountChange = (address) => {
+            authStore.update((state) => ({
+                ...state,
+                walletAddress: address,
+                isAuthenticated: !!address,
+                walletType: "metamask",
+            }));
+        };
+        votingInterface.onChainChange = (chainId) => {
+            currentChainId = chainId;
+            networkInfo = getNetworkInfo(chainId);
+        };
 
-        // Get preferred wallet first
-        const preferredWallet = getPreferredWallet();
-        console.log("Preferred wallet from storage:", preferredWallet);
-
-        // Check if preferred wallet is specifically connected
-        if (preferredWallet) {
-            try {
-                const preferredConnected =
-                    await isSpecificWalletConnected(preferredWallet);
-                console.log(
-                    `Preferred wallet (${preferredWallet}) connected:`,
-                    preferredConnected
-                );
-
-                if (preferredConnected) {
-                    const preferredWalletObj = availableWallets.find(
-                        (w) => w.type === preferredWallet
-                    );
-                    if (preferredWalletObj) {
-                        console.log(
-                            "Connecting to preferred wallet:",
-                            preferredWallet
-                        );
-                        await handleWalletSelected(preferredWalletObj);
-                        return; // Exit early if successful
-                    }
-                }
-            } catch (error) {
-                console.log(
-                    "Error checking preferred wallet connection:",
-                    error
-                );
-            }
-        }
-
-        // Fallback: check if any wallet is connected
-        try {
-            const anyConnected = await isWalletConnected();
-            console.log("Any wallet connected (fallback):", anyConnected);
-
-            if (anyConnected) {
-                await handleGenericConnection();
-            } else {
-                console.log("No wallet connected");
-            }
-        } catch (error) {
-            console.error("Error checking wallet connection:", error);
+        // If wallet already connected, update state
+        if (votingInterface.userAddress) {
+            authStore.update((state) => ({
+                ...state,
+                walletAddress: votingInterface.userAddress,
+                isAuthenticated: true,
+                walletType: "metamask",
+            }));
+            currentChainId = votingInterface.currentChainId;
+            networkInfo = getNetworkInfo(currentChainId);
         }
     });
 
-    async function handleGenericConnection() {
-        const address = await getCurrentAddress();
-        const chainId = await getCurrentChainId();
-        connectedWalletType = getCurrentWalletType();
-
-        console.log("Generic connection info:", {
-            address,
-            chainId,
-            connectedWalletType,
-        });
-
-        if (address) {
-            authStore.update((state) => ({
-                ...state,
-                isAuthenticated: true,
-                walletAddress: address,
-                walletType: connectedWalletType,
-            }));
-            currentChainId = chainId;
-            networkInfo = getNetworkInfo(chainId);
-        }
-    }
+    // No longer needed: handleGenericConnection
 
     function handleConnect() {
-        availableWallets = getAvailableWallets();
-
-        if (availableWallets.length === 0) {
-            alert(
-                "No wallets detected. Please install MetaMask or Coinbase Wallet."
-            );
-            return;
-        }
-
-        if (availableWallets.length === 1) {
-            // If only one wallet is available, connect directly
-            handleWalletSelected(availableWallets[0]);
-        } else {
-            // Show wallet selector if multiple wallets are available
-            showWalletSelector = true;
-        }
+        // Only MetaMask supported
+        handleWalletSelected(availableWallets[0]);
     }
 
     async function handleWalletSelected(wallet) {
         try {
-            const address = await connectWallet(wallet.type);
+            const result = await votingInterface.connectWallet();
             connectedWalletType = wallet.type;
-            currentChainId = await getCurrentChainId();
+            currentChainId = result.chainId;
             networkInfo = getNetworkInfo(currentChainId);
             showWalletSelector = false;
 
-            // Update auth store with wallet type (connectWallet already calls setAuth)
             authStore.update((state) => ({
                 ...state,
+                isAuthenticated: true,
+                walletAddress: result.address,
                 walletType: wallet.type,
             }));
         } catch (error) {
@@ -144,7 +73,13 @@
     }
 
     function handleDisconnect() {
-        disconnectWallet();
+        // MetaMask disconnect is not programmatic; just clear state
+        authStore.update((state) => ({
+            ...state,
+            isAuthenticated: false,
+            walletAddress: null,
+            walletType: null,
+        }));
         currentChainId = null;
         networkInfo = null;
         connectedWalletType = null;
@@ -153,7 +88,10 @@
 
     async function handleSwitchNetwork(targetChainId) {
         try {
-            await switchNetwork(targetChainId);
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x' + targetChainId.toString(16) }],
+            });
             currentChainId = targetChainId;
             networkInfo = getNetworkInfo(targetChainId);
         } catch (error) {

@@ -1,7 +1,6 @@
 import { writable, derived } from 'svelte/store';
-import { getTotalSupply, getTokenHolderCount } from '../blockchain.js';
 import { configStore } from './config.js';
-import { getCurrentChainId } from '../ethereum.js';
+import { } from '../votingAPI.js';
 
 // Governance statistics store
 function createGovernanceStatsStore() {
@@ -46,15 +45,15 @@ function createGovernanceStatsStore() {
                     throw new Error('Contract address not configured');
                 }
 
-                const chainId = await getCurrentChainId();
+                const chainId = votingInterface.currentChainId;
                 if (!chainId) {
                     throw new Error('Chain ID not available');
                 }
 
                 // Get total supply (voting power) and member count in parallel
                 const [totalVotingPower, memberCount] = await Promise.all([
-                    getTotalSupply(config.contractAddress, chainId),
-                    getTokenHolderCount(config.contractAddress, chainId)
+                    votingInterface.getTotalSupply(config.contractAddress),
+                    votingInterface.getTokenHolderCount(config.contractAddress)
                 ]);
                 
                 update(state => ({

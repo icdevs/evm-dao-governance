@@ -4,11 +4,10 @@
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { balanceStore } from "../stores/balance.js";
-    import { getCurrentChainId } from '../ethereum.js';
+    import { getUserTokenBalance } from '../votingAPI.js';
 
     // Export the refresh function so parent can call it
     export let onRefresh = null;
-        import { votingInterface } from '../icrc149-voting-interface.js';
     $: isConnected = $authStore.isAuthenticated;
     $: isConfigured = $configStore.isConfigured;
     $: canisterId = $configStore.canisterId;
@@ -59,7 +58,7 @@
     }
 
     async function getBalancesWithChainId() {
-        const currentChainId = await getCurrentChainId();
+        const currentChainId = votingInterface.currentChainId;
         const balances = await getBalances();
         return {
             ...balances,
@@ -80,7 +79,7 @@
 
         try {
             // Use votingInterface to get token balance
-            const tokenBal = await votingInterface.getUserTokenBalance(contractAddress, $authStore.walletAddress);
+            const tokenBal = await getUserTokenBalance(contractAddress, $authStore.walletAddress);
             return {
                 ethBalance: "0.0", // If you want ETH, add similar logic
                 tokenBalance: tokenBal.toString(),

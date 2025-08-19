@@ -5,7 +5,7 @@
     import { authStore } from "../stores/auth.js";
     import { configStore } from "../stores/config.js";
     import { getNetworkInfo } from "../utils.js";
-    import { votingInterface } from '../icrc149-voting-interface.js';
+    import { } from '../votingAPI.js';
     import { ethers } from 'ethers';
 
     // Export filter prop
@@ -412,31 +412,12 @@
         gap: 1rem;
     }
 
-    h2 {
-        margin: 0;
-        color: var(--color-text-primary);
-        font-size: 1.5rem;
-        font-weight: 700;
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-success) 100%
-        );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
 
     .filter-section {
         display: flex;
         align-items: center;
         gap: 1rem;
         flex-wrap: wrap;
-    }
-
-    .filter-section label {
-        font-weight: 600;
-        color: var(--color-text-primary, #333);
     }
 
     /* Form controls now use unified styles from index.scss */
@@ -851,19 +832,6 @@
         color: var(--color-text-primary, #333);
         font-size: 0.9rem;
     }
-
-    .detail-item dd.vote-count.yes {
-        color: var(--color-success, #28a745);
-        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-        font-weight: 700;
-    }
-
-    .detail-item dd.vote-count.no {
-        color: var(--color-danger, #dc3545);
-        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-        font-weight: 700;
-    }
-
     .detail-item dd.countdown {
         color: var(--color-primary, #007bff);
         font-weight: 600;

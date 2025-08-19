@@ -1,6 +1,6 @@
 <script>
     import { onMount } from "svelte";
-    import { votingInterface } from '../icrc149-voting-interface.js';
+    import { getProposal, hasUserVoted, executeProposal } from '../votingAPI.js';
     import { authStore } from "../stores/auth.js";
     import { getNetworkInfo, formatTokenAmount } from "../utils.js";
     import VotingInterface from "./VotingInterface.svelte";
@@ -25,7 +25,7 @@
             error = null;
 
             // Load proposal details using voting interface
-            const result = await votingInterface.canisterActor.icrc149_get_proposal(proposalId);
+            const result = await getProposal(proposalId);
 
             if (!result || result.length === 0) {
                 throw new Error("Proposal not found");
@@ -55,7 +55,7 @@
 
     async function loadUserVote() {
         try {
-            hasVoted = await votingInterface.hasUserVoted(proposalId, $authStore.walletAddress);
+            hasVoted = await hasUserVoted(proposalId, $authStore.walletAddress);
             // Optionally, fetch vote details if available
         } catch (err) {
             console.error("Failed to load user vote:", err);
@@ -125,11 +125,11 @@
         loadProposal();
     }
 
-    async function executeProposal() {
+    async function execute() {
         if (!proposal || !proposal.isActive) return;
 
         try {
-            await votingInterface.executeProposal(proposal.id);
+            await executeProposal(proposal.id);
             // Reload proposal to see updated status
             await loadProposal();
         } catch (err) {
@@ -391,7 +391,7 @@
         <!-- Admin Actions -->
         {#if proposal.isActive && proposal.tally.result === "Pass"}
             <div class="admin-actions">
-                <button class="execute-btn" on:click={executeProposal}>
+                <button class="execute-btn" on:click={execute}>
                     Execute Proposal
                 </button>
             </div>

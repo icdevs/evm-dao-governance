@@ -6,7 +6,7 @@
     import { statusStore } from "../stores/status.js";
     import { governanceStatsStore } from "../stores/governance.js";
     import { balanceStore } from "../stores/balance.js";
-    import { votingInterface } from '../icrc149-voting-interface.js';
+    import { getUserTokenBalance } from '../votingAPI.js';
     import { CopyButton, Spinner } from "./ui/index.js";
 
     // Export the refresh function so parent can call it
@@ -87,7 +87,7 @@
 
         try {
             // Use votingInterface to get token balance
-            const tokenBal = await votingInterface.getUserTokenBalance(contractAddress, $authStore.walletAddress);
+            const tokenBal = await getUserTokenBalance(contractAddress, $authStore.walletAddress);
             return {
                 ethBalance: "0.0", // If you want ETH, add similar logic
                 tokenBalance: tokenBal.toString(),
