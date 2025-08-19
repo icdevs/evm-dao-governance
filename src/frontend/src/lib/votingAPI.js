@@ -1,61 +1,50 @@
-// votingAPI.js - Core voting API functions using stores
+// votingAPI.js - Core voting API functions (refactored to eliminate get() usage)
 
 import { ethers } from 'ethers';
-import { get } from 'svelte/store';
-import { userAddress } from './stores/wallet.js';
-import { canisterActor, storageSlot } from './stores/canister.js';
-import { generateSIWEProof, generateWitnessProof } from './proofUtils.js';
-import { CHAIN_CONFIGS } from './chainConfig.js';
 import { createTransferData, parseTokenAmount, getNetworkInfo } from './utils.js';
-import { getCurrentChainId } from './stores/wallet.js';
 
 // Get contract configuration from canister
-export async function getContractConfig(contractAddress) {
-    const actor = get(canisterActor);
-    if (!actor) {
-        throw new Error('Canister not initialized');
+export async function getContractConfig(backendActor, contractAddress) {
+    if (!backendActor) {
+        throw new Error('Backend actor not provided');
     }
     
-    const result = await actor.icrc149_get_snapshot_contracts();
+    const result = await backendActor.icrc149_get_snapshot_contracts();
     
     // Find the contract in the list
     const contractConfig = result.find(([address, config]) => address === contractAddress);
     
     if (contractConfig) {
         const [, config] = contractConfig;
-        storageSlot.set(Number(config.balance_storage_slot));
-        return config;
+        return {
+            config,
+            storageSlot: Number(config.balance_storage_slot)
+        };
     } else {
         throw new Error(`Contract ${contractAddress} not found in snapshot contracts`);
     }
 }
 
 // Create a new proposal
-export async function createProposal(proposalData) {
-    const actor = get(canisterActor);
-    const address = get(userAddress);
+export async function createProposal(proposalData, dependencies) {
+    const { backendActor, userAddress, contractAddress, chainId, signer } = dependencies;
     
-    if (!address) {
+    if (!userAddress) {
         throw new Error('Wallet not connected');
     }
     
-    if (!actor) {
-        throw new Error('Canister not initialized');
+    if (!backendActor) {
+        throw new Error('Backend actor not available');
     }
     
-    // Get contract config and chain info
-    const contractConfig = await getContractConfig();
-    const contractAddress = contractConfig?.contract_address || null;
     if (!contractAddress) {
-        throw new Error('No governance contract available. Please configure a contract in the settings first.');
+        throw new Error('No governance contract configured');
     }
     
-    // Get current chain ID from voting interface
-    const chainId = getCurrentChainId();
     const networkInfo = getNetworkInfo(chainId);
     
     // Generate SIWE proof
-    const siweProof = await generateSIWEProof(contractAddress, chainId);
+    const siweProof = await generateSIWEProof(proposalData, contractAddress, chainId, signer);
     
     // Build proposal object based on type
     let proposal = {
@@ -123,7 +112,7 @@ export async function createProposal(proposalData) {
     
     console.log('Submitting proposal:', candidProposal);
     
-    const result = await actor.icrc149_create_proposal(candidProposal);
+    const result = await backendActor.icrc149_create_proposal(candidProposal);
     
     if ('Err' in result) {
         throw new Error(result.Err);
@@ -182,16 +171,15 @@ function getActionVariant(proposal) {
 }
 
 // Load proposals with optional filtering
-export async function getProposals(limit = 10, offset = null, filters = []) {
-    const actor = get(canisterActor);
-    if (!actor) {
-        throw new Error('Canister not initialized');
+export async function getProposals(backendActor, limit = 10, offset = null, filters = []) {
+    if (!backendActor) {
+        throw new Error('Backend actor not provided');
     }
     
     const limitOpt = limit ? [BigInt(limit)] : [];
     const prevOpt = offset ? [BigInt(offset)] : null;
     
-    const result = await actor.icrc149_get_proposals(prevOpt, limitOpt, filters);
+    const result = await backendActor.icrc149_get_proposals(prevOpt, limitOpt, filters);
     
     return result.map(proposal => ({
         id: Number(proposal.id),
@@ -200,38 +188,37 @@ export async function getProposals(limit = 10, offset = null, filters = []) {
         deadline: Number(proposal.deadline),
         created_at: Number(proposal.created_at),
         proposer: proposal.proposer,
-        snapshot: proposal.snapshot || null
+        snapshot: proposal.snapshot || null,
+        tally: proposal.tally || { yes: 0, no: 0, abstain: 0, total: 0, result: 'Pending' }
     }));
 }
 
 // Get single proposal
-export async function getProposal(proposalId) {
-    const actor = get(canisterActor);
-    if (!actor) {
-        throw new Error('Canister not initialized');
+export async function getProposal(backendActor, proposalId) {
+    if (!backendActor) {
+        throw new Error('Backend actor not provided');
     }
     
-    return await actor.icrc149_get_proposal(BigInt(proposalId));
+    return await backendActor.icrc149_get_proposal(BigInt(proposalId));
 }
 
 // Cast a vote on a proposal
-export async function castVote(proposalId, choice, contractAddress) {
-    const actor = get(canisterActor);
-    const address = get(userAddress);
+export async function castVote(proposalId, choice, dependencies) {
+    const { backendActor, userAddress, contractAddress, chainId, signer, provider } = dependencies;
     
-    if (!address) {
+    if (!userAddress) {
         throw new Error('Wallet not connected');
     }
     
-    if (!actor) {
-        throw new Error('Canister not initialized');
+    if (!backendActor) {
+        throw new Error('Backend actor not available');
     }
     
     // Generate SIWE proof
-    const siweProof = await generateSIWEProof(proposalId, choice, contractAddress);
+    const siweProof = await generateSIWEProofForVoting(proposalId, choice, contractAddress, chainId, signer);
     
     // Generate witness proof
-    const witness = await generateWitnessProof(contractAddress, proposalId);
+    const witness = await generateWitnessProof(contractAddress, proposalId, userAddress, provider);
     
     // Prepare vote choice
     const voteChoice = choice === 'Yes' ? { Yes: null } : 
@@ -240,14 +227,14 @@ export async function castVote(proposalId, choice, contractAddress) {
     
     const voteArgs = {
         proposal_id: BigInt(proposalId),
-        voter: ethers.getBytes(address),
+        voter: ethers.getBytes(userAddress),
         choice: voteChoice,
         siwe: siweProof,
         witness: witness
     };
     
     // Submit vote to canister
-    const result = await actor.icrc149_vote_proposal(voteArgs);
+    const result = await backendActor.icrc149_vote_proposal(voteArgs);
     
     if ('Ok' in result) {
         return 'Vote submitted successfully';
@@ -257,13 +244,12 @@ export async function castVote(proposalId, choice, contractAddress) {
 }
 
 // Execute a proposal (end vote)
-export async function executeProposal(proposalId) {
-    const actor = get(canisterActor);
-    if (!actor) {
-        throw new Error('Canister not initialized');
+export async function executeProposal(backendActor, proposalId) {
+    if (!backendActor) {
+        throw new Error('Backend actor not provided');
     }
     
-    const result = await actor.icrc149_execute_proposal(BigInt(proposalId));
+    const result = await backendActor.icrc149_execute_proposal(BigInt(proposalId));
     
     if ('Ok' in result) {
         return result.Ok;
@@ -273,13 +259,12 @@ export async function executeProposal(proposalId) {
 }
 
 // Get vote tally for a proposal
-export async function getVoteTally(proposalId) {
-    const actor = get(canisterActor);
-    if (!actor) {
-        throw new Error('Canister not initialized');
+export async function getVoteTally(backendActor, proposalId) {
+    if (!backendActor) {
+        throw new Error('Backend actor not provided');
     }
     
-    const result = await actor.icrc149_tally_votes(BigInt(proposalId));
+    const result = await backendActor.icrc149_tally_votes(BigInt(proposalId));
     
     return {
         yes: Number(result.yes),
@@ -290,44 +275,155 @@ export async function getVoteTally(proposalId) {
     };
 }
 
-// Update canister with discovered storage slot
-export async function updateCanisterStorageSlot(chainId, contractAddress, slot) {
-    const actor = get(canisterActor);
-    if (!actor) {
-        throw new Error('Canister not initialized');
+// Check if user has already voted on a proposal
+export async function hasUserVoted(backendActor, proposalId, userAddress) {
+    if (!backendActor || !userAddress) {
+        return false;
     }
     
-    const config = {
-        contract_address: contractAddress,
-        chain: { 
-            chain_id: BigInt(chainId), 
-            network_name: CHAIN_CONFIGS[chainId]?.name || 'Unknown' 
-        },
-        rpc_service: {
-            rpc_type: 'custom',
-            canister_id: null, // Will use default EVM RPC canister
-            custom_config: null
-        },
-        contract_type: { ERC20: null },
-        balance_storage_slot: BigInt(slot),
-        enabled: true
-    };
-    
-    const result = await actor.icrc149_update_snapshot_contract_config(
-        contractAddress, 
-        [config]
-    );
-    
-    if ('Ok' in result) {
-        return 'Configuration updated successfully';
-    } else {
-        throw new Error(`Failed to update canister: ${result.Err}`);
+    try {
+        const voteRequests = [{
+            proposal_id: BigInt(proposalId),
+            user_address: userAddress
+        }];
+        
+        const voteResults = await backendActor.icrc149_get_user_votes(voteRequests);
+        
+        if (voteResults && voteResults.length > 0) {
+            const result = voteResults[0];
+            return result.vote && result.vote.length > 0;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Failed to check user vote:', error);
+        return false;
     }
 }
 
-// Check if user has already voted on a proposal
-export async function hasUserVoted(proposalId) {
-    // This would need to be implemented in the canister
-    // For now, return false as a placeholder
-    return false;
+// Generate SIWE proof for proposal creation
+async function generateSIWEProof(proposalData, contractAddress, chainId, signer) {
+    if (!signer) {
+        throw new Error('Signer not available');
+    }
+    
+    const address = await signer.getAddress();
+    const currentTime = Date.now();
+    const currentTimeNanos = BigInt(currentTime) * 1_000_000n;
+    const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
+    
+    const currentTimeISO = new Date(currentTime).toISOString();
+    const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
+    
+    const domain = window.location.host;
+    const origin = window.location.origin;
+    
+    const statement = `Create proposal for contract ${contractAddress}`;
+    
+    const message = `${domain} wants you to sign in with your Ethereum account:
+${address}
+
+${statement}
+
+URI: ${origin}
+Version: 1
+Chain ID: ${chainId}
+Nonce: ${expirationTimeNanos.toString()}
+Issued At: ${currentTimeISO}
+Expiration Time: ${expirationTimeISO}
+Resources:
+- contract:${contractAddress}`;
+    
+    const signature = await signer.signMessage(message);
+    
+    return {
+        message: message,
+        signature: ethers.getBytes(signature)
+    };
+}
+
+// Generate SIWE proof for voting
+async function generateSIWEProofForVoting(proposalId, choice, contractAddress, chainId, signer) {
+    if (!signer) {
+        throw new Error('Signer not available');
+    }
+    
+    const address = await signer.getAddress();
+    const currentTime = Date.now();
+    const currentTimeNanos = BigInt(currentTime) * 1_000_000n;
+    const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
+    
+    const currentTimeISO = new Date(currentTime).toISOString();
+    const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
+    
+    const domain = window.location.host;
+    const origin = window.location.origin;
+    
+    const statement = `Vote ${choice} on proposal ${proposalId} for contract ${contractAddress}`;
+    
+    const message = `${domain} wants you to sign in with your Ethereum account:
+${address}
+
+${statement}
+
+URI: ${origin}
+Version: 1
+Chain ID: ${chainId}
+Nonce: ${expirationTimeNanos.toString()}
+Issued At: ${currentTimeISO}
+Expiration Time: ${expirationTimeISO}
+Resources:
+- proposal:${proposalId}
+- contract:${contractAddress}`;
+    
+    const signature = await signer.signMessage(message);
+    
+    return {
+        message: message,
+        signature: ethers.getBytes(signature)
+    };
+}
+
+// Generate witness proof for user's token balance
+async function generateWitnessProof(contractAddress, proposalId, userAddress, provider) {
+    if (!provider || !userAddress) {
+        throw new Error('Provider or user address not available');
+    }
+    
+    // For now, use latest block - in a real implementation, you'd use the proposal's snapshot block
+    const blockNumber = await provider.getBlockNumber();
+    
+    // Generate storage key for ERC20 balance mapping (assuming slot 0)
+    const storageKey = getERC20BalanceStorageKey(userAddress, 0);
+    
+    // Get proof from Ethereum node
+    const proof = await provider.send('eth_getProof', [
+        contractAddress,
+        [storageKey],
+        `0x${blockNumber.toString(16)}`
+    ]);
+    
+    const block = await provider.send('eth_getBlockByNumber', [
+        `0x${blockNumber.toString(16)}`,
+        false
+    ]);
+    
+    return {
+        blockHash: ethers.getBytes(block.hash),
+        blockNumber: BigInt(blockNumber),
+        userAddress: ethers.getBytes(userAddress),
+        contractAddress: ethers.getBytes(contractAddress),
+        storageKey: ethers.getBytes(storageKey),
+        storageValue: ethers.getBytes(proof.storageProof[0]?.value || '0x0'),
+        accountProof: proof.accountProof.map(p => ethers.getBytes(p)),
+        storageProof: proof.storageProof[0]?.proof.map(p => ethers.getBytes(p)) || []
+    };
+}
+
+// Generate storage key for ERC20 balance mapping
+function getERC20BalanceStorageKey(userAddress, slotIndex) {
+    // For Solidity mappings: keccak256(abi.encode(key, slot))
+    const paddedAddress = ethers.zeroPadValue(userAddress, 32);
+    const paddedSlot = ethers.zeroPadValue(`0x${slotIndex.toString(16)}`, 32);
+    return ethers.keccak256(ethers.concat([paddedAddress, paddedSlot]));
 }

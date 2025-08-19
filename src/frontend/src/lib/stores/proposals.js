@@ -1,5 +1,4 @@
 import { writable, derived } from 'svelte/store';
-import { backend } from '../canisters.js';
 
 // Proposals state store
 function createProposalsStore() {
@@ -13,8 +12,8 @@ function createProposalsStore() {
     return {
         subscribe,
         
-        // Load proposals from backend
-        load: async (filters = [], forceReload = false) => {
+        // Load proposals using provided backend actor
+        load: async (backendActor, filters = [], forceReload = false) => {
             // Skip loading if data is already loaded and not forcing reload
             let currentState;
             const unsubscribe = subscribe(state => currentState = state);
@@ -27,7 +26,7 @@ function createProposalsStore() {
             update(state => ({ ...state, loading: true, error: null }));
             
             try {
-                const result = await backend.icrc149_get_proposals([], [], filters);
+                const result = await backendActor.icrc149_get_proposals([], [], filters);
                 
                 const proposals = result.map((proposal) => ({
                     ...proposal,
@@ -46,7 +45,8 @@ function createProposalsStore() {
                     ...state,
                     proposals,
                     loading: false,
-                    lastUpdated: new Date()
+                    lastUpdated: new Date(),
+                    error: null
                 }));
                 
                 return proposals;
@@ -60,11 +60,53 @@ function createProposalsStore() {
                 throw error;
             }
         },
-        
-        // Refresh proposals
-        refresh: async () => {
-            const store = createProposalsStore();
-            return store.load();
+
+        // Set proposals manually
+        setProposals: (proposals) => {
+            update(state => ({
+                ...state,
+                proposals,
+                lastUpdated: new Date()
+            }));
+        },
+
+        // Add a new proposal
+        addProposal: (proposal) => {
+            update(state => ({
+                ...state,
+                proposals: [proposal, ...state.proposals],
+                lastUpdated: new Date()
+            }));
+        },
+
+        // Update a specific proposal
+        updateProposal: (proposalId, updates) => {
+            update(state => ({
+                ...state,
+                proposals: state.proposals.map(p => 
+                    p.id === proposalId ? { ...p, ...updates } : p
+                ),
+                lastUpdated: new Date()
+            }));
+        },
+
+        // Set loading state
+        setLoading: (loading) => {
+            update(state => ({ ...state, loading }));
+        },
+
+        // Set error state
+        setError: (error) => {
+            update(state => ({ 
+                ...state, 
+                error: error,
+                loading: false 
+            }));
+        },
+
+        // Clear error
+        clearError: () => {
+            update(state => ({ ...state, error: null }));
         },
         
         // Clear proposals
@@ -81,7 +123,7 @@ function createProposalsStore() {
 
 export const proposalsStore = createProposalsStore();
 
-// Derived stores for statistics
+// Derived stores for statistics (no get() usage here)
 export const proposalStats = derived(proposalsStore, ($proposalsStore) => {
     const { proposals } = $proposalsStore;
     
@@ -96,38 +138,8 @@ export const proposalStats = derived(proposalsStore, ($proposalsStore) => {
     };
 });
 
-// Derived store for user voting participation (requires wallet address)
-export const createUserStats = (walletAddress) => derived(
-    proposalsStore, 
-    ($proposalsStore) => {
-        const { proposals } = $proposalsStore;
-        
-        if (!walletAddress) {
-            return {
-                votedOn: 0,
-                participationRate: 0
-            };
-        }
-        
-        // Count proposals the user has voted on
-        // This would need to be implemented based on your voting data structure
-        // For now, this is a placeholder until we implement vote tracking
-        const votedProposals = proposals.filter(proposal => {
-            // TODO: Check if walletAddress has voted on this proposal
-            // This would require calling icrc149_get_user_votes with the proposal IDs
-            return false; // Placeholder
-        });
-        
-        return {
-            votedOn: votedProposals.length,
-            participationRate: proposals.length > 0 ? 
-                Math.round((votedProposals.length / proposals.length) * 100) : 0
-        };
-    }
-);
-
-// Function to get user voting data for a specific address
-export async function getUserVotingData(walletAddress, proposals) {
+// Function to get user voting data (accepts parameters instead of using get())
+export async function getUserVotingData(backendActor, walletAddress, proposals) {
     if (!walletAddress || !proposals || proposals.length === 0) {
         return {
             votedOn: 0,
@@ -144,7 +156,7 @@ export async function getUserVotingData(walletAddress, proposals) {
         }));
 
         // Use the bulk vote checking function
-        const voteResults = await backend.icrc149_get_user_votes(voteRequests);
+        const voteResults = await backendActor.icrc149_get_user_votes(voteRequests);
         
         // Process results into existing votes map
         const existingVotes = new Map();

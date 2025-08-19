@@ -1,6 +1,5 @@
 import { writable, derived } from 'svelte/store';
-import { proposalsStore, getUserVotingData } from './proposals.js';
-import { authStore } from './auth.js';
+import { getUserVotingData } from './proposals.js';
 
 // User voting statistics store
 function createUserStatsStore() {
@@ -15,8 +14,8 @@ function createUserStatsStore() {
     return {
         subscribe,
         
-        // Load user voting statistics
-        load: async (walletAddress) => {
+        // Load user voting statistics using provided parameters
+        load: async (backendActor, walletAddress, proposals) => {
             if (!walletAddress) {
                 set({
                     votedOn: 0,
@@ -31,20 +30,13 @@ function createUserStatsStore() {
             update(state => ({ ...state, loading: true, error: null }));
             
             try {
-                // Get current proposals from the proposals store
-                const proposalsState = proposalsStore.subscribe(state => state);
-                let proposals = [];
-                proposalsState(state => {
-                    proposals = state.proposals;
-                });
-                proposalsState(); // Unsubscribe immediately
-                
-                const userVotingData = await getUserVotingData(walletAddress, proposals);
+                const userVotingData = await getUserVotingData(backendActor, walletAddress, proposals);
                 
                 update(state => ({
                     ...state,
                     ...userVotingData,
-                    loading: false
+                    loading: false,
+                    error: null
                 }));
                 
                 return userVotingData;
@@ -57,6 +49,33 @@ function createUserStatsStore() {
                 }));
                 throw error;
             }
+        },
+
+        // Update user stats manually
+        updateStats: (stats) => {
+            update(state => ({
+                ...state,
+                ...stats
+            }));
+        },
+
+        // Set loading state
+        setLoading: (loading) => {
+            update(state => ({ ...state, loading }));
+        },
+
+        // Set error state
+        setError: (error) => {
+            update(state => ({ 
+                ...state, 
+                error: error,
+                loading: false 
+            }));
+        },
+
+        // Clear error
+        clearError: () => {
+            update(state => ({ ...state, error: null }));
         },
         
         // Clear user statistics
@@ -74,38 +93,40 @@ function createUserStatsStore() {
 
 export const userStatsStore = createUserStatsStore();
 
-// Derived store that automatically loads user stats when auth state changes
-export const autoUserStats = derived(
-    [authStore, proposalsStore],
-    ([$authStore, $proposalsStore], set) => {
-        // Add debouncing to prevent rapid successive calls
-        const walletAddress = $authStore.walletAddress;
-        const hasProposals = $proposalsStore.proposals.length > 0;
-        const isAuthenticated = $authStore.isAuthenticated;
-        
-        if (isAuthenticated && walletAddress && hasProposals && !$proposalsStore.loading) {
-            // Load user stats when wallet is connected and proposals are available
-            getUserVotingData(walletAddress, $proposalsStore.proposals)
-                .then(stats => set(stats))
-                .catch(error => {
-                    console.error('Failed to load auto user stats:', error);
-                    set({
-                        votedOn: 0,
-                        participationRate: 0,
-                        existingVotes: new Map()
+// Derived store that automatically loads user stats when dependencies change
+// This replaces the autoUserStats store but without get() usage
+export function createAutoUserStats(authStore, proposalsStore, backendActor) {
+    return derived(
+        [authStore, proposalsStore],
+        ([$authStore, $proposalsStore], set) => {
+            const walletAddress = $authStore.walletAddress;
+            const hasProposals = $proposalsStore.proposals.length > 0;
+            const isAuthenticated = $authStore.isAuthenticated;
+            
+            if (isAuthenticated && walletAddress && hasProposals && !$proposalsStore.loading && backendActor) {
+                // Load user stats when wallet is connected and proposals are available
+                getUserVotingData(backendActor, walletAddress, $proposalsStore.proposals)
+                    .then(stats => set(stats))
+                    .catch(error => {
+                        console.error('Failed to load auto user stats:', error);
+                        set({
+                            votedOn: 0,
+                            participationRate: 0,
+                            existingVotes: new Map()
+                        });
                     });
+            } else {
+                set({
+                    votedOn: 0,
+                    participationRate: 0,
+                    existingVotes: new Map()
                 });
-        } else {
-            set({
-                votedOn: 0,
-                participationRate: 0,
-                existingVotes: new Map()
-            });
+            }
+        },
+        {
+            votedOn: 0,
+            participationRate: 0,
+            existingVotes: new Map()
         }
-    },
-    {
-        votedOn: 0,
-        participationRate: 0,
-        existingVotes: new Map()
-    }
-);
+    );
+}

@@ -14,8 +14,6 @@ function createConfigStore() {
 
     return {
         subscribe,
-        set,
-        update,
         
         // Load config from localStorage
         load: () => {
@@ -24,32 +22,39 @@ function createConfigStore() {
                     const saved = localStorage.getItem('evm-dao-config');
                     if (saved) {
                         const config = JSON.parse(saved);
-                        set({ ...defaultConfig, ...config });
+                        const mergedConfig = { ...defaultConfig, ...config };
+                        set(mergedConfig);
+                        return mergedConfig;
                     }
                 } catch (error) {
                     console.error('Failed to load config from localStorage:', error);
                 }
             }
-            // Return a resolved promise for consistency
-            return Promise.resolve();
+            return defaultConfig;
         },
         
-        // Save config to localStorage
+        // Save complete config
         save: (config) => {
+            const configToSave = { ...config, isConfigured: isConfigurationComplete(config) };
+            
             if (browser) {
                 try {
-                    localStorage.setItem('evm-dao-config', JSON.stringify(config));
+                    localStorage.setItem('evm-dao-config', JSON.stringify(configToSave));
                 } catch (error) {
                     console.error('Failed to save config to localStorage:', error);
                 }
             }
-            set(config);
+            set(configToSave);
+            return configToSave;
         },
         
         // Update a specific field
         updateField: (field, value) => {
+            let newConfig;
             update(config => {
-                const newConfig = { ...config, [field]: value };
+                newConfig = { ...config, [field]: value };
+                newConfig.isConfigured = isConfigurationComplete(newConfig);
+                
                 if (browser) {
                     try {
                         localStorage.setItem('evm-dao-config', JSON.stringify(newConfig));
@@ -59,13 +64,16 @@ function createConfigStore() {
                 }
                 return newConfig;
             });
+            return newConfig;
         },
         
-        // Check if configuration is complete
-        checkConfiguration: () => {
+        // Update multiple fields at once
+        updateFields: (fieldsToUpdate) => {
+            let newConfig;
             update(config => {
-                const isConfigured = config.canisterId.trim() !== '' && config.contractAddress.trim() !== '';
-                const newConfig = { ...config, isConfigured };
+                newConfig = { ...config, ...fieldsToUpdate };
+                newConfig.isConfigured = isConfigurationComplete(newConfig);
+                
                 if (browser) {
                     try {
                         localStorage.setItem('evm-dao-config', JSON.stringify(newConfig));
@@ -75,8 +83,27 @@ function createConfigStore() {
                 }
                 return newConfig;
             });
+            return newConfig;
+        },
+        
+        // Reset to defaults
+        reset: () => {
+            if (browser) {
+                try {
+                    localStorage.removeItem('evm-dao-config');
+                } catch (error) {
+                    console.error('Failed to remove config from localStorage:', error);
+                }
+            }
+            set(defaultConfig);
+            return defaultConfig;
         }
     };
+}
+
+// Helper function to check if configuration is complete
+function isConfigurationComplete(config) {
+    return config.canisterId.trim() !== '' && config.contractAddress.trim() !== '';
 }
 
 export const configStore = createConfigStore();

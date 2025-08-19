@@ -1,5 +1,4 @@
-import { writable, derived } from 'svelte/store';
-import { backend } from '$lib/canisters.js';
+import { writable } from 'svelte/store';
 
 // Contracts store
 function createContractsStore() {
@@ -14,24 +13,29 @@ function createContractsStore() {
     return {
         subscribe,
         
-        async load(forceReload = false) {
-            update(state => {
-                // Skip if already loading
-                if (state.loading && !forceReload) return state;
-                
-                // Skip if data is fresh (less than 5 minutes old) and not forcing reload
-                if (!forceReload && state.lastUpdated && state.contracts.length > 0) {
-                    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-                    if (state.lastUpdated > fiveMinutesAgo) {
-                        return state;
-                    }
+        // Load contracts using provided backend actor
+        async load(backendActor, forceReload = false) {
+            // Skip if already loading
+            let currentState;
+            const unsubscribe = subscribe(state => currentState = state);
+            unsubscribe();
+            
+            if (currentState.loading && !forceReload) {
+                return currentState.contracts;
+            }
+            
+            // Skip if data is fresh (less than 5 minutes old) and not forcing reload
+            if (!forceReload && currentState.lastUpdated && currentState.contracts.length > 0) {
+                const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+                if (currentState.lastUpdated > fiveMinutesAgo) {
+                    return currentState.contracts;
                 }
-                
-                return { ...state, loading: true, error: null };
-            });
+            }
+            
+            update(state => ({ ...state, loading: true, error: null }));
 
             try {
-                const contracts = await backend.icrc149_get_snapshot_contracts();
+                const contracts = await backendActor.icrc149_get_snapshot_contracts();
                 const mappedContracts = contracts.map(([address, config]) => ({
                     address,
                     config,
@@ -50,6 +54,8 @@ function createContractsStore() {
                         error: null
                     };
                 });
+
+                return mappedContracts;
             } catch (error) {
                 console.error('Failed to load contracts:', error);
                 update(state => ({
@@ -57,9 +63,11 @@ function createContractsStore() {
                     loading: false,
                     error: error.message || 'Failed to load contracts'
                 }));
+                throw error;
             }
         },
 
+        // Set selected contract
         setSelectedContract(address) {
             update(state => ({
                 ...state,
@@ -67,6 +75,35 @@ function createContractsStore() {
             }));
         },
 
+        // Update contracts list
+        setContracts(contracts) {
+            update(state => ({
+                ...state,
+                contracts,
+                lastUpdated: Date.now()
+            }));
+        },
+
+        // Set loading state
+        setLoading(loading) {
+            update(state => ({ ...state, loading }));
+        },
+
+        // Set error state
+        setError(error) {
+            update(state => ({ 
+                ...state, 
+                error: error,
+                loading: false 
+            }));
+        },
+
+        // Clear error
+        clearError() {
+            update(state => ({ ...state, error: null }));
+        },
+
+        // Reset store
         reset() {
             set({
                 contracts: [],

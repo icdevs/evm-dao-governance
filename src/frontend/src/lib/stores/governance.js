@@ -1,7 +1,4 @@
-import { writable, derived } from 'svelte/store';
-import { configStore } from './config.js';
-import { getTotalSupply } from '../storage-slot-security-analysis.js';
-import { getCurrentChainId } from './wallet.js';
+import { writable } from 'svelte/store';
 
 // Governance statistics store
 function createGovernanceStatsStore() {
@@ -16,8 +13,8 @@ function createGovernanceStatsStore() {
     return {
         subscribe,
         
-        // Load governance statistics
-        load: async (forceReload = false) => {
+        // Load governance statistics using provided functions
+        load: async (getTotalSupplyFn, getMemberCountFn = null, forceReload = false) => {
             // Check if we should skip loading
             let currentState;
             const unsubscribe = subscribe(state => currentState = state);
@@ -37,36 +34,23 @@ function createGovernanceStatsStore() {
             update(state => ({ ...state, loading: true, error: null }));
             
             try {
-                // Get current config state
-                let config;
-                const unsubscribe = configStore.subscribe(value => config = value);
-                unsubscribe();
+                // Get total supply (voting power)
+                const totalVotingPower = await getTotalSupplyFn();
                 
-                if (!config.isConfigured || !config.contractAddress) {
-                    throw new Error('Contract address not configured');
-                }
-
-                const chainId = getCurrentChainId();
-                if (!chainId) {
-                    throw new Error('Chain ID not available');
-                }
-
-                // Get total supply (voting power) and member count in parallel
-                const [totalVotingPower] = await Promise.all([
-                    getTotalSupply(config.contractAddress)
-                ]);
+                // Get member count if function provided, otherwise use placeholder
+                const memberCount = getMemberCountFn ? await getMemberCountFn() : "-";
+                
+                const stats = { totalVotingPower, memberCount };
                 
                 update(state => ({
                     ...state,
-                    totalVotingPower,
-                    memberCount,
+                    ...stats,
                     loading: false,
-                    lastUpdated: new Date()
+                    lastUpdated: new Date(),
+                    error: null
                 }));
 
-                const memberCount = "-"; // TODO how to get member count?
-                
-                return { totalVotingPower, memberCount };
+                return stats;
             } catch (error) {
                 console.error("Failed to load governance stats:", error);
                 update(state => ({
@@ -76,6 +60,34 @@ function createGovernanceStatsStore() {
                 }));
                 throw error;
             }
+        },
+
+        // Update stats manually
+        updateStats: (stats) => {
+            update(state => ({
+                ...state,
+                ...stats,
+                lastUpdated: new Date()
+            }));
+        },
+
+        // Set loading state
+        setLoading: (loading) => {
+            update(state => ({ ...state, loading }));
+        },
+
+        // Set error state
+        setError: (error) => {
+            update(state => ({ 
+                ...state, 
+                error: error,
+                loading: false 
+            }));
+        },
+
+        // Clear error
+        clearError: () => {
+            update(state => ({ ...state, error: null }));
         },
 
         // Reset the store

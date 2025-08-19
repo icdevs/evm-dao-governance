@@ -1,5 +1,4 @@
 import { writable } from 'svelte/store';
-import { browser } from '$app/environment';
 
 // Balance store that persists data across component mounts
 function createBalanceStore() {
@@ -10,16 +9,17 @@ function createBalanceStore() {
         isLoading: false,
         isInitialLoad: true,
         lastUpdated: null,
-        chainId: null
+        chainId: null,
+        error: null
     });
 
     const store = {
         subscribe,
         
-        // Load balances (with optional silent mode)
+        // Load balances using provided loader function
         load: async (getBalancesFn, silent = false) => {
             if (!silent) {
-                update(state => ({ ...state, isLoading: true }));
+                update(state => ({ ...state, isLoading: true, error: null }));
             }
 
             try {
@@ -33,26 +33,47 @@ function createBalanceStore() {
                     chainId: balances.chainId || null,
                     isInitialLoad: false,
                     lastUpdated: new Date(),
-                    isLoading: false
+                    isLoading: false,
+                    error: null
                 }));
 
                 return balances;
             } catch (error) {
                 update(state => ({ 
                     ...state, 
-                    isLoading: false 
+                    isLoading: false,
+                    error: error.message || 'Failed to load balances'
                 }));
                 throw error;
             }
         },
 
-        // Check if we should load (based on age of data)
-        shouldLoad: (currentState, maxAge = 60000) => { // 1 minute default
-            if (!currentState.lastUpdated) return true;
-            if (currentState.ethBalance === "0.0" && currentState.tokenBalance === "0.0") return true;
-            
-            const age = Date.now() - currentState.lastUpdated.getTime();
-            return age > maxAge;
+        // Update specific balance fields
+        updateBalances: (balanceUpdates) => {
+            update(state => ({
+                ...state,
+                ...balanceUpdates,
+                lastUpdated: new Date()
+            }));
+        },
+
+        // Set loading state
+        setLoading: (loading) => {
+            update(state => ({ ...state, isLoading: loading }));
+        },
+
+        // Set error state
+        setError: (error) => {
+            update(state => ({ 
+                ...state, 
+                error: error,
+                isLoading: false 
+            }));
+        },
+
+        // Clear error
+        clearError: () => {
+            update(state => ({ ...state, error: null }));
         },
 
         // Clear all data
@@ -64,17 +85,22 @@ function createBalanceStore() {
                 isLoading: false,
                 isInitialLoad: true,
                 lastUpdated: null,
-                chainId: null
+                chainId: null,
+                error: null
             });
         }
     };
 
-    // Force refresh method
-    store.refresh = async (getBalancesFn) => {
-        return await store.load(getBalancesFn, false);
-    };
-
     return store;
+}
+
+// Helper function to check if we should load (can be used by components)
+export function shouldLoadBalances(currentState, maxAge = 60000) {
+    if (!currentState.lastUpdated) return true;
+    if (currentState.ethBalance === "0.0" && currentState.tokenBalance === "0.0") return true;
+    
+    const age = Date.now() - currentState.lastUpdated.getTime();
+    return age > maxAge;
 }
 
 export const balanceStore = createBalanceStore();

@@ -1,33 +1,85 @@
 import { writable, derived } from 'svelte/store';
 import { ethers } from 'ethers';
 
-// Core wallet state
+// Core wallet state stores
 export const provider = writable(null);
 export const signer = writable(null);
 export const userAddress = writable(null);
 export const chainId = writable(null);
+
+// Derived store for connection status
 export const isConnected = derived(userAddress, $userAddress => !!$userAddress);
 
-// Initialize MetaMask provider
+// Helper functions for updating wallet state
+export function setProvider(providerInstance) {
+    provider.set(providerInstance);
+}
+
+export function setSigner(signerInstance) {
+    signer.set(signerInstance);
+}
+
+export function setUserAddress(address) {
+    userAddress.set(address);
+}
+
+export function setChainId(id) {
+    chainId.set(id);
+}
+
+export function clearWallet() {
+    provider.set(null);
+    signer.set(null);
+    userAddress.set(null);
+    chainId.set(null);
+}
+
+// Connection function that returns values instead of storing them
+export async function connectWallet() {
+    if (typeof window === 'undefined' || !window.ethereum) {
+        throw new Error('MetaMask not available');
+    }
+    
+    const metamaskProvider = new ethers.BrowserProvider(window.ethereum);
+    
+    await metamaskProvider.send("eth_requestAccounts", []);
+    const signerInstance = await metamaskProvider.getSigner();
+    const address = await signerInstance.getAddress();
+    const network = await metamaskProvider.getNetwork();
+    
+    // Update stores
+    setProvider(metamaskProvider);
+    setSigner(signerInstance);
+    setUserAddress(address);
+    setChainId(Number(network.chainId));
+    
+    return {
+        address,
+        chainId: Number(network.chainId),
+        provider: metamaskProvider,
+        signer: signerInstance
+    };
+}
+
+// Initialize provider and set up event listeners
 export function initializeProvider() {
     if (typeof window !== 'undefined' && window.ethereum) {
         const metamaskProvider = new ethers.BrowserProvider(window.ethereum);
-        provider.set(metamaskProvider);
+        setProvider(metamaskProvider);
         
         // Listen for account changes
         window.ethereum.on('accountsChanged', (accounts) => {
             if (accounts.length === 0) {
-                userAddress.set(null);
-                signer.set(null);
+                clearWallet();
             } else {
-                userAddress.set(accounts[0]);
+                setUserAddress(accounts[0]);
                 updateSigner(metamaskProvider);
             }
         });
         
         // Listen for chain changes
         window.ethereum.on('chainChanged', (newChainId) => {
-            chainId.set(parseInt(newChainId, 16));
+            setChainId(parseInt(newChainId, 16));
             // Reload the page as recommended by MetaMask
             window.location.reload();
         });
@@ -37,96 +89,21 @@ export function initializeProvider() {
     return null;
 }
 
+// Helper function to update signer
 async function updateSigner(metamaskProvider) {
     try {
         const signerInstance = await metamaskProvider.getSigner();
-        signer.set(signerInstance);
+        setSigner(signerInstance);
     } catch (error) {
         console.error('Failed to get signer:', error);
-        signer.set(null);
+        setSigner(null);
     }
 }
 
-// Connect wallet
-export async function connectWallet() {
-    const metamaskProvider = initializeProvider();
-    if (!metamaskProvider) {
-        throw new Error('MetaMask not available');
-    }
-    
-    await metamaskProvider.send("eth_requestAccounts", []);
-    const signerInstance = await metamaskProvider.getSigner();
-    const address = await signerInstance.getAddress();
-    const network = await metamaskProvider.getNetwork();
-    
-    provider.set(metamaskProvider);
-    signer.set(signerInstance);
-    userAddress.set(address);
-    chainId.set(Number(network.chainId));
-    
-    return {
-        address,
-        chainId: Number(network.chainId)
-    };
-}
-
-// Get current chain ID
-export async function getCurrentChainId() {
-    // First try to get from store (most reliable if already connected)
-    let currentChainId;
-    const unsubscribe = chainId.subscribe(value => currentChainId = value);
-    unsubscribe();
-    
-    if (currentChainId) {
-        return currentChainId;
-    }
-    
-    // If not in store, try to get from provider
-    let currentProvider;
-    const unsubscribeProvider = provider.subscribe(value => currentProvider = value);
-    unsubscribeProvider();
-    
-    if (currentProvider) {
-        try {
-            const network = await currentProvider.getNetwork();
-            const networkChainId = Number(network.chainId);
-            chainId.set(networkChainId); // Update store
-            return networkChainId;
-        } catch (error) {
-            console.error('Failed to get chain ID from provider:', error);
-        }
-    }
-    
-    // Last resort: try MetaMask directly
-    if (typeof window !== 'undefined' && window.ethereum) {
-        try {
-            const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-            const directChainId = parseInt(chainIdHex, 16);
-            chainId.set(directChainId); // Update store
-            return directChainId;
-        } catch (error) {
-            console.error('Failed to get chain ID from MetaMask:', error);
-        }
-    }
-    
-    throw new Error('Unable to get chain ID. Please connect your wallet.');
-}
-
-// Disconnect wallet
-export function disconnectWallet() {
-    userAddress.set(null);
-    signer.set(null);
-    chainId.set(null);
-}
-
-// Sign message utility
-export async function signMessage(message) {
-    let currentSigner;
-    const unsubscribe = signer.subscribe(value => currentSigner = value);
-    unsubscribe();
-    
-    if (!currentSigner) {
+// Utility function to sign a message (requires signer to be passed in)
+export async function signMessage(signerInstance, message) {
+    if (!signerInstance) {
         throw new Error('No signer available');
     }
-    return await currentSigner.signMessage(message);
+    return await signerInstance.signMessage(message);
 }

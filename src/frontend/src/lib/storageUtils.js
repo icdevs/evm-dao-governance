@@ -1,7 +1,4 @@
 import { ethers } from 'ethers';
-import { get } from 'svelte/store';
-import { provider, userAddress as userAddressStore } from './stores/wallet.js';
-import { storageSlot } from './stores/canister.js';
 
 // Generate storage key for ERC20 balance mapping
 export function getERC20BalanceStorageKey(userAddress, slotIndex) {
@@ -12,19 +9,16 @@ export function getERC20BalanceStorageKey(userAddress, slotIndex) {
     return ethers.keccak256(ethers.concat([paddedAddress, paddedSlot]));
 }
 
-// Get user's token balance
-export async function getUserTokenBalance(contractAddress, userAddress = null, blockTag = 'latest') {
-    const metamaskProvider = get(provider);
-    const address = userAddress || get(userAddressStore);
-    
-    if (!metamaskProvider || !address) {
+// Get user's token balance using provided dependencies
+export async function getUserTokenBalance(provider, contractAddress, userAddress, blockTag = 'latest') {
+    if (!provider || !userAddress || !contractAddress) {
         return BigInt(0);
     }
     
     try {
         // ERC20 balanceOf function call: balanceOf(address)
-        const balanceData = `0x70a08231${address.slice(2).padStart(64, '0')}`;
-        const result = await metamaskProvider.send('eth_call', [
+        const balanceData = `0x70a08231${userAddress.slice(2).padStart(64, '0')}`;
+        const result = await provider.send('eth_call', [
             {
                 to: contractAddress,
                 data: balanceData
@@ -40,16 +34,13 @@ export async function getUserTokenBalance(contractAddress, userAddress = null, b
 }
 
 // Discover storage slot for ERC20 balance mapping
-export async function discoverStorageSlot(contractAddress, userAddress = null) {
-    const metamaskProvider = get(provider);
-    const address = userAddress || get(userAddressStore);
-    
-    if (!address) {
-        throw new Error('User address not available');
+export async function discoverStorageSlot(provider, contractAddress, userAddress) {
+    if (!provider || !userAddress || !contractAddress) {
+        throw new Error('Provider, contract address, and user address are required');
     }
     
     // Get current balance via balanceOf call
-    const actualBalance = await getUserTokenBalance(contractAddress, address);
+    const actualBalance = await getUserTokenBalance(provider, contractAddress, userAddress);
     
     if (actualBalance === BigInt(0)) {
         throw new Error('User has 0 tokens. Storage slot discovery requires a non-zero balance.');
@@ -58,8 +49,8 @@ export async function discoverStorageSlot(contractAddress, userAddress = null) {
     // Try common storage slots (0-10)
     for (let slot = 0; slot <= 10; slot++) {
         try {
-            const storageKey = getERC20BalanceStorageKey(address, slot);
-            const storageValue = await metamaskProvider.send('eth_getStorageAt', [
+            const storageKey = getERC20BalanceStorageKey(userAddress, slot);
+            const storageValue = await provider.send('eth_getStorageAt', [
                 contractAddress,
                 storageKey,
                 'latest'
@@ -68,7 +59,6 @@ export async function discoverStorageSlot(contractAddress, userAddress = null) {
             const storageBalance = ethers.getBigInt(storageValue || '0x0');
             
             if (storageBalance === actualBalance) {
-                storageSlot.set(slot);
                 return slot;
             }
         } catch (error) {
@@ -77,4 +67,103 @@ export async function discoverStorageSlot(contractAddress, userAddress = null) {
     }
     
     throw new Error('Could not find storage slot in range 0-10. The contract may use a non-standard storage layout.');
+}
+
+// Validate that a storage slot contains the expected balance
+export async function validateStorageSlot(provider, contractAddress, userAddress, slotIndex, expectedBalance, blockTag = "latest") {
+    try {
+        const storageKey = getERC20BalanceStorageKey(userAddress, slotIndex);
+        const proof = await provider.send("eth_getProof", [
+            contractAddress,
+            [storageKey],
+            blockTag
+        ]);
+        
+        const storageValue = proof.storageProof[0]?.value || '0x0';
+        const storageBalance = ethers.getBigInt(storageValue).toString();
+        
+        if (storageBalance === expectedBalance) {
+            return {
+                valid: true,
+                storageBalance,
+                expectedBalance,
+                reason: `✅ SECURITY CHECK PASSED: Storage slot ${slotIndex} correctly contains balance ${expectedBalance}`
+            };
+        } else {
+            return {
+                valid: false,
+                storageBalance,
+                expectedBalance,
+                reason: `❌ SECURITY CHECK FAILED: Storage slot ${slotIndex} contains ${storageBalance} but balanceOf() returns ${expectedBalance}. This indicates wrong slot or potential security issue.`
+            };
+        }
+    } catch (error) {
+        return {
+            valid: false,
+            storageBalance: 'ERROR',
+            expectedBalance,
+            reason: `❌ SECURITY CHECK ERROR: Failed to validate storage slot: ${error.message}`
+        };
+    }
+}
+
+// Get comprehensive balance information for an address
+export async function getBalanceInfo(provider, contractAddress, userAddress, chainId) {
+    try {
+        const [ethBalance, tokenBalance] = await Promise.all([
+            getEthBalance(provider, userAddress),
+            getUserTokenBalance(provider, contractAddress, userAddress)
+        ]);
+        
+        return {
+            address: userAddress,
+            chainId,
+            ethBalance: ethers.formatEther(ethBalance),
+            tokenBalance: tokenBalance.toString(),
+            chainName: getChainName(chainId)
+        };
+    } catch (error) {
+        console.error('Failed to get balance info:', error);
+        throw error;
+    }
+}
+
+// Get ETH balance for an address
+export async function getEthBalance(provider, userAddress) {
+    try {
+        const balance = await provider.getBalance(userAddress);
+        return balance;
+    } catch (error) {
+        console.error('Failed to get ETH balance:', error);
+        return BigInt(0);
+    }
+}
+
+// Helper function to get chain name
+function getChainName(chainId) {
+    const chainNames = {
+        1: 'Ethereum Mainnet',
+        11155111: 'Sepolia Testnet',
+        137: 'Polygon Mainnet',
+        80001: 'Polygon Mumbai',
+        42161: 'Arbitrum One',
+        421613: 'Arbitrum Goerli',
+        10: 'Optimism',
+        420: 'Optimism Goerli',
+        31337: 'Local/Anvil'
+    };
+    
+    return chainNames[chainId] || `Unknown Network (${chainId})`;
+}
+
+// Check if an address is a valid Ethereum address
+export function isValidEthereumAddress(address) {
+    return ethers.isAddress(address);
+}
+
+// Format an address for display (shortened)
+export function formatAddress(address) {
+    if (!address) return '';
+    if (!isValidEthereumAddress(address)) return address;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }

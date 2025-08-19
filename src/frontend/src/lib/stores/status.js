@@ -48,7 +48,7 @@ function createStatusStore() {
             set([]);
         },
         
-        // Convenience methods
+        // Convenience methods for different message types
         success: (message, duration = 5000) => {
             return createStatusStore().add(message, MESSAGE_TYPES.SUCCESS, duration);
         },

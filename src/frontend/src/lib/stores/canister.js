@@ -2,17 +2,45 @@ import { writable } from 'svelte/store';
 import { Actor, HttpAgent, AnonymousIdentity } from '@dfinity/agent';
 import { idlFactory } from '../../../../declarations/backend/backend.did.js';
 
-// Core canister state
+// Core canister state stores
 export const agent = writable(null);
 export const canisterActor = writable(null);
 export const canisterId = writable(null);
 export const isLocal = writable(false);
 export const storageSlot = writable(null);
 
-// Initialize IC canister connection
+// Helper functions for updating canister state
+export function setAgent(agentInstance) {
+    agent.set(agentInstance);
+}
+
+export function setCanisterActor(actor) {
+    canisterActor.set(actor);
+}
+
+export function setCanisterId(id) {
+    canisterId.set(id);
+}
+
+export function setIsLocal(local) {
+    isLocal.set(local);
+}
+
+export function setStorageSlot(slot) {
+    storageSlot.set(slot);
+}
+
+export function clearCanister() {
+    agent.set(null);
+    canisterActor.set(null);
+    canisterId.set(null);
+    storageSlot.set(null);
+}
+
+// Initialize IC canister connection and return the created actor
 export async function initializeCanister(targetCanisterId, environment = 'local') {
     const local = environment === 'local';
-    isLocal.set(local);
+    setIsLocal(local);
     
     let agentInstance;
     if (local) {
@@ -32,7 +60,7 @@ export async function initializeCanister(targetCanisterId, environment = 'local'
         });
     }
     
-    agent.set(agentInstance);
+    setAgent(agentInstance);
     
     // Create canister actor with proper IDL
     const actor = Actor.createActor(idlFactory, {
@@ -40,16 +68,13 @@ export async function initializeCanister(targetCanisterId, environment = 'local'
         canisterId: targetCanisterId
     });
     
-    canisterActor.set(actor);
-    canisterId.set(targetCanisterId);
+    setCanisterActor(actor);
+    setCanisterId(targetCanisterId);
     
-    return actor;
-}
-
-// Disconnect from canister
-export function disconnectCanister() {
-    agent.set(null);
-    canisterActor.set(null);
-    canisterId.set(null);
-    storageSlot.set(null);
+    return {
+        actor,
+        agent: agentInstance,
+        canisterId: targetCanisterId,
+        isLocal: local
+    };
 }

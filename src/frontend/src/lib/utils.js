@@ -1,12 +1,13 @@
 import { ethers } from 'ethers';
 
-// ERC20 ABI for transfer function
+// ERC20 ABI for common functions
 const ERC20_ABI = [
     "function transfer(address to, uint256 amount) returns (bool)",
     "function balanceOf(address owner) view returns (uint256)",
     "function decimals() view returns (uint8)",
     "function symbol() view returns (string)",
-    "function name() view returns (string)"
+    "function name() view returns (string)",
+    "function totalSupply() view returns (uint256)"
 ];
 
 // Create transaction data for ERC20 transfer
@@ -29,85 +30,6 @@ export function parseTokenAmount(amount, decimals = 18) {
 // Format amount from wei
 export function formatTokenAmount(amount, decimals = 18, precision = 4) {
     return parseFloat(ethers.formatUnits(amount, decimals)).toFixed(precision);
-}
-
-// Convert SIWE proof to Candid format
-export function siweProofToCandid(siweProof) {
-    const sigBytes = Array.from(siweProof.signature)
-        .map(b => `\\${b.toString(16).padStart(2, '0')}`)
-        .join('');
-    
-    return {
-        message: siweProof.message.replace(/\n/g, '\\n').replace(/"/g, '\\"'),
-        signature: `blob "${sigBytes}"`
-    };
-}
-
-// Convert proposal data to Candid format
-export function proposalToCandid(proposal) {
-    let action;
-    
-    switch (proposal.type) {
-        case 'motion':
-            action = `variant { Motion = "${proposal.motion}" }`;
-            break;
-            
-        case 'eth_transaction':
-            const dataHex = proposal.data.slice(2); // Remove 0x
-            const dataBytes = dataHex.match(/.{2}/g)?.map(byte => `\\${byte}`).join('') || '';
-            
-            action = `variant { 
-                EthTransaction = record {
-                    to = "${proposal.to}";
-                    value = ${proposal.value} : nat;
-                    data = blob "${dataBytes}";
-                    chain = record { 
-                        chain_id = ${proposal.chainId} : nat; 
-                        network_name = "${proposal.networkName}" 
-                    };
-                    subaccount = null;
-                    maxPriorityFeePerGas = ${proposal.maxPriorityFeePerGas} : nat;
-                    maxFeePerGas = ${proposal.maxFeePerGas} : nat;
-                    gasLimit = ${proposal.gasLimit} : nat;
-                    signature = null;
-                    nonce = null;
-                }
-            }`;
-            break;
-            
-        case 'icp_call':
-            const argsHex = proposal.args.slice(2); // Remove 0x if present
-            const argsBytes = argsHex.match(/.{2}/g)?.map(byte => `\\${byte}`).join('') || '';
-            
-            action = `variant {
-                ICPCall = record {
-                    canister = principal "${proposal.canister}";
-                    method = "${proposal.method}";
-                    args = blob "${argsBytes}";
-                    cycles = ${proposal.cycles} : nat;
-                    best_effort_timeout = null;
-                    result = null;
-                }
-            }`;
-            break;
-            
-        default:
-            throw new Error(`Unknown proposal type: ${proposal.type}`);
-    }
-    
-    const siweProof = siweProofToCandid(proposal.siweProof);
-    
-    return `(
-        record {
-            action = ${action};
-            metadata = opt "${proposal.metadata || ''}";
-            siwe = record {
-                message = "${siweProof.message}";
-                signature = ${siweProof.signature};
-            };
-            snapshot_contract = opt "${proposal.snapshotContract || ''}";
-        }
-    )`;
 }
 
 // Network configurations
@@ -142,4 +64,242 @@ export function isValidAmount(amount) {
     } catch {
         return false;
     }
+}
+
+// Format address for display (shortened)
+export function formatAddress(address) {
+    if (!address) return '';
+    if (!isValidAddress(address)) return address;
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+// Get native currency symbol for a chain
+export function getNativeCurrencySymbol(chainId) {
+    switch (chainId) {
+        case 137: // Polygon Mainnet
+        case 80001: // Polygon Mumbai
+            return 'MATIC';
+        case 56: // BSC Mainnet
+        case 97: // BSC Testnet
+            return 'BNB';
+        case 43114: // Avalanche Mainnet
+        case 43113: // Avalanche Testnet
+            return 'AVAX';
+        default:
+            return 'ETH';
+    }
+}
+
+// Token information functions that accept provider as parameter
+export async function getTokenInfo(provider, contractAddress) {
+    try {
+        const contract = new ethers.Contract(contractAddress, ERC20_ABI, provider);
+        
+        const [name, symbol, decimals, totalSupply] = await Promise.all([
+            contract.name(),
+            contract.symbol(),
+            contract.decimals(),
+            contract.totalSupply()
+        ]);
+        
+        return {
+            name,
+            symbol,
+            decimals: Number(decimals),
+            totalSupply: totalSupply.toString()
+        };
+    } catch (error) {
+        console.error('Failed to get token info:', error);
+        return {
+            name: 'Unknown Token',
+            symbol: 'UNK',
+            decimals: 18,
+            totalSupply: '0'
+        };
+    }
+}
+
+// Get token balance for a specific address
+export async function getTokenBalance(provider, contractAddress, userAddress) {
+    try {
+        const contract = new ethers.Contract(contractAddress, ERC20_ABI, provider);
+        const balance = await contract.balanceOf(userAddress);
+        return balance.toString();
+    } catch (error) {
+        console.error('Failed to get token balance:', error);
+        return '0';
+    }
+}
+
+// Get ETH balance for an address
+export async function getEthBalance(provider, userAddress) {
+    try {
+        const balance = await provider.getBalance(userAddress);
+        return ethers.formatEther(balance);
+    } catch (error) {
+        console.error('Failed to get ETH balance:', error);
+        return '0.0';
+    }
+}
+
+// Get formatted token balance with symbol
+export async function getFormattedTokenBalance(provider, contractAddress, userAddress) {
+    try {
+        const [balance, tokenInfo] = await Promise.all([
+            getTokenBalance(provider, contractAddress, userAddress),
+            getTokenInfo(provider, contractAddress)
+        ]);
+        
+        const formattedBalance = formatTokenAmount(balance, tokenInfo.decimals);
+        return `${formattedBalance} ${tokenInfo.symbol}`;
+    } catch (error) {
+        console.error('Failed to get formatted token balance:', error);
+        return 'Error';
+    }
+}
+
+// Utility to create provider from chain config
+export function createProviderFromChain(chainId) {
+    const networkConfig = NETWORKS[chainId];
+    if (!networkConfig) {
+        throw new Error(`No RPC configuration for chain ID: ${chainId}`);
+    }
+    
+    return new ethers.JsonRpcProvider(networkConfig.rpc);
+}
+
+// Time formatting utilities
+export function formatTimeRemaining(deadline) {
+    const now = Date.now();
+    const endTime = new Date(deadline).getTime();
+    const timeDiff = endTime - now;
+
+    if (timeDiff <= 0) {
+        return "Expired";
+    }
+
+    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (days > 0) {
+        return `${days}d ${hours}h remaining`;
+    } else if (hours > 0) {
+        return `${hours}h ${minutes}m remaining`;
+    } else {
+        return `${minutes}m remaining`;
+    }
+}
+
+// Format date for display
+export function formatDate(date) {
+    if (!date) return 'Unknown';
+    
+    const dateObj = date instanceof Date ? date : new Date(date);
+    
+    return dateObj.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+// Percentage calculation utility
+export function calculatePercentage(value, total) {
+    if (!total || total === 0) return 0;
+    return Math.round((Number(value) / Number(total)) * 100);
+}
+
+// Proposal type utilities
+export function getActionTypeDisplay(action) {
+    if (action.Motion) return "Motion";
+    if (action.EthTransaction) return "Ethereum Transaction";
+    if (action.ICPCall) return "ICP Call";
+    return "Unknown";
+}
+
+export function getActionDetails(action, networkInfo) {
+    if (action.Motion) {
+        return action.Motion;
+    }
+    if (action.EthTransaction) {
+        const tx = action.EthTransaction;
+        const network = networkInfo || getNetworkInfo(Number(tx.chain.chain_id));
+        return `To: ${formatAddress(tx.to)} on ${network.name}`;
+    }
+    if (action.ICPCall) {
+        const call = action.ICPCall;
+        return `${call.method} on ${call.canister}`;
+    }
+    return "Unknown action";
+}
+
+// Status badge utilities
+export function getStatusBadgeClass(proposal) {
+    if (proposal.isExecuted) return "status-executed";
+    if (proposal.isFailed) return "status-failed";
+    if (proposal.isExecuting) return "status-executing";
+    if (proposal.isActive) return "status-active";
+    return "status-pending";
+}
+
+export function getStatusText(proposal) {
+    if (proposal.isExecuted) return "Executed";
+    if (proposal.isFailed) return "Failed";
+    if (proposal.isExecuting) return "Executing";
+    if (proposal.isActive) return "Active";
+    return "Pending";
+}
+
+// Error formatting
+export function formatError(error) {
+    if (typeof error === 'string') return error;
+    if (error?.message) return error.message;
+    if (error?.reason) return error.reason;
+    return 'An unknown error occurred';
+}
+
+// Validation utilities
+export function validateProposalForm(formData) {
+    const errors = [];
+    
+    if (!formData.type) {
+        errors.push('Proposal type is required');
+    }
+    
+    switch (formData.type) {
+        case 'motion':
+            if (!formData.motionText?.trim()) {
+                errors.push('Motion text is required');
+            }
+            break;
+            
+        case 'eth_transaction':
+            if (!isValidAddress(formData.ethTo)) {
+                errors.push('Invalid recipient address');
+            }
+            
+            if (formData.erc20Mode) {
+                if (!isValidAddress(formData.erc20Recipient)) {
+                    errors.push('Invalid ERC20 recipient address');
+                }
+                if (!formData.erc20Amount || parseFloat(formData.erc20Amount) <= 0) {
+                    errors.push('Invalid ERC20 amount');
+                }
+            }
+            break;
+            
+        case 'icp_call':
+            if (!formData.icpCanister?.trim()) {
+                errors.push('Canister ID is required');
+            }
+            if (!formData.icpMethod?.trim()) {
+                errors.push('Method name is required');
+            }
+            break;
+    }
+    
+    return errors;
 }
