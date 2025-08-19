@@ -5,8 +5,7 @@
     import { authStore } from "../stores/auth.js";
     import { configStore } from "../stores/config.js";
     import { getNetworkInfo } from "../utils.js";
-    import { getTokenBalance } from "../blockchain.js";
-    import { submitVote, getUserVote } from "../voting.js";
+    import { votingInterface } from '../icrc149-voting-interface.js';
     import { ethers } from 'ethers';
 
     // Export filter prop
@@ -61,7 +60,8 @@
 
     async function loadProposals() {
         try {
-            await proposalsStore.load();
+            const proposals = await votingInterface.loadProposals();
+            proposalsStore.set({ proposals, loading: false, error: null });
         } catch (err) {
             console.error("Failed to load proposals:", err);
         }
@@ -76,19 +76,9 @@
 
         isLoadingBalance = true;
         try {
-            // Get current chain ID from MetaMask
-            const provider = new ethers.BrowserProvider(window.ethereum);
-            const network = await provider.getNetwork();
-            const chainId = Number(network.chainId);
-
-            // Get token balance
-            const balance = await getTokenBalance(walletAddress, contractAddress, chainId);
-            
-            // Extract numeric value from balance string (e.g., "100.0 GOV" -> "100.0")
-            const numericBalance = balance.split(' ')[0];
-            userTokenBalance = numericBalance === 'Error' || numericBalance === 'N/A' ? "0" : numericBalance;
-            userVotingPower = userTokenBalance; // For now, voting power = token balance
-
+            const balance = await votingInterface.getUserTokenBalance(contractAddress, walletAddress);
+            userTokenBalance = balance.toString();
+            userVotingPower = userTokenBalance;
         } catch (error) {
             console.error('Failed to load user token balance:', error);
             userTokenBalance = "0";
@@ -193,8 +183,8 @@
             userVotes[proposalId] = 'loading';
             userVotes = { ...userVotes };
             
-            // Submit vote to backend
-            await submitVote(proposalId, vote);
+            // Submit vote using voting interface
+            await votingInterface.castVote(proposalId, vote, contractAddress);
             
             // Update local state on success
             userVotes[proposalId] = vote;

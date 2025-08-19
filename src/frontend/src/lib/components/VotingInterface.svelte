@@ -1,11 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../stores/auth.js";
-    import { backend } from "../canisters.js";
-    import {
-        createSiweProofForVoting,
-        getCurrentChainId,
-    } from "../ethereum.js";
+    import { votingInterface } from '../icrc149-voting-interface.js';
 
     export let proposal;
 
@@ -25,18 +21,8 @@
 
     async function loadUserVote() {
         try {
-            const result = await backend.icrc149_get_user_vote(
-                proposal.id,
-                $authStore.walletAddress
-            );
-
-            if (result && result.length > 0) {
-                hasVoted = true;
-                const vote = result[0];
-                if ("Yes" in vote) userVote = "Yes";
-                else if ("No" in vote) userVote = "No";
-                else if ("Abstain" in vote) userVote = "Abstain";
-            }
+            hasVoted = await votingInterface.hasUserVoted(proposal.id, $authStore.walletAddress);
+            // Optionally, fetch vote details if available
         } catch (err) {
             console.error("Failed to load user vote:", err);
         }
@@ -58,53 +44,17 @@
             error = null;
             success = null;
 
-            // Get current chain ID
-            const chainId = await getCurrentChainId();
+            // Initialize canister if not already done (provide canisterId and environment as needed)
+            // await votingInterface.initializeCanister(canisterId, environment);
 
             // Get snapshot contract from proposal (if available)
-            const snapshotContract =
-                proposal.snapshot?.contract_address ||
-                (await getDefaultSnapshotContract());
-
+            const snapshotContract = proposal.snapshot?.contract_address || null;
             if (!snapshotContract) {
                 throw new Error("No snapshot contract available for voting");
             }
 
-            // Create SIWE proof for voting
-            const siweProof = await createSiweProofForVoting(
-                proposal.id,
-                selectedChoice,
-                snapshotContract,
-                chainId
-            );
-
-            // Create witness (this would normally be generated from Ethereum state)
-            // For now, we'll create a placeholder witness structure
-            const witness = await createWitnessForVoting(
-                $authStore.walletAddress,
-                snapshotContract,
-                chainId
-            );
-
-            // Submit vote
-            const voteArgs = {
-                proposal_id: proposal.id,
-                choice: { [selectedChoice]: null },
-                voter: new Uint8Array(
-                    Buffer.from($authStore.walletAddress.slice(2), "hex")
-                ),
-                siwe: {
-                    message: siweProof.message,
-                    signature: siweProof.signature,
-                },
-                witness: witness,
-            };
-
-            const result = await backend.icrc149_vote_proposal(voteArgs);
-
-            if ("Err" in result) {
-                throw new Error(result.Err);
-            }
+            // Cast vote using the voting interface
+            await votingInterface.castVote(proposal.id, selectedChoice, snapshotContract);
 
             success = `Vote submitted successfully! Choice: ${selectedChoice}`;
             hasVoted = true;
@@ -124,9 +74,9 @@
 
     async function getDefaultSnapshotContract() {
         try {
-            const contracts = await backend.icrc149_get_snapshot_contracts();
-            if (contracts.length > 0) {
-                return contracts[0][0]; // Return first contract address
+            const contracts = await votingInterface.getContractConfig();
+            if (contracts && contracts.length > 0) {
+                return contracts[0].contract_address;
             }
         } catch (err) {
             console.error("Failed to get snapshot contracts:", err);
@@ -134,30 +84,7 @@
         return null;
     }
 
-    // Placeholder function for creating witness
-    // In a real implementation, this would generate Merkle proofs from Ethereum state
-    async function createWitnessForVoting(
-        userAddress,
-        contractAddress,
-        chainId
-    ) {
-        // This is a placeholder - you would need to implement actual witness generation
-        // that creates Merkle proofs of the user's token balance at the snapshot block
-        return {
-            accountProof: [new Uint8Array(32)], // Placeholder proof
-            blockHash: new Uint8Array(32),
-            blockNumber: 0,
-            contractAddress: new Uint8Array(
-                Buffer.from(contractAddress.slice(2), "hex")
-            ),
-            storageKey: new Uint8Array(32),
-            storageProof: [new Uint8Array(32)],
-            storageValue: new Uint8Array(32),
-            userAddress: new Uint8Array(
-                Buffer.from(userAddress.slice(2), "hex")
-            ),
-        };
-    }
+    // Witness generation is now handled by votingInterface.generateWitnessProof
 
     function getChoiceVariant(choice) {
         switch (choice) {

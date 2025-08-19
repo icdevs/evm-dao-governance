@@ -3,8 +3,7 @@
 
 import { ethers } from 'ethers';
 import { Actor, HttpAgent, AnonymousIdentity } from '@dfinity/agent';
-import { IDL } from '@dfinity/candid';
-import { idlFactory } from '../declarations/backend/backend.did.js';
+import { idlFactory } from '../../../declarations/backend/backend.did.js';
 
 export class ICRC149VotingInterface {
     constructor() {
@@ -81,7 +80,7 @@ export class ICRC149VotingInterface {
         let agent;
         if (this.isLocal) {
             // Local development configuration with best practices
-            agent = new HttpAgent({
+            agent = new HttpAgent.create({
                 host: 'http://127.0.0.1:8080',
                 identity: new AnonymousIdentity()
             });
@@ -90,7 +89,7 @@ export class ICRC149VotingInterface {
             await agent.fetchRootKey();
         } else {
             // Internet Computer production configuration
-            agent = new HttpAgent({
+            agent = new HttpAgent.create({
                 host: 'https://ic0.app',
                 identity: new AnonymousIdentity()
             });
@@ -438,6 +437,9 @@ Expiration Time: ${expirationTime}`;
     onChainChange = null;
     onStatusUpdate = null;
 }
+
+// Singleton instance for global use
+export const votingInterface = new ICRC149VotingInterface();
 
 // Export for use in browser environments
 if (typeof window !== 'undefined') {

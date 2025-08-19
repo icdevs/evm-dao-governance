@@ -1,6 +1,6 @@
 <script>
     import { onMount } from "svelte";
-    import { backend } from "../canisters.js";
+    import { votingInterface } from '../icrc149-voting-interface.js';
     import { authStore } from "../stores/auth.js";
     import { getNetworkInfo, formatTokenAmount } from "../utils.js";
     import VotingInterface from "./VotingInterface.svelte";
@@ -24,8 +24,8 @@
             loading = true;
             error = null;
 
-            // Load proposal details
-            const result = await backend.icrc149_get_proposal(proposalId);
+            // Load proposal details using voting interface
+            const result = await votingInterface.canisterActor.icrc149_get_proposal(proposalId);
 
             if (!result || result.length === 0) {
                 throw new Error("Proposal not found");
@@ -55,18 +55,8 @@
 
     async function loadUserVote() {
         try {
-            const result = await backend.icrc149_get_user_vote(
-                proposalId,
-                $authStore.walletAddress
-            );
-
-            if (result && result.length > 0) {
-                hasVoted = true;
-                const vote = result[0];
-                if ("Yes" in vote) userVote = "Yes";
-                else if ("No" in vote) userVote = "No";
-                else if ("Abstain" in vote) userVote = "Abstain";
-            }
+            hasVoted = await votingInterface.hasUserVoted(proposalId, $authStore.walletAddress);
+            // Optionally, fetch vote details if available
         } catch (err) {
             console.error("Failed to load user vote:", err);
         }
@@ -139,11 +129,7 @@
         if (!proposal || !proposal.isActive) return;
 
         try {
-            const result = await backend.icrc149_execute_proposal(proposal.id);
-            if ("Err" in result) {
-                throw new Error(result.Err);
-            }
-
+            await votingInterface.executeProposal(proposal.id);
             // Reload proposal to see updated status
             await loadProposal();
         } catch (err) {

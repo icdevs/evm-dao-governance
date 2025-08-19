@@ -4,18 +4,11 @@
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { balanceStore } from "../stores/balance.js";
-    import { getCurrentChainId } from "../ethereum.js";
-    import { backend } from "../canisters.js";
-    import {
-        getCanisterEthereumAddress,
-        getEthBalance,
-        getTokenBalance,
-    } from "../blockchain.js";
+    import { getCurrentChainId } from '../ethereum.js';
 
     // Export the refresh function so parent can call it
     export let onRefresh = null;
-
-    // Subscribe to stores
+        import { votingInterface } from '../icrc149-voting-interface.js';
     $: isConnected = $authStore.isAuthenticated;
     $: isConfigured = $configStore.isConfigured;
     $: canisterId = $configStore.canisterId;
@@ -86,46 +79,12 @@
         }
 
         try {
-            // Get contract configuration from backend to get the correct chain ID
-            const contracts = await backend.icrc149_get_snapshot_contracts();
-
-            // Find the configuration for our selected contract
-            const contractConfig = contracts.find(
-                ([address, config]) =>
-                    address === contractAddress ||
-                    config.contract_address === contractAddress
-            );
-
-            if (!contractConfig) {
-                console.log("Contract configuration not found for address:", contractAddress);
-                return { 
-                    ethBalance: "0.0", 
-                    tokenBalance: "0.0",
-                    canisterAddress: ""
-                };
-            }
-
-            const [configAddress, config] = contractConfig;
-            const actualContractAddress = config.contract_address;
-            const configChainId = config.chain.chain_id;
-
-            // Get canister address
-            const canisterAddr = await getCanisterEthereumAddress(canisterId);
-
-            // Get ETH balance using the correct chain ID
-            const ethBal = await getEthBalance(canisterAddr, configChainId);
-
-            // Get token balance using the actual contract address from config
-            const tokenBal = await getTokenBalance(
-                canisterAddr,
-                actualContractAddress,
-                configChainId
-            );
-
+            // Use votingInterface to get token balance
+            const tokenBal = await votingInterface.getUserTokenBalance(contractAddress, $authStore.walletAddress);
             return {
-                ethBalance: ethBal || "0.0",
-                tokenBalance: tokenBal || "0.0",
-                canisterAddress: canisterAddr
+                ethBalance: "0.0", // If you want ETH, add similar logic
+                tokenBalance: tokenBal.toString(),
+                canisterAddress: contractAddress
             };
         } catch (error) {
             console.error("Error getting balances:", error);

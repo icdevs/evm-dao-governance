@@ -1,11 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../stores/auth.js";
-    import { backend } from "../canisters.js";
-    import {
-        createSiweProofForProposal,
-        getCurrentChainId,
-    } from "../ethereum.js";
+    import { votingInterface } from '../icrc149-voting-interface.js';
     import {
         createTransferData,
         parseTokenAmount,
@@ -80,26 +76,17 @@
                 return;
             }
 
-            // Get current network info
-            const chainId = await getCurrentChainId();
+            // Get contract config and chain info
+            const contractConfig = await votingInterface.getContractConfig();
+            const contractAddress = contractConfig?.contract_address || null;
+            if (!contractAddress) {
+                throw new Error("No governance contract available. Please configure a contract in the settings first.");
+            }
+            const chainId = votingInterface.currentChainId;
             const networkInfo = getNetworkInfo(chainId);
 
-            // Create SIWE proof
-            // Get the selected contract from the main page's governance selector
-            const contracts = await backend.icrc149_get_snapshot_contracts();
-            const contractAddress =
-                contracts.length > 0 ? contracts[0][0] : null;
-
-            if (!contractAddress) {
-                throw new Error(
-                    "No governance contract available. Please configure a contract in the settings first."
-                );
-            }
-
-            const siweProof = await createSiweProofForProposal(
-                contractAddress,
-                chainId
-            );
+            // Generate SIWE proof
+            const siweProof = await votingInterface.generateSIWEProof(contractAddress, chainId);
 
             // Build proposal object
             let proposal = {
@@ -154,7 +141,7 @@
 
             console.log("Submitting proposal:", proposalData);
 
-            const result = await backend.icrc149_create_proposal(proposalData);
+            const result = await votingInterface.canisterActor.icrc149_create_proposal(proposalData);
 
             if ("Err" in result) {
                 throw new Error(result.Err);

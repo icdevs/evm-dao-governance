@@ -1,5 +1,6 @@
 <script>
     import { configStore } from "../stores/config.js";
+    import { votingInterface } from "../icrc149-voting-interface.js";
     import { statusStore } from "../stores/status.js";
     import { backend } from "../canisters.js";
     import { onMount } from "svelte";
@@ -256,12 +257,18 @@
         }
     }
 
-    function saveConfiguration() {
+    async function saveConfiguration() {
         // Save the configuration
         configStore.updateField("canisterId", canisterId);
         configStore.updateField("environment", environment);
         configStore.updateField("contractAddress", contractAddress);
         configStore.checkConfiguration();
+        try {
+            await votingInterface.initializeCanister(canisterId, environment);
+            statusStore.add("Voting interface initialized!", "success");
+        } catch (e) {
+            statusStore.add(`Voting interface initialization failed: ${e.message}`, "error");
+        }
 
         // Show success message
         statusStore.add("Configuration saved successfully!", "success");
