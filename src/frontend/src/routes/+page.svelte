@@ -1,6 +1,5 @@
 <script>
     import "../index.scss";
-    import { browser } from "$app/environment";
     import { goto } from "$app/navigation";
     import WalletConnector from "$lib/components/WalletConnector.svelte";
     import TreasuryAddress from "$lib/components/TreasuryAddress.svelte";
@@ -17,16 +16,12 @@
     import { providerStore } from "$lib/stores/provider.js";
 
     // State
-    let initialized = false;
     let showCreateProposal = false;
     let showContractDropdown = false;
     let proposalFilter = "any";
     let dashboardRefreshFn = null;
     let isDashboardLoading = false;
     let isGlobalRefreshing = false;
-
-    // Track initialization state
-    let dataInitialized = false;
 
     // Computed values from stores
     $: stats = $proposalStats;
@@ -35,6 +30,7 @@
     $: backendActor = $agentStore.actor;
     $: provider = $providerStore;
     $: contractAddress = $configStore.contractAddress;
+    $: tokenInfo = $governanceStatsStore.tokenInfo;
 
     // Redirect to config if not configured
     $: if ($configStore.loaded && !$configStore.isConfigured) {
@@ -42,24 +38,14 @@
     }
 
     // Load initial data when all dependencies are ready (only once)
-    $: if (
-        !dataInitialized &&
-        backendActor &&
-        provider &&
-        contractAddress &&
-        $treasuryBalanceStore.walletAddress
-    ) {
-        console.log("Loading initial data");
-        dataInitialized = true; // Load all data in parallel
-        Promise.all([
-            proposalsStore.load(backendActor, [], false),
-            governanceStatsStore.load(provider, contractAddress, false),
-            treasuryBalanceStore.load(provider),
-        ]).catch((error) => {
-            console.error("Failed to load initial data:", error);
-            // Reset flag so it can retry if needed
-            dataInitialized = false;
-        });
+    $: if (backendActor) {
+        proposalsStore.load(backendActor, [], false);
+    }
+    $: if (provider && tokenInfo && $treasuryBalanceStore.walletAddress) {
+        treasuryBalanceStore.load(provider, tokenInfo);
+    }
+    $: if (provider && contractAddress) {
+        governanceStatsStore.load(provider, contractAddress, false);
     }
 
     // Event handlers
@@ -120,259 +106,247 @@
 <StatusMessages />
 
 <main>
-    {#if !dataInitialized}
-        <div class="loading-screen">
-            <div class="spinner"></div>
-            <p>Initializing DAO Governance...</p>
-        </div>
-    {:else}
-        <div class="app-container">
-            <!-- App Header -->
-            <header class="app-header">
-                <div class="header-content">
-                    <div class="brand">
-                        <h1>🗳️ DAO Governance</h1>
-                        <p class="subtitle">
-                            Cross-chain voting on Internet Computer
-                        </p>
-                    </div>
-                    <div class="header-actions">
-                        <WalletConnector showNetworkInfo={true} />
-                    </div>
+    <div class="app-container">
+        <!-- App Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="brand">
+                    <h1>🗳️ DAO Governance</h1>
+                    <p class="subtitle">
+                        Cross-chain voting on Internet Computer
+                    </p>
                 </div>
-            </header>
+                <div class="header-actions">
+                    <WalletConnector showNetworkInfo={true} />
+                </div>
+            </div>
+        </header>
 
-            <!-- Compact Dashboard Bar -->
-            <div class="compact-dashboard">
-                <div class="dashboard-left">
-                    <div class="addresses-section">
-                        <div class="governance-info">
-                            <span class="governance-label"
-                                >Governance Token:</span
+        <!-- Compact Dashboard Bar -->
+        <div class="compact-dashboard">
+            <div class="dashboard-left">
+                <div class="addresses-section">
+                    <div class="governance-info">
+                        <span class="governance-label">Governance Token:</span>
+                        <div class="inline-address">
+                            <span class="address-full">{contractAddress}</span>
+                            <button
+                                class="inline-copy-btn"
+                                on:click={() =>
+                                    navigator.clipboard.writeText(
+                                        contractAddress
+                                    )}
+                                title="Copy address"
                             >
-                            <div class="inline-address">
-                                <span class="address-full"
-                                    >{contractAddress}</span
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    xmlns="http://www.w3.org/2000/svg"
                                 >
-                                <button
-                                    class="inline-copy-btn"
-                                    on:click={() =>
-                                        navigator.clipboard.writeText(
-                                            contractAddress
-                                        )}
-                                    title="Copy address"
-                                >
-                                    <svg
-                                        viewBox="0 0 24 24"
+                                    <rect
+                                        x="9"
+                                        y="9"
+                                        width="13"
+                                        height="13"
+                                        rx="2"
+                                        ry="2"
+                                        stroke="currentColor"
+                                        stroke-width="2"
                                         fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                    >
-                                        <rect
-                                            x="9"
-                                            y="9"
-                                            width="13"
-                                            height="13"
-                                            rx="2"
-                                            ry="2"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            fill="none"
-                                        />
-                                        <path
-                                            d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            fill="none"
-                                        />
-                                    </svg>
-                                </button>
-                            </div>
+                                    />
+                                    <path
+                                        d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        fill="none"
+                                    />
+                                </svg>
+                            </button>
                         </div>
-                        <TreasuryAddress />
                     </div>
-                </div>
-
-                <div class="dashboard-center">
-                    <BalanceDisplay
-                        onRefresh={setDashboardRefreshFn}
-                        bind:isLoading={isDashboardLoading}
-                    />
-                </div>
-
-                <div class="dashboard-right">
-                    <div class="compact-actions">
-                        <button
-                            class="refresh-btn-inline"
-                            on:click={handleGlobalRefresh}
-                            disabled={!walletConnected ||
-                                !$configStore.isConfigured ||
-                                isGlobalRefreshing}
-                            title="Refresh all data"
-                        >
-                            <svg
-                                class="refresh-icon-inline"
-                                class:spinning={isGlobalRefreshing}
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                            >
-                                <path
-                                    d="M1 4V10H7"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                />
-                                <path
-                                    d="M23 20V14H17"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                />
-                                <path
-                                    d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                />
-                            </svg>
-                        </button>
-
-                        <button
-                            class="config-btn-inline"
-                            on:click={() => goto("/config")}
-                            title="Configuration"
-                        >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                            >
-                                <path
-                                    d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                />
-                                <circle
-                                    cx="12"
-                                    cy="12"
-                                    r="3"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                />
-                            </svg>
-                        </button>
-                    </div>
+                    <TreasuryAddress />
                 </div>
             </div>
 
-            <!-- Main Content -->
-            <div class="main-content">
-                <div class="proposals-section">
-                    <div class="proposals-header">
-                        <div class="section-title">
-                            <h2>📋 Proposals</h2>
-                            <div class="proposals-stats">
-                                <div class="stat-item">
-                                    <span class="stat-label">Total:</span>
-                                    <span class="stat-value"
-                                        >{$proposalsStore.loading
-                                            ? "-"
-                                            : stats.total}</span
-                                    >
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">Active:</span>
-                                    <span class="stat-value"
-                                        >{$proposalsStore.loading
-                                            ? "-"
-                                            : stats.active}</span
-                                    >
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label"
-                                        >Total Voting Power:</span
-                                    >
-                                    <span class="stat-value"
-                                        >{governanceStats.loading
-                                            ? "-"
-                                            : governanceStats.totalVotingPowerFormatted}</span
-                                    >
-                                </div>
-                            </div>
-                        </div>
+            <div class="dashboard-center">
+                <BalanceDisplay
+                    onRefresh={setDashboardRefreshFn}
+                    bind:isLoading={isDashboardLoading}
+                />
+            </div>
 
-                        <div class="proposals-actions">
-                            <div class="filter-section">
-                                <label for="statusFilter">Filter:</label>
-                                <select
-                                    id="statusFilter"
-                                    class="form-control"
-                                    bind:value={proposalFilter}
-                                >
-                                    <option value="any">All Proposals</option>
-                                    <option value="active">Active</option>
-                                    <option value="pending">Pending</option>
-                                    <option value="executed">Executed</option>
-                                    <option value="expired">Expired</option>
-                                    <option value="rejected">Rejected</option>
-                                </select>
-                            </div>
-
-                            {#if walletConnected}
-                                <button
-                                    class="create-proposal-btn"
-                                    on:click={() =>
-                                        (showCreateProposal =
-                                            !showCreateProposal)}
-                                    class:active={showCreateProposal}
-                                >
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        width="24"
-                                        height="24"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                    >
-                                        <path
-                                            d="M12 5V19M5 12H19"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                        />
-                                    </svg>
-                                    {showCreateProposal
-                                        ? "Cancel"
-                                        : "Create Proposal"}
-                                </button>
-                            {:else}
-                                <div class="auth-hint-compact">
-                                    🔒 Connect wallet to create proposals
-                                </div>
-                            {/if}
-                        </div>
-                    </div>
-
-                    {#if showCreateProposal}
-                        <div class="create-proposal-form">
-                            <ProposalForm
-                                on:proposalCreated={handleProposalCreated}
+            <div class="dashboard-right">
+                <div class="compact-actions">
+                    <button
+                        class="refresh-btn-inline"
+                        on:click={handleGlobalRefresh}
+                        disabled={!walletConnected ||
+                            !$configStore.isConfigured ||
+                            isGlobalRefreshing}
+                        title="Refresh all data"
+                    >
+                        <svg
+                            class="refresh-icon-inline"
+                            class:spinning={isGlobalRefreshing}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M1 4V10H7"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
                             />
-                        </div>
-                    {/if}
+                            <path
+                                d="M23 20V14H17"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <path
+                                d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M3.51 15A9 9 0 0 0 18.36 18.36L23 14"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                        </svg>
+                    </button>
 
-                    <div class="proposals-list">
-                        <ProposalList filter={proposalFilter} />
-                    </div>
+                    <button
+                        class="config-btn-inline"
+                        on:click={() => goto("/config")}
+                        title="Configuration"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                        >
+                            <path
+                                d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 000 2l.15.08a2 2 0 011 1.73v.51a2 2 0 01-1 1.73l-.15.08a2 2 0 000 2l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 000-2l-.15-.08a2 2 0 01-1-1.73v-.51a2 2 0 011-1.73l.15-.08a2 2 0 000-2l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            />
+                            <circle
+                                cx="12"
+                                cy="12"
+                                r="3"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            />
+                        </svg>
+                    </button>
                 </div>
             </div>
         </div>
-    {/if}
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="proposals-section">
+                <div class="proposals-header">
+                    <div class="section-title">
+                        <h2>📋 Proposals</h2>
+                        <div class="proposals-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">Total:</span>
+                                <span class="stat-value"
+                                    >{$proposalsStore.loading
+                                        ? "-"
+                                        : stats.total}</span
+                                >
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Active:</span>
+                                <span class="stat-value"
+                                    >{$proposalsStore.loading
+                                        ? "-"
+                                        : stats.active}</span
+                                >
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label"
+                                    >Total Voting Power:</span
+                                >
+                                <span class="stat-value"
+                                    >{governanceStats.loading
+                                        ? "-"
+                                        : governanceStats.totalVotingPowerFormatted}</span
+                                >
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="proposals-actions">
+                        <div class="filter-section">
+                            <label for="statusFilter">Filter:</label>
+                            <select
+                                id="statusFilter"
+                                class="form-control"
+                                bind:value={proposalFilter}
+                            >
+                                <option value="any">All Proposals</option>
+                                <option value="active">Active</option>
+                                <option value="pending">Pending</option>
+                                <option value="executed">Executed</option>
+                                <option value="expired">Expired</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                        </div>
+
+                        {#if walletConnected}
+                            <button
+                                class="create-proposal-btn"
+                                on:click={() =>
+                                    (showCreateProposal = !showCreateProposal)}
+                                class:active={showCreateProposal}
+                            >
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    width="24"
+                                    height="24"
+                                    fill="none"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                >
+                                    <path
+                                        d="M12 5V19M5 12H19"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    />
+                                </svg>
+                                {showCreateProposal
+                                    ? "Cancel"
+                                    : "Create Proposal"}
+                            </button>
+                        {:else}
+                            <div class="auth-hint-compact">
+                                🔒 Connect wallet to create proposals
+                            </div>
+                        {/if}
+                    </div>
+                </div>
+
+                {#if showCreateProposal}
+                    <div class="create-proposal-form">
+                        <ProposalForm
+                            on:proposalCreated={handleProposalCreated}
+                        />
+                    </div>
+                {/if}
+
+                <div class="proposals-list">
+                    <ProposalList filter={proposalFilter} />
+                </div>
+            </div>
+        </div>
+    </div>
 </main>
 
 <style>

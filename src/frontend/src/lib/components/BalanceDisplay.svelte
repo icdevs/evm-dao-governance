@@ -3,6 +3,7 @@
     import { walletStore } from "../stores/wallet.js";
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
+    import { governanceStatsStore } from "../stores/governance.js";
     import { treasuryBalanceStore } from "../stores/balance.js";
     import { providerStore } from "../stores/provider.js";
     import { formatTokenAmount } from "../utils.js";
@@ -16,59 +17,24 @@
     $: treasuryBalanceData = $treasuryBalanceStore;
 
     // Derive reactive values
-    $: isConnected = walletData.state === "connected";
-    $: isConfigured = configData.isConfigured;
-    $: canisterId = configData.canisterId;
-    $: contractAddress = configData.contractAddress;
-    $: walletAddress = walletData.userAddress;
     $: provider = $providerStore;
+    $: tokenInfo = $governanceStatsStore.tokenInfo;
 
     // Balance data
     $: isLoading = treasuryBalanceData?.isLoading || true;
     $: isInitialLoad = treasuryBalanceData.isInitialLoad;
 
-    let initialized = false;
-    let previousConfigured = false;
-    let previousCanisterId = "";
-
     onMount(async () => {
-        if (isConnected && isConfigured) {
-            // Check if we should load balances
-            if (shouldLoadBalances(treasuryBalanceData)) {
-                await refreshBalances();
-            }
-        }
-
-        initialized = true;
-
         // Expose refresh function to parent
         if (onRefresh) {
             onRefresh(() => refreshBalances());
         }
     });
 
-    // Helper function to check if we should load balances
-    function shouldLoadBalances(currentBalanceData) {
-        if (!currentBalanceData.lastUpdated) return true;
-        if (
-            currentBalanceData.ethBalance === "0.0" &&
-            currentBalanceData.tokenBalance === "0.0"
-        )
-            return true;
-
-        const age = Date.now() - currentBalanceData.lastUpdated.getTime();
-        return age > 60000; // 1 minute
-    }
-
     async function refreshBalances() {
         console.log("Refreshing treasury balances...");
         try {
-            await treasuryBalanceStore.load(
-                provider,
-                contractAddress,
-                walletAddress,
-                false
-            );
+            await treasuryBalanceStore.load(provider, tokenInfo);
         } catch (error) {
             console.error("Failed to refresh treasury balances:", error);
             statusStore.add(
@@ -76,22 +42,6 @@
                 "error"
             );
         }
-    }
-
-    // Watch for auth and config changes to trigger refresh
-    $: {
-        if (initialized && isConfigured) {
-            const configChanged = !previousConfigured && isConfigured;
-            const canisterChanged =
-                previousCanisterId !== canisterId && canisterId;
-
-            if (configChanged || canisterChanged) {
-                refreshBalances();
-            }
-        }
-
-        previousConfigured = isConfigured;
-        previousCanisterId = canisterId || "";
     }
 </script>
 

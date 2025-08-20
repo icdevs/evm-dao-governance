@@ -30,7 +30,7 @@ function createBalanceStore(initializeFunc) {
         subscribe,
 
         // Load balances using provided loader function
-        load: async (provider) => {
+        load: async (provider, tokenInfo) => {
 
             let currentState;
             const unsubscribe = subscribe(state => currentState = state);
@@ -46,7 +46,8 @@ function createBalanceStore(initializeFunc) {
                     getTokenBalanceInfo(
                         provider,
                         currentState.contractAddress,
-                        currentState.walletAddress
+                        currentState.walletAddress,
+                        tokenInfo
                     )
                 ]);
 

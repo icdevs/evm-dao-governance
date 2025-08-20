@@ -2,18 +2,19 @@
 
 import { ethers } from 'ethers';
 import { createTransferData, parseTokenAmount, getNetworkInfo } from './utils.js';
+import { getERC20BalanceStorageKey } from "./storageUtils.js"
 
 // Get contract configuration from canister
 export async function getContractConfig(backendActor, contractAddress) {
     if (!backendActor) {
         throw new Error('Backend actor not provided');
     }
-    
+
     const result = await backendActor.icrc149_get_snapshot_contracts();
-    
+
     // Find the contract in the list
     const contractConfig = result.find(([address, config]) => address === contractAddress);
-    
+
     if (contractConfig) {
         const [, config] = contractConfig;
         return {
@@ -28,43 +29,43 @@ export async function getContractConfig(backendActor, contractAddress) {
 // Create a new proposal
 export async function createProposal(proposalData, dependencies) {
     const { backendActor, userAddress, contractAddress, chainId, signer } = dependencies;
-    
+
     if (!userAddress) {
         throw new Error('Wallet not connected');
     }
-    
+
     if (!backendActor) {
         throw new Error('Backend actor not available');
     }
-    
+
     if (!contractAddress) {
         throw new Error('No governance contract configured');
     }
-    
+
     const networkInfo = getNetworkInfo(chainId);
-    
+
     // Generate SIWE proof
     const siweProof = await generateSIWEProof(proposalData, contractAddress, chainId, signer);
-    
+
     // Build proposal object based on type
     let proposal = {
         metadata: proposalData.metadata || '',
         snapshotContract: contractAddress,
         siweProof,
     };
-    
+
     // Process proposal data based on type
     switch (proposalData.type) {
         case 'motion':
             proposal.type = 'motion';
             proposal.motion = proposalData.motionText;
             break;
-            
+
         case 'eth_transaction':
             // Handle ERC20 transfer helper if enabled
             let ethData = proposalData.ethData || '0x';
             let ethValue = proposalData.ethValue || '0';
-            
+
             if (proposalData.erc20Mode && proposalData.erc20Recipient && proposalData.erc20Amount) {
                 const amount = parseTokenAmount(
                     proposalData.erc20Amount,
@@ -73,7 +74,7 @@ export async function createProposal(proposalData, dependencies) {
                 ethData = createTransferData(proposalData.erc20Recipient, amount);
                 ethValue = '0'; // ERC20 transfers don't send ETH value
             }
-            
+
             proposal.type = 'eth_transaction';
             proposal.to = proposalData.ethTo;
             proposal.value = ethValue;
@@ -84,21 +85,21 @@ export async function createProposal(proposalData, dependencies) {
             proposal.maxFeePerGas = proposalData.ethMaxFeePerGas || '2000000000';
             proposal.maxPriorityFeePerGas = proposalData.ethMaxPriorityFeePerGas || '1000000000';
             break;
-            
+
         case 'icp_call':
             proposal.type = 'icp_call';
             proposal.canister = proposalData.icpCanister;
             proposal.method = proposalData.icpMethod;
-            proposal.args = proposalData.icpArgs.startsWith('0x') 
-                ? proposalData.icpArgs 
+            proposal.args = proposalData.icpArgs.startsWith('0x')
+                ? proposalData.icpArgs
                 : `0x${proposalData.icpArgs}`;
             proposal.cycles = proposalData.icpCycles || '0';
             break;
-            
+
         default:
             throw new Error(`Unknown proposal type: ${proposalData.type}`);
     }
-    
+
     // Convert to Candid format and submit
     const candidProposal = {
         action: getActionVariant(proposal),
@@ -109,15 +110,15 @@ export async function createProposal(proposalData, dependencies) {
         },
         snapshot_contract: proposal.snapshotContract ? [proposal.snapshotContract] : [],
     };
-    
+
     console.log('Submitting proposal:', candidProposal);
-    
+
     const result = await backendActor.icrc149_create_proposal(candidProposal);
-    
+
     if ('Err' in result) {
         throw new Error(result.Err);
     }
-    
+
     return {
         id: result.Ok,
         proposal: proposal
@@ -129,7 +130,7 @@ function getActionVariant(proposal) {
     switch (proposal.type) {
         case 'motion':
             return { Motion: proposal.motion };
-            
+
         case 'eth_transaction':
             return {
                 EthTransaction: {
@@ -150,7 +151,7 @@ function getActionVariant(proposal) {
                     nonce: [],
                 },
             };
-            
+
         case 'icp_call':
             return {
                 ICPCall: {
@@ -164,7 +165,7 @@ function getActionVariant(proposal) {
                     result: [],
                 },
             };
-            
+
         default:
             throw new Error(`Unknown proposal type: ${proposal.type}`);
     }
@@ -175,12 +176,12 @@ export async function getProposals(backendActor, limit = 10, offset = null, filt
     if (!backendActor) {
         throw new Error('Backend actor not provided');
     }
-    
+
     const limitOpt = limit ? [BigInt(limit)] : [];
     const prevOpt = offset ? [BigInt(offset)] : null;
-    
+
     const result = await backendActor.icrc149_get_proposals(prevOpt, limitOpt, filters);
-    
+
     return result.map(proposal => ({
         id: Number(proposal.id),
         action: proposal.action,
@@ -198,33 +199,24 @@ export async function getProposal(backendActor, proposalId) {
     if (!backendActor) {
         throw new Error('Backend actor not provided');
     }
-    
+
     return await backendActor.icrc149_get_proposal(BigInt(proposalId));
 }
 
 // Cast a vote on a proposal
-export async function castVote(proposalId, choice, dependencies) {
-    const { backendActor, userAddress, contractAddress, chainId, signer, provider } = dependencies;
-    
-    if (!userAddress) {
-        throw new Error('Wallet not connected');
-    }
-    
-    if (!backendActor) {
-        throw new Error('Backend actor not available');
-    }
-    
+export async function castVote(proposalId, choice, backendActor, userAddress, contractAddress, chainId, signer, provider) {
+
     // Generate SIWE proof
     const siweProof = await generateSIWEProofForVoting(proposalId, choice, contractAddress, chainId, signer);
-    
+    console.log("proof", siweProof);
     // Generate witness proof
-    const witness = await generateWitnessProof(contractAddress, proposalId, userAddress, provider);
-    
+    const witness = await generateWitnessProof(contractAddress, userAddress, provider);
+
     // Prepare vote choice
-    const voteChoice = choice === 'Yes' ? { Yes: null } : 
-                      choice === 'No' ? { No: null } : 
-                      { Abstain: null };
-    
+    const voteChoice = choice === 'Yes' ? { Yes: null } :
+        choice === 'No' ? { No: null } :
+            { Abstain: null };
+
     const voteArgs = {
         proposal_id: BigInt(proposalId),
         voter: ethers.getBytes(userAddress),
@@ -232,10 +224,10 @@ export async function castVote(proposalId, choice, dependencies) {
         siwe: siweProof,
         witness: witness
     };
-    
+
     // Submit vote to canister
     const result = await backendActor.icrc149_vote_proposal(voteArgs);
-    
+
     if ('Ok' in result) {
         return 'Vote submitted successfully';
     } else {
@@ -248,9 +240,9 @@ export async function executeProposal(backendActor, proposalId) {
     if (!backendActor) {
         throw new Error('Backend actor not provided');
     }
-    
+
     const result = await backendActor.icrc149_execute_proposal(BigInt(proposalId));
-    
+
     if ('Ok' in result) {
         return result.Ok;
     } else {
@@ -263,9 +255,9 @@ export async function getVoteTally(backendActor, proposalId) {
     if (!backendActor) {
         throw new Error('Backend actor not provided');
     }
-    
+
     const result = await backendActor.icrc149_tally_votes(BigInt(proposalId));
-    
+
     return {
         yes: Number(result.yes),
         no: Number(result.no),
@@ -280,20 +272,20 @@ export async function hasUserVoted(backendActor, proposalId, userAddress) {
     if (!backendActor || !userAddress) {
         return false;
     }
-    
+
     try {
         const voteRequests = [{
             proposal_id: BigInt(proposalId),
             user_address: userAddress
         }];
-        
+
         const voteResults = await backendActor.icrc149_get_user_votes(voteRequests);
-        
+
         if (voteResults && voteResults.length > 0) {
             const result = voteResults[0];
             return result.vote && result.vote.length > 0;
         }
-        
+
         return false;
     } catch (error) {
         console.error('Failed to check user vote:', error);
@@ -306,20 +298,20 @@ async function generateSIWEProof(proposalData, contractAddress, chainId, signer)
     if (!signer) {
         throw new Error('Signer not available');
     }
-    
+
     const address = await signer.getAddress();
     const currentTime = Date.now();
     const currentTimeNanos = BigInt(currentTime) * 1_000_000n;
     const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
-    
+
     const currentTimeISO = new Date(currentTime).toISOString();
     const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
-    
+
     const domain = window.location.host;
     const origin = window.location.origin;
-    
+
     const statement = `Create proposal for contract ${contractAddress}`;
-    
+
     const message = `${domain} wants you to sign in with your Ethereum account:
 ${address}
 
@@ -333,9 +325,9 @@ Issued At: ${currentTimeISO}
 Expiration Time: ${expirationTimeISO}
 Resources:
 - contract:${contractAddress}`;
-    
+
     const signature = await signer.signMessage(message);
-    
+
     return {
         message: message,
         signature: ethers.getBytes(signature)
@@ -347,20 +339,20 @@ async function generateSIWEProofForVoting(proposalId, choice, contractAddress, c
     if (!signer) {
         throw new Error('Signer not available');
     }
-    
+
     const address = await signer.getAddress();
     const currentTime = Date.now();
     const currentTimeNanos = BigInt(currentTime) * 1_000_000n;
     const expirationTimeNanos = currentTimeNanos + 600_000_000_000n; // 10 minutes
-    
+
     const currentTimeISO = new Date(currentTime).toISOString();
     const expirationTimeISO = new Date(Number(expirationTimeNanos / 1_000_000n)).toISOString();
-    
+
     const domain = window.location.host;
     const origin = window.location.origin;
-    
+
     const statement = `Vote ${choice} on proposal ${proposalId} for contract ${contractAddress}`;
-    
+
     const message = `${domain} wants you to sign in with your Ethereum account:
 ${address}
 
@@ -375,9 +367,9 @@ Expiration Time: ${expirationTimeISO}
 Resources:
 - proposal:${proposalId}
 - contract:${contractAddress}`;
-    
+
     const signature = await signer.signMessage(message);
-    
+
     return {
         message: message,
         signature: ethers.getBytes(signature)
@@ -385,45 +377,40 @@ Resources:
 }
 
 // Generate witness proof for user's token balance
-async function generateWitnessProof(contractAddress, proposalId, userAddress, provider) {
+async function generateWitnessProof(contractAddress, userAddress, provider) {
     if (!provider || !userAddress) {
         throw new Error('Provider or user address not available');
     }
-    
+
     // For now, use latest block - in a real implementation, you'd use the proposal's snapshot block
     const blockNumber = await provider.getBlockNumber();
-    
+
     // Generate storage key for ERC20 balance mapping (assuming slot 0)
     const storageKey = getERC20BalanceStorageKey(userAddress, 0);
-    
+
     // Get proof from Ethereum node
     const proof = await provider.send('eth_getProof', [
         contractAddress,
         [storageKey],
         `0x${blockNumber.toString(16)}`
     ]);
-    
+
     const block = await provider.send('eth_getBlockByNumber', [
         `0x${blockNumber.toString(16)}`,
         false
     ]);
-    
+
+    const rawStorageValue = BigInt(proof.storageProof[0]?.value ?? '0x0');
+    const storageValue = '0x' + rawStorageValue.toString(16).padStart(64, '0');
+
     return {
         blockHash: ethers.getBytes(block.hash),
         blockNumber: BigInt(blockNumber),
         userAddress: ethers.getBytes(userAddress),
         contractAddress: ethers.getBytes(contractAddress),
         storageKey: ethers.getBytes(storageKey),
-        storageValue: ethers.getBytes(proof.storageProof[0]?.value || '0x0'),
+        storageValue: ethers.getBytes(storageValue),
         accountProof: proof.accountProof.map(p => ethers.getBytes(p)),
         storageProof: proof.storageProof[0]?.proof.map(p => ethers.getBytes(p)) || []
     };
-}
-
-// Generate storage key for ERC20 balance mapping
-function getERC20BalanceStorageKey(userAddress, slotIndex) {
-    // For Solidity mappings: keccak256(abi.encode(key, slot))
-    const paddedAddress = ethers.zeroPadValue(userAddress, 32);
-    const paddedSlot = ethers.zeroPadValue(`0x${slotIndex.toString(16)}`, 32);
-    return ethers.keccak256(ethers.concat([paddedAddress, paddedSlot]));
 }

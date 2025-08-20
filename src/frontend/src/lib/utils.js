@@ -145,12 +145,9 @@ export async function getCanisterEthereumAddress(backendActor) {
 }
 
 // Get formatted token balance with symbol
-export async function getTokenBalanceInfo(provider, contractAddress, userAddress) {
+export async function getTokenBalanceInfo(provider, contractAddress, userAddress, tokenInfo) {
     try {
-        const [balance, tokenInfo] = await Promise.all([
-            getTokenBalance(provider, contractAddress, userAddress),
-            getTokenInfo(provider, contractAddress)
-        ]);
+        const balance = await getTokenBalance(provider, contractAddress, userAddress)
 
         const formattedBalance = formatTokenAmount(balance, tokenInfo.decimals);
         return {

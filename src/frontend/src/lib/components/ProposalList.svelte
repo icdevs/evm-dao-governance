@@ -1,13 +1,15 @@
 <script>
-    import { onMount } from "svelte";
     import { proposalsStore } from "../stores/proposals.js";
     import { walletStore } from "../stores/wallet.js";
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { getNetworkInfo } from "../utils.js";
     import { agentStore } from "../stores/agent.js";
+    import { governanceStatsStore } from "../stores/governance.js";
     import { getTokenBalanceInfo } from "../utils.js";
     import { providerStore } from "../stores/provider.js";
+    import { castVote } from "../votingAPI.js";
+    import { formatTokenAmount } from "../utils.js";
 
     // Export filter prop
     export let filter = "any"; // any, active, executed, expired, pending, rejected
@@ -23,9 +25,12 @@
     $: loading = proposalsData.loading;
     $: error = proposalsData.error;
     $: isAuthenticated = walletData.state === "connected";
-    $: walletAddress = walletData.userAddress;
+    $: userAddress = walletData.userAddress;
     $: contractAddress = configData.contractAddress;
     $: provider = $providerStore;
+    $: signer = $walletStore.signer;
+    $: chainId = walletData.chainId;
+    $: tokenInfo = $governanceStatsStore.tokenInfo;
 
     // User token balance state
     let userTokenBalanceFormatted = "0";
@@ -58,7 +63,7 @@
               });
 
     // Reactive statement to load balance when auth/config changes
-    $: if (isAuthenticated && walletAddress && contractAddress) {
+    $: if (isAuthenticated && userAddress && contractAddress) {
         loadUserTokenBalance();
     }
 
@@ -83,7 +88,7 @@
     }
 
     async function loadUserTokenBalance() {
-        if (!isAuthenticated || !walletAddress || !contractAddress) {
+        if (!isAuthenticated || !userAddress || !contractAddress) {
             userTokenBalanceFormatted = "-";
             userVotingPower = 0;
             totalTokenSupply = 0;
@@ -95,7 +100,8 @@
             const tokenBalanceInfo = await getTokenBalanceInfo(
                 provider,
                 contractAddress,
-                walletAddress
+                userAddress,
+                tokenInfo
             );
             userTokenBalanceFormatted = tokenBalanceInfo.formatted;
             userVotingPower = tokenBalanceInfo.balance;
@@ -187,7 +193,7 @@
     }
 
     async function handleVote(proposalId, vote) {
-        if (!isAuthenticated || !walletAddress) {
+        if (!isAuthenticated || !userAddress) {
             statusStore.add("Please connect your wallet first", "error");
             return;
         }
@@ -210,13 +216,17 @@
             userVotes[proposalId] = "loading";
             userVotes = { ...userVotes };
 
-            // Submit vote using voting interface
-            // Note: This would need to be updated with your actual voting implementation
-            // await castVote(proposalId, vote, contractAddress);
-            console.log(`Voting ${vote} on proposal ${proposalId}`);
-
-            // For now, simulate success
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            // Call the real vote submission logic
+            await castVote(
+                proposalId,
+                vote,
+                backendActor,
+                userAddress,
+                contractAddress,
+                chainId,
+                signer,
+                provider
+            );
 
             // Update local state on success
             userVotes[proposalId] = vote;
@@ -238,11 +248,17 @@
 
             // Show user-friendly error message
             let errorMessage = "Failed to submit vote. ";
-            if (error.message.includes("already voted")) {
+            if (error.message && error.message.includes("already voted")) {
                 errorMessage += "You have already voted on this proposal.";
-            } else if (error.message.includes("not authenticated")) {
+            } else if (
+                error.message &&
+                error.message.includes("not authenticated")
+            ) {
                 errorMessage += "Please connect your wallet and try again.";
-            } else if (error.message.includes("insufficient balance")) {
+            } else if (
+                error.message &&
+                error.message.includes("insufficient balance")
+            ) {
                 errorMessage += "You need governance tokens to vote.";
             } else {
                 errorMessage += error.message || "Please try again.";
@@ -349,14 +365,14 @@
                                         aria-valuemax={proposal.tally.total}
                                     >
                                         <div
-                                            class="yes"
+                                            class="Yes"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.yes,
                                                 proposal.tally.total
                                             )}%;"
                                         ></div>
                                         <div
-                                            class="no"
+                                            class="No"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.no,
                                                 proposal.tally.total
@@ -369,12 +385,18 @@
                                 <div class="vote-counts">
                                     <div class="yes-count">
                                         <span class="count-value"
-                                            >{proposal.tally.yes}</span
+                                            >{formatTokenAmount(
+                                                proposal.tally.yes,
+                                                tokenInfo.decimals
+                                            )}</span
                                         >
                                     </div>
                                     <div class="no-count">
                                         <span class="count-value"
-                                            >{proposal.tally.no}</span
+                                            >{formatTokenAmount(
+                                                proposal.tally.no,
+                                                tokenInfo.decimals
+                                            )}</span
                                         >
                                     </div>
                                 </div>
@@ -385,10 +407,10 @@
                                 <button
                                     class="vote-btn yes-btn"
                                     class:voted={userVotes[proposal.id] ===
-                                        "yes"}
+                                        "Yes"}
                                     class:other-voted={userVotes[
                                         proposal.id
-                                    ] === "no"}
+                                    ] === "No"}
                                     class:loading={userVotes[proposal.id] ===
                                         "loading"}
                                     disabled={!proposal.isActive ||
@@ -396,21 +418,21 @@
                                         parseFloat(userVotingPower) === 0 ||
                                         userVotes[proposal.id]}
                                     on:click={() =>
-                                        handleVote(proposal.id, "yes")}
+                                        handleVote(proposal.id, "Yes")}
                                 >
                                     {userVotes[proposal.id] === "loading"
                                         ? "Submitting..."
-                                        : userVotes[proposal.id] === "yes"
+                                        : userVotes[proposal.id] === "Yes"
                                           ? "✓ Adopted"
                                           : "Adopt"}
                                 </button>
                                 <button
                                     class="vote-btn no-btn"
                                     class:voted={userVotes[proposal.id] ===
-                                        "no"}
+                                        "No"}
                                     class:other-voted={userVotes[
                                         proposal.id
-                                    ] === "yes"}
+                                    ] === "Yes"}
                                     class:loading={userVotes[proposal.id] ===
                                         "loading"}
                                     disabled={!proposal.isActive ||
@@ -418,11 +440,11 @@
                                         parseFloat(userVotingPower) === 0 ||
                                         userVotes[proposal.id]}
                                     on:click={() =>
-                                        handleVote(proposal.id, "no")}
+                                        handleVote(proposal.id, "No")}
                                 >
                                     {userVotes[proposal.id] === "loading"
                                         ? "Submitting..."
-                                        : userVotes[proposal.id] === "no"
+                                        : userVotes[proposal.id] === "No"
                                           ? "✗ Rejected"
                                           : "Reject"}
                                 </button>

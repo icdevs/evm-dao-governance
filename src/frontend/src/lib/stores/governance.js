@@ -7,6 +7,7 @@ function createGovernanceStatsStore() {
     const { subscribe, set, update } = writable({
         totalVotingPower: '-',
         memberCount: '-',
+        tokenInfo: {},
         loading: false,
         error: null,
         lastUpdated: null
@@ -48,6 +49,7 @@ function createGovernanceStatsStore() {
                     ...state,
                     totalVotingPower,
                     totalVotingPowerFormatted,
+                    tokenInfo: tokenInfo,
                     loading: false,
                     lastUpdated: new Date(),
                     error: null

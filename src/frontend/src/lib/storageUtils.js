@@ -5,7 +5,7 @@ export function getERC20BalanceStorageKey(userAddress, slotIndex) {
     // Standard ERC20 balance mapping: mapping(address => uint256) balances
     // Storage key = keccak256(abi.encode(userAddress, slotIndex))
     const paddedAddress = ethers.zeroPadValue(userAddress, 32);
-    const paddedSlot = ethers.zeroPadValue(`0x${slotIndex.toString(16)}`, 32);
+    const paddedSlot = ethers.zeroPadValue(`0x${slotIndex.toString(16).padStart(64, '0')}`, 32);
     return ethers.keccak256(ethers.concat([paddedAddress, paddedSlot]));
 }
 
