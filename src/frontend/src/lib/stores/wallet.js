@@ -4,7 +4,6 @@ import { providerStore } from './provider.js';
 
 function createWalletStore() {
     const { subscribe, set, update } = writable({
-        provider: null,
         signer: null,
         userAddress: null,
         chainId: null,
@@ -55,7 +54,6 @@ function createWalletStore() {
         } else {
             update(state => ({
                 ...state,
-                provider: null,
                 signer: null,
                 userAddress: null,
                 chainId: null,
@@ -68,11 +66,7 @@ function createWalletStore() {
     const store = {
         subscribe,
         // Connect wallet
-        connect: async () => {
-            const state = get({ subscribe });
-            const provider = state.provider;
-            if (!provider) throw new Error('Provider not initialized.');
-
+        connect: async (provider) => {
             update(s => ({ ...s, state: 'connecting', error: null }));
             try {
                 await provider.send("eth_requestAccounts", []);

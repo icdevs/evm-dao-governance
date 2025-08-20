@@ -1,80 +1,70 @@
 <script>
     import { walletStore } from "../stores/wallet.js";
+    import { providerStore } from "../stores/provider.js";
     import { getNetworkInfo, NETWORKS, formatAddress } from "../utils.js";
 
     export let showNetworkInfo = true;
 
     $: currentChainId = $walletStore.chainId;
+    $: provider = $providerStore;
     let networkInfo = null;
-    let showWalletSelector = false;
     let showNetworkSelector = false;
-    let availableWallets = [];
-    let selectedWallet = null;
+    let metamaskAvailable = false;
 
-    function detectWallets() {
-        availableWallets = [];
-        availableWallets = [];
+    function detectMetaMask() {
         if (
             typeof window !== "undefined" &&
             window.ethereum &&
-            window.ethereum.providerMap
+            window.ethereum.isMetaMask
         ) {
-            for (const [
-                name,
-                provider,
-            ] of window.ethereum.providerMap.entries()) {
-                let type = name.toLowerCase();
-                let icon = "💼";
-                if (type.includes("metamask")) icon = "🦊";
-                availableWallets.push({ type, name, icon, provider });
-            }
-        }
-        if (availableWallets.length === 1) {
-            selectedWallet = availableWallets[0];
-        }
-    }
-
-    detectWallets();
-
-    function handleConnect() {
-        if (availableWallets.length > 1) {
-            showWalletSelector = true;
-        } else if (availableWallets.length === 1) {
-            handleWalletSelected(availableWallets[0]);
+            metamaskAvailable = true;
         } else {
-            alert(
-                "No supported wallet found. Please install MetaMask or Coinbase Wallet."
-            );
+            metamaskAvailable = false;
         }
     }
 
-    async function handleWalletSelected(wallet) {
-        selectedWallet = wallet;
-        try {
-            const walletData = await walletStore.connect();
-            networkInfo = getNetworkInfo(walletData.chainId);
-            showWalletSelector = false;
-        } catch (error) {
-            console.error("Connection failed:", error);
+    detectMetaMask();
+
+    async function handleConnect(provider) {
+        if (metamaskAvailable) {
+            try {
+                const walletData = await walletStore.connect(provider);
+                networkInfo = getNetworkInfo(walletData.chainId);
+                // Persist connection flag
+                localStorage.setItem("isWalletConnected", "true");
+            } catch (error) {
+                console.error("Connection failed:", error);
+            }
+        } else {
+            alert("MetaMask not found. Please install MetaMask.");
         }
     }
 
     function handleDisconnect() {
         walletStore.disconnect();
         networkInfo = null;
-        showWalletSelector = false;
-        selectedWallet = null;
+        showNetworkSelector = false;
+        // Remove persistent connection flag
+        localStorage.removeItem("isWalletConnected");
     }
 
     async function handleSwitchNetwork(targetChainId) {
         walletStore.switchChain(targetChainId);
         networkInfo = getNetworkInfo(targetChainId);
-        showWalletSelector = false;
+        showNetworkSelector = false;
     }
 
     async function handleNetworkSelected(chainId) {
-        showNetworkSelector = false;
         await handleSwitchNetwork(chainId);
+    }
+    // Auto-connect MetaMask on page load if available, not already connected, and user previously connected
+    $: if (
+        metamaskAvailable &&
+        $walletStore.state === "disconnected" &&
+        provider &&
+        localStorage.getItem("isWalletConnected") === "true"
+    ) {
+        handleConnect(provider);
     }
 </script>
 
@@ -157,37 +147,9 @@
         </div>
     {:else}
         <div class="connect-section">
-            <button class="connect-btn" on:click={handleConnect}
-                >Connect Wallet</button
+            <button class="connect-btn" on:click={() => handleConnect(provider)}
+                >Connect MetaMask</button
             >
-            {#if showWalletSelector}
-                <div class="wallet-selector-overlay">
-                    <div class="wallet-selector-modal">
-                        <h3>Select Wallet</h3>
-                        <div class="wallet-options">
-                            {#each availableWallets as wallet}
-                                <button
-                                    class="wallet-option"
-                                    on:click={() =>
-                                        handleWalletSelected(wallet)}
-                                >
-                                    <span class="wallet-icon"
-                                        >{wallet.icon}</span
-                                    >
-                                    <span class="wallet-name"
-                                        >{wallet.name}</span
-                                    >
-                                </button>
-                            {/each}
-                        </div>
-                        <button
-                            class="back-btn"
-                            on:click={() => (showWalletSelector = false)}
-                            >Cancel</button
-                        >
-                    </div>
-                </div>
-            {/if}
             {#if $walletStore.error}
                 <div class="error-message">
                     {$walletStore.error}
@@ -198,70 +160,6 @@
 </div>
 
 <style>
-    .wallet-selector-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0, 0, 0, 0.25);
-        z-index: 999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .wallet-selector-modal {
-        background: #222;
-        color: #f7f7f7;
-        padding: 1rem 1.2rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.28);
-        z-index: 1000;
-        min-width: 220px;
-        max-width: 300px;
-        max-height: 320px;
-        text-align: center;
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-    .wallet-options {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        margin: 1rem 0;
-        max-height: 160px;
-        overflow-y: auto;
-        width: 100%;
-    }
-    .wallet-option {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        font-size: 1rem;
-        border: 1px solid #444;
-        border-radius: 7px;
-        background: #333;
-        color: #f7f7f7;
-        cursor: pointer;
-        transition:
-            background 0.2s,
-            box-shadow 0.2s;
-        width: 100%;
-    }
-    .wallet-option:hover {
-        background: #444;
-        box-shadow: 0 2px 8px rgba(0, 210, 255, 0.08);
-    }
-    .wallet-icon {
-        font-size: 1.3rem;
-    }
-    .wallet-name {
-        font-weight: 500;
-        color: #f7f7f7;
-    }
     .back-btn {
         margin-top: 0.5rem;
         padding: 0.4rem 1.2rem;
@@ -275,41 +173,6 @@
     }
     .back-btn:hover {
         background: #666;
-    }
-    .wallet-selector-modal {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: #fff;
-        padding: 1.25rem 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.18);
-        z-index: 1000;
-        min-width: 260px;
-        max-width: 320px;
-        text-align: center;
-    }
-    .wallet-option {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem 1rem;
-        font-size: 1rem;
-        border: 1px solid #eee;
-        border-radius: 7px;
-        background: #f7f7f7;
-        cursor: pointer;
-        transition:
-            background 0.2s,
-            box-shadow 0.2s;
-    }
-    .wallet-option:hover {
-        background: #e0f7fa;
-        box-shadow: 0 2px 8px rgba(0, 210, 255, 0.08);
-    }
-    .wallet-icon {
-        font-size: 1.3rem;
     }
     .back-btn {
         margin-top: 0.5rem;
@@ -542,33 +405,6 @@
         display: flex;
         flex-direction: column;
         gap: 0.75rem;
-    }
-
-    .wallet-option {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        padding: 1.25rem;
-        background: var(--color-bg-secondary);
-        border: 1px solid var(--color-border);
-        border-radius: 10px;
-        cursor: pointer;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        font-size: 1rem;
-        font-weight: 500;
-    }
-
-    .wallet-option:hover {
-        background: var(--color-surface-hover);
-        border-color: var(--color-primary);
-        transform: translateY(-2px);
-        box-shadow: 0 8px 24px rgba(0, 210, 255, 0.2);
-    }
-
-    .wallet-icon {
-        font-size: 1.75rem;
-        flex-shrink: 0;
-        filter: drop-shadow(0 2px 4px currentColor);
     }
 
     .connect-btn {
