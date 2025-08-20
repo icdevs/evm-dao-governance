@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from "svelte";
-    import { authStore } from "../stores/auth.js";
-    import { hasUserVoted, castVote, getContractConfig } from "../votingAPI.js";
+    import { walletStore } from "../stores/wallet.js";
+    import { hasUserVoted, castVote } from "../votingAPI.js";
 
     export let proposal;
 
@@ -14,14 +14,19 @@
     let hasVoted = false;
     let selectedChoice = "Yes";
 
+    $: walletConnected = $walletStore.state === "connected";
+
     // Load user's existing vote if they're authenticated
-    $: if ($authStore.isAuthenticated && proposal) {
+    $: if (walletConnected && proposal) {
         loadUserVote();
     }
 
     async function loadUserVote() {
         try {
-            hasVoted = await hasUserVoted(proposal.id, $authStore.userAddress);
+            hasVoted = await hasUserVoted(
+                proposal.id,
+                $walletStore.userAddress
+            );
             // Optionally, fetch vote details if available
         } catch (err) {
             console.error("Failed to load user vote:", err);
@@ -29,7 +34,7 @@
     }
 
     async function handleVote() {
-        if (!$authStore.isAuthenticated) {
+        if (!walletConnected) {
             error = "Please connect your wallet first";
             return;
         }
@@ -97,7 +102,7 @@
         </div>
     {/if}
 
-    {#if !$authStore.isAuthenticated}
+    {#if !walletConnected}
         <div class="auth-warning">
             <p>Connect your wallet to vote on this proposal.</p>
         </div>

@@ -1,10 +1,8 @@
 <script>
     import "../../index.scss";
-    import { onMount } from "svelte";
     import { goto } from "$app/navigation";
     import ConfigurationPanel from "$lib/components/ConfigurationPanel.svelte";
     import { configStore } from "$lib/stores/config.js";
-    import { authStore } from "$lib/stores/auth.js";
 
     let configCompleted = false;
 
@@ -37,7 +35,7 @@
                 </div>
 
                 {#if $configStore.isConfigured}
-                    <button class="back-btn" on:click={() => goto('/')}>
+                    <button class="back-btn" on:click={() => goto("/")}>
                         <svg
                             viewBox="0 0 24 24"
                             fill="none"

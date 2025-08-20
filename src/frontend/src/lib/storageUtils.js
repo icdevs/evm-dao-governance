@@ -11,10 +11,8 @@ export function getERC20BalanceStorageKey(userAddress, slotIndex) {
 
 // Get user's token balance using provided dependencies
 export async function getUserTokenBalance(provider, contractAddress, userAddress, blockTag = 'latest') {
-    if (!provider || !userAddress || !contractAddress) {
-        return BigInt(0);
-    }
-    
+
+
     try {
         // ERC20 balanceOf function call: balanceOf(address)
         const balanceData = `0x70a08231${userAddress.slice(2).padStart(64, '0')}`;
@@ -25,7 +23,7 @@ export async function getUserTokenBalance(provider, contractAddress, userAddress
             },
             blockTag
         ]);
-        
+
         return ethers.getBigInt(result || '0x0');
     } catch (error) {
         console.error('Failed to get token balance:', error);
@@ -35,17 +33,14 @@ export async function getUserTokenBalance(provider, contractAddress, userAddress
 
 // Discover storage slot for ERC20 balance mapping
 export async function discoverStorageSlot(provider, contractAddress, userAddress) {
-    if (!provider || !userAddress || !contractAddress) {
-        throw new Error('Provider, contract address, and user address are required');
-    }
-    
+
     // Get current balance via balanceOf call
     const actualBalance = await getUserTokenBalance(provider, contractAddress, userAddress);
-    
+
     if (actualBalance === BigInt(0)) {
         throw new Error('User has 0 tokens. Storage slot discovery requires a non-zero balance.');
     }
-    
+
     // Try common storage slots (0-10)
     for (let slot = 0; slot <= 10; slot++) {
         try {
@@ -55,9 +50,9 @@ export async function discoverStorageSlot(provider, contractAddress, userAddress
                 storageKey,
                 'latest'
             ]);
-            
+
             const storageBalance = ethers.getBigInt(storageValue || '0x0');
-            
+
             if (storageBalance === actualBalance) {
                 return slot;
             }
@@ -65,7 +60,7 @@ export async function discoverStorageSlot(provider, contractAddress, userAddress
             console.log(`Slot ${slot} check failed:`, error.message);
         }
     }
-    
+
     throw new Error('Could not find storage slot in range 0-10. The contract may use a non-standard storage layout.');
 }
 
@@ -78,10 +73,10 @@ export async function validateStorageSlot(provider, contractAddress, userAddress
             [storageKey],
             blockTag
         ]);
-        
+
         const storageValue = proof.storageProof[0]?.value || '0x0';
         const storageBalance = ethers.getBigInt(storageValue).toString();
-        
+
         if (storageBalance === expectedBalance) {
             return {
                 valid: true,
@@ -114,7 +109,7 @@ export async function getBalanceInfo(provider, contractAddress, userAddress, cha
             getEthBalance(provider, userAddress),
             getUserTokenBalance(provider, contractAddress, userAddress)
         ]);
-        
+
         return {
             address: userAddress,
             chainId,
@@ -152,6 +147,6 @@ function getChainName(chainId) {
         420: 'Optimism Goerli',
         31337: 'Local/Anvil'
     };
-    
+
     return chainNames[chainId] || `Unknown Network (${chainId})`;
 }

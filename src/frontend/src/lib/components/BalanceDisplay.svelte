@@ -4,7 +4,7 @@
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
     import { balanceStore } from "../stores/balance.js";
-    import { getUserTokenBalance } from "../storageUtils.js";
+    import { getTokenBalanceInfo } from "../utils.js";
 
     // Export the refresh function so parent can call it
     export let onRefresh = null;
@@ -20,12 +20,12 @@
     $: canisterId = configData.canisterId;
     $: contractAddress = configData.contractAddress;
     $: walletAddress = walletData.userAddress;
-    $: chainId = walletData.chainId;
+    $: provider = walletData.provider;
 
     // Balance data
     $: ethBalance = balanceData.ethBalance;
     $: tokenBalance = balanceData.tokenBalance;
-    $: isLoading = balanceData.isLoading;
+    $: isLoading = balanceData?.isLoading || true;
     $: isInitialLoad = balanceData.isInitialLoad;
 
     let initialized = false;
@@ -37,16 +37,7 @@
         if (isConnected && isConfigured) {
             // Check if we should load balances
             if (shouldLoadBalances(balanceData)) {
-                console.log("Loading balances (initial)...");
-                try {
-                    await balanceStore.load(getBalancesWithChainId, false);
-                } catch (error) {
-                    console.error("Failed to load balances:", error);
-                    statusStore.add(
-                        `Failed to load balances: ${error.message}`,
-                        "error"
-                    );
-                }
+                await refreshBalances();
             }
         }
 
@@ -72,7 +63,7 @@
     }
 
     async function refreshBalances() {
-        console.log("Refreshing balances (manual)...");
+        console.log("Refreshing balances...");
         try {
             await balanceStore.load(getBalancesWithChainId, false);
         } catch (error) {
@@ -88,9 +79,7 @@
         const balances = await getBalances();
         return {
             ...balances,
-            canisterAddress:
-                balances.canisterAddress ||
-                (await getCanisterEthereumAddress(canisterId)),
+            canisterAddress: balances.canisterAddress,
         };
     }
 
@@ -105,13 +94,14 @@
         }
 
         try {
-            const tokenBal = await getUserTokenBalance(
+            const tokenBalanceInfo = await getTokenBalanceInfo(
+                provider,
                 contractAddress,
                 walletAddress
             );
             return {
                 ethBalance: "0.0", // If you want ETH, add similar logic
-                tokenBalance: tokenBal.toString(),
+                tokenBalance: tokenBalanceInfo.formatted,
                 canisterAddress: contractAddress,
             };
         } catch (error) {
@@ -119,15 +109,9 @@
             return {
                 ethBalance: "0.0",
                 tokenBalance: "0.0",
-                canisterAddress: "",
+                canisterAddress: contractAddress,
             };
         }
-    }
-
-    // Get canister Ethereum address (placeholder - would need actual implementation)
-    async function getCanisterEthereumAddress(canisterId) {
-        // This would be implemented based on your canister setup
-        return contractAddress || "";
     }
 
     // Watch for auth and config changes to trigger refresh

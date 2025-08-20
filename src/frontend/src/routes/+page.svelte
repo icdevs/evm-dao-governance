@@ -15,186 +15,161 @@
     import { governanceStatsStore } from "$lib/stores/governance.js";
     import { contractsStore } from "$lib/stores/contracts.js";
     import { agentStore } from "$lib/stores/agent.js";
-    import { ethers } from "ethers";
+    import { getTotalSupply } from "$lib/storage-slot-security-analysis.js";
 
+    // State
     let initialized = false;
     let showCreateProposal = false;
-
-    // Dashboard refresh functionality
+    let showContractDropdown = false;
+    let proposalFilter = "any";
     let dashboardRefreshFn = null;
     let isDashboardLoading = false;
-
-    let showContractDropdown = false;
     let isGlobalRefreshing = false;
-    let proposalFilter = "any";
 
-    // Subscribe to proposal statistics
+    // Track initialization state
+    let dataInitialized = false;
+    let agentInitialized = false;
+
+    // Computed values from stores
     $: stats = $proposalStats;
     $: governanceStats = $governanceStatsStore;
     $: walletConnected = $walletStore.state === "connected";
     $: backendActor = $agentStore.actor;
-
-    // Subscribe to contracts store
+    $: provider = $walletStore.provider;
+    $: contractAddress = $walletStore.userAddress;
     $: contracts = $contractsStore;
     $: availableContracts = contracts.contracts;
     $: selectedContract = contracts.selectedContract;
     $: contractsLoading = contracts.loading;
 
-    // Redirect to config page if not configured
+    $: if (browser) {
+        configStore.load();
+    }
+
+    $: if (browser && window && window.ethereum && !initialized) {
+        walletStore.initialize(window.ethereum);
+        initialized = true;
+    }
+
+    // Redirect to config if not configured
     $: if (initialized && !$configStore.isConfigured) {
         goto("/config");
     }
 
-    onMount(() => {
-        if (typeof window !== "undefined" && window.ethereum) {
-            walletStore.initialize(window.ethereum);
-        }
-        if (browser) {
-            // Load configuration from localStorage
-            configStore.load();
-            initialized = true;
-
-            // Only load data initially if configured and not already loaded
-            if (backendActor) {
-                // Load proposals if not already loaded
-                if (
-                    $proposalsStore.proposals.length === 0 &&
-                    !$proposalsStore.loading
-                ) {
-                    proposalsStore.load(backendActor);
-                }
-
-                // Load governance stats if not already loaded
-                if (
-                    !$governanceStatsStore.lastUpdated &&
-                    !$governanceStatsStore.loading
-                ) {
-                    governanceStatsStore.load().catch((error) => {
-                        console.error(
-                            "Failed to load governance stats:",
-                            error
-                        );
-                    });
-                }
-
-                // Load contracts if not already loaded
-                if (!$contractsStore.lastUpdated && !$contractsStore.loading) {
-                    contractsStore.load().catch((error) => {
-                        console.error("Failed to load contracts:", error);
-                    });
-                }
-            }
-        }
-    });
-
-    function handleProposalCreated(event) {
-        const { id, proposal } = event.detail;
-        console.log("Proposal created:", id, proposal);
-
-        // Refresh proposals to include the new one
-        proposalsStore.load(backendActor, [], true);
-
-        // Refresh governance stats as well
-        governanceStatsStore.load(true);
-
-        // Close create proposal form
-        showCreateProposal = false;
-    }
-
-    // Auto-load proposals when configuration is complete (only if not already loaded)
-    let proposalsLoadAttempted = false;
+    // Initialize agent when config is ready (only once)
     $: if (
-        $agentStore.state === "connected" &&
-        initialized &&
+        !agentInitialized &&
         $configStore.isConfigured &&
-        !proposalsLoadAttempted &&
-        $proposalsStore.proposals.length === 0 &&
-        !$proposalsStore.loading
+        $configStore.canisterId &&
+        $configStore.environment
     ) {
-        proposalsLoadAttempted = true;
-        proposalsStore.load(backendActor).catch((error) => {
-            console.error("Failed to load proposals:", error);
-            // Reset flag on error so it can be retried
-            proposalsLoadAttempted = false;
-        });
-
-        // Also load governance stats only if not already loaded
-        if (!$governanceStatsStore.lastUpdated) {
-            governanceStatsStore.load().catch((error) => {
-                console.error("Failed to load governance stats:", error);
-            });
-        }
-
-        // Also load contracts only if not already loaded
-        if (!$contractsStore.lastUpdated) {
-            contractsStore.load().catch((error) => {
-                console.error("Failed to load contracts:", error);
-            });
-        }
+        agentInitialized = true;
+        agentStore.initialize(
+            $configStore.canisterId,
+            $configStore.environment
+        );
     }
 
-    // Handle comprehensive refresh of all data
-    async function handleGlobalRefresh() {
-        if (isGlobalRefreshing) return; // Prevent multiple simultaneous refreshes
+    // Load initial data when all dependencies are ready (only once)
+    $: if (!dataInitialized && backendActor && provider && contractAddress) {
+        dataInitialized = true;
+        loadInitialData();
+    }
+
+    // Data loading functions
+    async function loadInitialData() {
+        // Load all data in parallel
+        await Promise.all([
+            loadProposals(),
+            loadGovernanceStats(),
+            loadContracts(),
+        ]).catch((error) => {
+            console.error("Failed to load initial data:", error);
+            // Reset flag so it can retry if needed
+            dataInitialized = false;
+        });
+    }
+
+    async function loadProposals(force = false) {
+        if (!backendActor) return;
 
         try {
-            isGlobalRefreshing = true;
+            await proposalsStore.load(backendActor, [], force);
+        } catch (error) {
+            console.error("Failed to load proposals:", error);
+            throw error;
+        }
+    }
 
+    async function loadGovernanceStats(force = false) {
+        if (!provider || !contractAddress) return;
+
+        try {
+            const getTotalSupplyFn = () =>
+                getTotalSupply(provider, contractAddress);
+            await governanceStatsStore.load(getTotalSupplyFn, null, force);
+        } catch (error) {
+            console.error("Failed to load governance stats:", error);
+            throw error;
+        }
+    }
+
+    async function loadContracts(force = false) {
+        if (!backendActor) return;
+
+        try {
+            await contractsStore.load(backendActor, force);
+        } catch (error) {
+            console.error("Failed to load contracts:", error);
+            throw error;
+        }
+    }
+
+    // Event handlers
+    async function handleGlobalRefresh() {
+        if (isGlobalRefreshing) return;
+
+        isGlobalRefreshing = true;
+        try {
             // Refresh dashboard
-            if (dashboardRefreshFn) {
-                dashboardRefreshFn();
-            }
+            dashboardRefreshFn?.();
 
-            // Refresh proposals
-            await proposalsStore.load(backendActor, [], true).catch((error) => {
-                console.error("Failed to refresh proposals:", error);
-            });
-
-            // Refresh governance stats
-            await governanceStatsStore.load(true).catch((error) => {
-                console.error("Failed to refresh governance stats:", error);
-            });
-
-            // Refresh contracts
-            await contractsStore.load(true).catch((error) => {
-                console.error("Failed to refresh contracts:", error);
-            });
+            // Refresh all data with force flag
+            await Promise.all([
+                loadProposals(true),
+                loadGovernanceStats(true),
+                loadContracts(true),
+            ]);
         } finally {
             isGlobalRefreshing = false;
         }
     }
 
-    // Handle dashboard refresh (legacy)
-    function handleDashboardRefresh() {
-        handleGlobalRefresh();
+    function handleProposalCreated(event) {
+        const { id, proposal } = event.detail;
+        console.log("Proposal created:", id, proposal);
+
+        // Refresh data
+        loadProposals(true);
+        loadGovernanceStats(true);
+
+        // Close form
+        showCreateProposal = false;
     }
 
-    function setDashboardRefreshFn(refreshFn) {
-        dashboardRefreshFn = refreshFn;
-    }
-
-    // Handle contract selection change
     function handleContractChange() {
         console.log("Selected contract changed to:", selectedContract);
 
-        // Refresh dashboard with new contract
-        handleDashboardRefresh();
-
-        // Refresh proposals with new contract context
-        proposalsStore.load(backendActor, [], true);
-
-        // Refresh governance stats
-        governanceStatsStore.load(true);
+        // Refresh all data with new contract context
+        handleGlobalRefresh();
     }
 
-    // Select contract and close dropdown
     function selectContract(address) {
         contractsStore.setSelectedContract(address);
         showContractDropdown = false;
         handleContractChange();
     }
 
-    // Close dropdown when clicking outside
     function handleClickOutside(event) {
         if (
             showContractDropdown &&
@@ -202,6 +177,10 @@
         ) {
             showContractDropdown = false;
         }
+    }
+
+    function setDashboardRefreshFn(refreshFn) {
+        dashboardRefreshFn = refreshFn;
     }
 </script>
 
@@ -215,7 +194,6 @@
 
 <svelte:window on:click={handleClickOutside} />
 
-<!-- Status Messages (Toast notifications) -->
 <StatusMessages />
 
 <main>
@@ -230,7 +208,6 @@
                             Cross-chain voting on Internet Computer
                         </p>
                     </div>
-
                     <div class="header-actions">
                         <WalletConnector showNetworkInfo={true} />
                     </div>
@@ -240,7 +217,6 @@
             <!-- Compact Dashboard Bar -->
             <div class="compact-dashboard">
                 <div class="dashboard-left">
-                    <!-- Contract Addresses Section -->
                     <div class="addresses-section">
                         <div class="governance-info">
                             <span class="governance-label"
@@ -253,9 +229,9 @@
                                 </div>
                             {:else if selectedContract}
                                 <div class="inline-address">
-                                    <span class="address-full">
-                                        {selectedContract}
-                                    </span>
+                                    <span class="address-full"
+                                        >{selectedContract}</span
+                                    >
                                     <button
                                         class="inline-copy-btn"
                                         on:click={() =>
@@ -293,14 +269,11 @@
                                 <span class="no-contract">Not configured</span>
                             {/if}
                         </div>
-
-                        <!-- Treasury Address -->
                         <TreasuryAddress />
                     </div>
                 </div>
 
                 <div class="dashboard-center">
-                    <!-- Balance Information -->
                     <BalanceDisplay
                         onRefresh={setDashboardRefreshFn}
                         bind:isLoading={isDashboardLoading}
@@ -433,7 +406,6 @@
 
             <!-- Main Content -->
             <div class="main-content">
-                <!-- Proposals Section -->
                 <div class="proposals-section">
                     <div class="proposals-header">
                         <div class="section-title">
@@ -441,50 +413,41 @@
                             <div class="proposals-stats">
                                 <div class="stat-item">
                                     <span class="stat-label">Total:</span>
-                                    <span class="stat-value">
-                                        {#if $proposalsStore.loading}
-                                            -
-                                        {:else}
-                                            {stats.total}
-                                        {/if}
-                                    </span>
+                                    <span class="stat-value"
+                                        >{$proposalsStore.loading
+                                            ? "-"
+                                            : stats.total}</span
+                                    >
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-label">Active:</span>
-                                    <span class="stat-value">
-                                        {#if $proposalsStore.loading}
-                                            -
-                                        {:else}
-                                            {stats.active}
-                                        {/if}
-                                    </span>
+                                    <span class="stat-value"
+                                        >{$proposalsStore.loading
+                                            ? "-"
+                                            : stats.active}</span
+                                    >
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-label">Members:</span>
-                                    <span class="stat-value">
-                                        {#if governanceStats.loading}
-                                            -
-                                        {:else}
-                                            {governanceStats.memberCount}
-                                        {/if}
-                                    </span>
+                                    <span class="stat-value"
+                                        >{governanceStats.loading
+                                            ? "-"
+                                            : governanceStats.memberCount}</span
+                                    >
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-label">Voting Power:</span
                                     >
-                                    <span class="stat-value">
-                                        {#if governanceStats.loading}
-                                            -
-                                        {:else}
-                                            {governanceStats.totalVotingPower}
-                                        {/if}
-                                    </span>
+                                    <span class="stat-value"
+                                        >{governanceStats.loading
+                                            ? "-"
+                                            : governanceStats.totalVotingPower}</span
+                                    >
                                 </div>
                             </div>
                         </div>
 
                         <div class="proposals-actions">
-                            <!-- Filter Section -->
                             <div class="filter-section">
                                 <label for="statusFilter">Filter:</label>
                                 <select

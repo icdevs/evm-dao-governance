@@ -113,14 +113,14 @@ function createWalletStore() {
 
         // Clear all wallet data
         disconnect: () => {
-            set({
-                provider: null,
+            update(s => ({
+                ...s,
                 signer: null,
                 userAddress: null,
                 chainId: null,
                 state: 'disconnected',
                 error: null
-            });
+            }));
         }
     };
 

@@ -235,7 +235,7 @@ export const VOTE_CHOICE_OPTIONS = [
 // API endpoints (for future use)
 export const API_ENDPOINTS = {
     IC_MAINNET: 'https://ic0.app',
-    IC_LOCAL: 'http://127.0.0.1:8080',
+    IC_LOCAL: 'http://127.0.0.1:4943',
     SOURCIFY: 'https://sourcify.dev/server',
     ETHERSCAN_API: 'https://api.etherscan.io/api',
     POLYGONSCAN_API: 'https://api.polygonscan.com/api'

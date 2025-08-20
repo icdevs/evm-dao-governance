@@ -94,14 +94,14 @@ export function getNativeCurrencySymbol(chainId) {
 export async function getTokenInfo(provider, contractAddress) {
     try {
         const contract = new ethers.Contract(contractAddress, ERC20_ABI, provider);
-        
+
         const [name, symbol, decimals, totalSupply] = await Promise.all([
             contract.name(),
             contract.symbol(),
             contract.decimals(),
             contract.totalSupply()
         ]);
-        
+
         return {
             name,
             symbol,
@@ -143,15 +143,19 @@ export async function getEthBalance(provider, userAddress) {
 }
 
 // Get formatted token balance with symbol
-export async function getFormattedTokenBalance(provider, contractAddress, userAddress) {
+export async function getTokenBalanceInfo(provider, contractAddress, userAddress) {
     try {
         const [balance, tokenInfo] = await Promise.all([
             getTokenBalance(provider, contractAddress, userAddress),
             getTokenInfo(provider, contractAddress)
         ]);
-        
+
         const formattedBalance = formatTokenAmount(balance, tokenInfo.decimals);
-        return `${formattedBalance} ${tokenInfo.symbol}`;
+        return {
+            balance: balance,
+            tokenInfo: tokenInfo,
+            formatted: `${formattedBalance} ${tokenInfo.symbol}`
+        };
     } catch (error) {
         console.error('Failed to get formatted token balance:', error);
         return 'Error';
@@ -164,7 +168,7 @@ export function createProviderFromChain(chainId) {
     if (!networkConfig) {
         throw new Error(`No RPC configuration for chain ID: ${chainId}`);
     }
-    
+
     return new ethers.JsonRpcProvider(networkConfig.rpc);
 }
 
@@ -194,9 +198,9 @@ export function formatTimeRemaining(deadline) {
 // Format date for display
 export function formatDate(date) {
     if (!date) return 'Unknown';
-    
+
     const dateObj = date instanceof Date ? date : new Date(date);
-    
+
     return dateObj.toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
@@ -264,23 +268,23 @@ export function formatError(error) {
 // Validation utilities
 export function validateProposalForm(formData) {
     const errors = [];
-    
+
     if (!formData.type) {
         errors.push('Proposal type is required');
     }
-    
+
     switch (formData.type) {
         case 'motion':
             if (!formData.motionText?.trim()) {
                 errors.push('Motion text is required');
             }
             break;
-            
+
         case 'eth_transaction':
             if (!isValidAddress(formData.ethTo)) {
                 errors.push('Invalid recipient address');
             }
-            
+
             if (formData.erc20Mode) {
                 if (!isValidAddress(formData.erc20Recipient)) {
                     errors.push('Invalid ERC20 recipient address');
@@ -290,7 +294,7 @@ export function validateProposalForm(formData) {
                 }
             }
             break;
-            
+
         case 'icp_call':
             if (!formData.icpCanister?.trim()) {
                 errors.push('Canister ID is required');
@@ -300,6 +304,6 @@ export function validateProposalForm(formData) {
             }
             break;
     }
-    
+
     return errors;
 }

@@ -6,7 +6,7 @@
     import { statusStore } from "../stores/status.js";
     import { getNetworkInfo } from "../utils.js";
     import { agentStore } from "../stores/agent.js";
-    import { getUserTokenBalance } from "../storageUtils.js";
+    import { getTokenBalanceInfo } from "../utils.js";
 
     // Export filter prop
     export let filter = "any"; // any, active, executed, expired, pending, rejected
@@ -24,6 +24,7 @@
     $: isAuthenticated = walletData.state === "connected";
     $: walletAddress = walletData.userAddress;
     $: contractAddress = configData.contractAddress;
+    $: provider = walletData.provider;
 
     // User token balance state
     let userTokenBalance = "0";
@@ -88,12 +89,13 @@
 
         isLoadingBalance = true;
         try {
-            const balance = await getUserTokenBalance(
+            const tokenBalanceInfo = await getTokenBalanceInfo(
+                provider,
                 contractAddress,
                 walletAddress
             );
-            userTokenBalance = balance.toString();
-            userVotingPower = userTokenBalance;
+            userTokenBalance = tokenBalanceInfo.formatted;
+            userVotingPower = tokenBalanceInfo.balance.toString();
         } catch (error) {
             console.error("Failed to load user token balance:", error);
             userTokenBalance = "0";
@@ -438,19 +440,9 @@
                                         {:else if !isAuthenticated}
                                             Not connected
                                         {:else}
-                                            {userVotingPower} GOV
+                                            {userTokenBalance}
                                         {/if}
                                     </span>
-                                </div>
-                                <div class="participation-info">
-                                    <span class="label">Participation</span>
-                                    <span class="value"
-                                        >{getTallyPercentage(
-                                            proposal.tally.yes +
-                                                proposal.tally.no,
-                                            proposal.tally.total
-                                        )}% of total power</span
-                                    >
                                 </div>
                             </div>
                         </div>
@@ -925,10 +917,6 @@
     .voting-power .value.has-power {
         color: var(--color-success, #28a745);
         font-weight: 700;
-    }
-
-    .participation-info .value {
-        color: var(--color-info, #17a2b8);
     }
 
     /* Proposal Details */

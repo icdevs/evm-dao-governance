@@ -58,11 +58,11 @@ const VERIFIED_STORAGE_SLOTS = {
   '0xA0b86a33E6441f8F20e2DC5dCb5E32C8A6b8e68a': { slot: 0, name: 'USDC', verified: true },
   '0xdAC17F958D2ee523a2206206994597C13D831ec7': { slot: 1, name: 'USDT', verified: true },
   '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2': { slot: 3, name: 'WETH', verified: true },
-  
+
   // Arbitrum One  
   '0xaf88d065e77c8cc2239327c5edb3a432268e5831': { slot: 9, name: 'USDC', verified: true },
   '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9': { slot: 1, name: 'USDT', verified: true },
-  
+
   // Add more as verified...
 };
 
@@ -77,7 +77,7 @@ export async function validateBalanceSlotSecurity(provider, contractAddress, use
     warnings: [],
     validations: {}
   };
-  
+
   // 1. Check if contract is in verified list
   const verified = VERIFIED_STORAGE_SLOTS[contractAddress.toLowerCase()];
   if (verified) {
@@ -89,35 +89,35 @@ export async function validateBalanceSlotSecurity(provider, contractAddress, use
       results.warnings.push(`❌ SECURITY ALERT: ${verified.name} verified slot is ${verified.slot}, not ${claimedSlot}!`);
     }
   }
-  
+
   // 2. Cross-validate with balanceOf() 
   const actualBalance = await getBalanceOf(provider, contractAddress, userAddress);
   const storageBalance = await getStorageBalance(provider, contractAddress, userAddress, claimedSlot);
-  
+
   if (actualBalance !== storageBalance) {
     results.securityLevel = 'DANGEROUS';
     results.warnings.push(`❌ BALANCE MISMATCH: balanceOf()=${actualBalance}, slot ${claimedSlot}=${storageBalance}`);
   } else {
     results.validations.balanceMatch = `✅ Balance validation passed: ${actualBalance}`;
   }
-  
+
   // 3. Check for suspiciously high values compared to total supply
   try {
     const totalSupply = await getTotalSupply(provider, contractAddress);
     const balanceRatio = BigInt(storageBalance) * 100n / BigInt(totalSupply);
-    
+
     if (balanceRatio > 50n) { // More than 50% of total supply
       results.warnings.push(`⚠️ SUSPICIOUS: Balance is ${balanceRatio}% of total supply. Possible wrong slot.`);
     }
   } catch (error) {
     results.warnings.push('⚠️ Could not validate against total supply');
   }
-  
+
   // 4. Test multiple slots to detect potential manipulation
   const suspiciousSlots = [];
   for (let testSlot = 0; testSlot <= 20; testSlot++) {
     if (testSlot === claimedSlot) continue;
-    
+
     try {
       const testBalance = await getStorageBalance(provider, contractAddress, userAddress, testSlot);
       if (testBalance !== '0' && BigInt(testBalance) > BigInt(storageBalance)) {
@@ -127,11 +127,11 @@ export async function validateBalanceSlotSecurity(provider, contractAddress, use
       // Ignore errors for non-existent slots
     }
   }
-  
+
   if (suspiciousSlots.length > 0) {
     results.warnings.push(`⚠️ SUSPICIOUS SLOTS FOUND: Other slots have higher values: ${JSON.stringify(suspiciousSlots)}`);
   }
-  
+
   return results;
 }
 
@@ -140,12 +140,12 @@ async function getBalanceOf(provider, contractAddress, userAddress) {
   const balanceOfSelector = "0x70a08231";
   const paddedAddress = userAddress.toLowerCase().replace('0x', '').padStart(64, '0');
   const callData = balanceOfSelector + paddedAddress;
-  
+
   const result = await provider.send("eth_call", [
     { to: contractAddress, data: callData },
     "latest"
   ]);
-  
+
   return ethers.getBigInt(result || '0x0').toString();
 }
 
@@ -157,25 +157,29 @@ async function getStorageBalance(provider, contractAddress, userAddress, slot) {
       [userAddress, slot]
     )
   );
-  
+
   const proof = await provider.send("eth_getProof", [
     contractAddress,
     [storageKey],
     "latest"
   ]);
-  
+
   return ethers.getBigInt(proof.storageProof[0]?.value || '0x0').toString();
 }
 
 // Helper function to get total supply
 export async function getTotalSupply(provider, contractAddress) {
   const totalSupplySelector = "0x18160ddd"; // totalSupply()
-  
+
   const result = await provider.send("eth_call", [
     { to: contractAddress, data: totalSupplySelector },
     "latest"
   ]);
-  
+
+  if (result == "0x") {
+    return "0";
+  }
+
   return ethers.getBigInt(result || '0x0').toString();
 }
 
@@ -187,18 +191,18 @@ export async function discoverStorageSlotSecurely(provider, contractAddress, use
 
   // Get current balance via balanceOf call
   const actualBalance = await getBalanceOf(provider, contractAddress, userAddress);
-  
+
   if (actualBalance === '0') {
     throw new Error('User has 0 tokens. Storage slot discovery requires a non-zero balance.');
   }
-  
+
   console.log(`🔍 Discovering storage slot for balance: ${actualBalance}`);
-  
+
   // Check verified contracts first
   const verified = VERIFIED_STORAGE_SLOTS[contractAddress.toLowerCase()];
   if (verified) {
     console.log(`✅ Found verified contract: ${verified.name}, slot: ${verified.slot}`);
-    
+
     // Validate the verified slot
     const validation = await validateBalanceSlotSecurity(provider, contractAddress, userAddress, verified.slot);
     if (validation.securityLevel === 'SECURE') {
@@ -213,18 +217,18 @@ export async function discoverStorageSlotSecurely(provider, contractAddress, use
       console.log(`⚠️ Verified slot validation failed:`, validation.warnings);
     }
   }
-  
+
   // Try common storage slots (0-20) with security validation
   for (let slot = 0; slot <= 20; slot++) {
     try {
       const storageBalance = await getStorageBalance(provider, contractAddress, userAddress, slot);
-      
+
       if (storageBalance === actualBalance) {
         console.log(`✅ Found matching slot: ${slot}`);
-        
+
         // Validate the discovered slot
         const validation = await validateBalanceSlotSecurity(provider, contractAddress, userAddress, slot);
-        
+
         return {
           slot,
           found: true,
@@ -238,7 +242,7 @@ export async function discoverStorageSlotSecurely(provider, contractAddress, use
       console.log(`❌ Error checking slot ${slot}:`, error.message);
     }
   }
-  
+
   throw new Error('Could not find storage slot in range 0-20. The contract may use a non-standard storage layout.');
 }
 
@@ -249,15 +253,15 @@ export async function validateSlotWithSecurityChecks(provider, contractAddress, 
   }
 
   console.log(`🔒 Running security validation for slot ${slot}...`);
-  
+
   const validation = await validateBalanceSlotSecurity(provider, contractAddress, userAddress, slot);
-  
+
   console.log(`🔒 Security validation results:`, validation);
-  
+
   if (validation.securityLevel === 'DANGEROUS') {
     const warningsText = validation.warnings.join('\n');
     throw new Error(`SECURITY VALIDATION FAILED:\n${warningsText}`);
   }
-  
+
   return validation;
 }

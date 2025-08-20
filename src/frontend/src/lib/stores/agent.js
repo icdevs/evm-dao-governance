@@ -21,11 +21,11 @@ function createAgentStore() {
 
             try {
                 const local = environment === 'local';
-                
+
                 let agentInstance;
                 if (local) {
                     agentInstance = await HttpAgent.create({
-                        host: 'http://127.0.0.1:8080',
+                        host: 'http://127.0.0.1:4943',
                         identity: new AnonymousIdentity()
                     });
                     await agentInstance.fetchRootKey();
@@ -35,12 +35,12 @@ function createAgentStore() {
                         identity: new AnonymousIdentity()
                     });
                 }
-                
+
                 const actor = Actor.createActor(idlFactory, {
                     agent: agentInstance,
                     canisterId: targetCanisterId
                 });
-                
+
                 const canisterData = {
                     agent: agentInstance,
                     actor: actor,
@@ -53,8 +53,8 @@ function createAgentStore() {
                 set(canisterData);
                 return canisterData;
             } catch (error) {
-                update(state => ({ 
-                    ...state, 
+                update(state => ({
+                    ...state,
                     state: 'error',
                     error: error.message || 'Failed to initialize canister'
                 }));
