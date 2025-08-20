@@ -1,27 +1,24 @@
 import { writable } from 'svelte/store';
 import { Actor, HttpAgent, AnonymousIdentity } from '@dfinity/agent';
 import { idlFactory } from '../../../../declarations/backend/backend.did.js';
+import { configStore } from './config.js';
 
 function createAgentStore() {
     const { subscribe, set, update } = writable({
         agent: null,
         actor: null,
-        canisterId: null,
         isLocal: false,
-        state: 'disconnected', // 'disconnected', 'connecting', 'connected', 'error'
+        state: 'disconnected',
         error: null
     });
 
-    const store = {
-        subscribe,
-
-        // Initialize canister connection
-        initialize: async (targetCanisterId, environment = 'local') => {
+    // Subscribe to configStore and initialize when canisterId and environment change
+    configStore.subscribe(async (config) => {
+        if (config && config.canisterId && config.environment) {
+            console.log("Initializing agent...");
             update(state => ({ ...state, state: 'connecting', error: null }));
-
             try {
-                const local = environment === 'local';
-
+                const local = config.environment === 'local';
                 let agentInstance;
                 if (local) {
                     agentInstance = await HttpAgent.create({
@@ -35,38 +32,43 @@ function createAgentStore() {
                         identity: new AnonymousIdentity()
                     });
                 }
-
                 const actor = Actor.createActor(idlFactory, {
                     agent: agentInstance,
-                    canisterId: targetCanisterId
+                    canisterId: config.canisterId
                 });
-
                 const canisterData = {
                     agent: agentInstance,
                     actor: actor,
-                    canisterId: targetCanisterId,
                     isLocal: local,
                     state: 'connected',
                     error: null
                 };
-
                 set(canisterData);
-                return canisterData;
             } catch (error) {
                 update(state => ({
                     ...state,
                     state: 'error',
                     error: error.message || 'Failed to initialize canister'
                 }));
-                throw error;
             }
-        },
+        } else {
+            // Reset if config is missing
+            set({
+                agent: null,
+                actor: null,
+                isLocal: false,
+                state: 'disconnected',
+                error: null
+            });
+        }
+    });
 
+    const store = {
+        subscribe,
         // Clear error
         clearError: () => {
             update(state => ({ ...state, error: null }));
-        },
-
+        }
     };
 
     return store;

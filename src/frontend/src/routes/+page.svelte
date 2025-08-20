@@ -1,6 +1,5 @@
 <script>
     import "../index.scss";
-    import { onMount } from "svelte";
     import { browser } from "$app/environment";
     import { goto } from "$app/navigation";
     import WalletConnector from "$lib/components/WalletConnector.svelte";
@@ -13,9 +12,9 @@
     import { proposalsStore, proposalStats } from "$lib/stores/proposals.js";
     import { walletStore } from "$lib/stores/wallet.js";
     import { governanceStatsStore } from "$lib/stores/governance.js";
-    import { contractsStore } from "$lib/stores/contracts.js";
     import { agentStore } from "$lib/stores/agent.js";
-    import { getTotalSupply } from "$lib/storage-slot-security-analysis.js";
+    import { treasuryBalanceStore } from "$lib/stores/balance";
+    import { providerStore } from "$lib/stores/provider.js";
 
     // State
     let initialized = false;
@@ -28,101 +27,39 @@
 
     // Track initialization state
     let dataInitialized = false;
-    let agentInitialized = false;
 
     // Computed values from stores
     $: stats = $proposalStats;
     $: governanceStats = $governanceStatsStore;
     $: walletConnected = $walletStore.state === "connected";
     $: backendActor = $agentStore.actor;
-    $: provider = $walletStore.provider;
-    $: contractAddress = $walletStore.userAddress;
-    $: contracts = $contractsStore;
-    $: availableContracts = contracts.contracts;
-    $: selectedContract = contracts.selectedContract;
-    $: contractsLoading = contracts.loading;
-
-    $: if (browser) {
-        configStore.load();
-    }
-
-    $: if (browser && window && window.ethereum && !initialized) {
-        walletStore.initialize(window.ethereum);
-        initialized = true;
-    }
+    $: provider = $providerStore;
+    $: contractAddress = $configStore.contractAddress;
 
     // Redirect to config if not configured
-    $: if (initialized && !$configStore.isConfigured) {
+    $: if ($configStore.loaded && !$configStore.isConfigured) {
         goto("/config");
     }
 
-    // Initialize agent when config is ready (only once)
-    $: if (
-        !agentInitialized &&
-        $configStore.isConfigured &&
-        $configStore.canisterId &&
-        $configStore.environment
-    ) {
-        agentInitialized = true;
-        agentStore.initialize(
-            $configStore.canisterId,
-            $configStore.environment
-        );
-    }
-
     // Load initial data when all dependencies are ready (only once)
-    $: if (!dataInitialized && backendActor && provider && contractAddress) {
-        dataInitialized = true;
-        loadInitialData();
-    }
-
-    // Data loading functions
-    async function loadInitialData() {
-        // Load all data in parallel
-        await Promise.all([
-            loadProposals(),
-            loadGovernanceStats(),
-            loadContracts(),
+    $: if (
+        !dataInitialized &&
+        backendActor &&
+        provider &&
+        contractAddress &&
+        $treasuryBalanceStore.walletAddress
+    ) {
+        console.log("Loading initial data");
+        dataInitialized = true; // Load all data in parallel
+        Promise.all([
+            proposalsStore.load(backendActor, [], false),
+            governanceStatsStore.load(provider, contractAddress, false),
+            treasuryBalanceStore.load(provider),
         ]).catch((error) => {
             console.error("Failed to load initial data:", error);
             // Reset flag so it can retry if needed
             dataInitialized = false;
         });
-    }
-
-    async function loadProposals(force = false) {
-        if (!backendActor) return;
-
-        try {
-            await proposalsStore.load(backendActor, [], force);
-        } catch (error) {
-            console.error("Failed to load proposals:", error);
-            throw error;
-        }
-    }
-
-    async function loadGovernanceStats(force = false) {
-        if (!provider || !contractAddress) return;
-
-        try {
-            const getTotalSupplyFn = () =>
-                getTotalSupply(provider, contractAddress);
-            await governanceStatsStore.load(getTotalSupplyFn, null, force);
-        } catch (error) {
-            console.error("Failed to load governance stats:", error);
-            throw error;
-        }
-    }
-
-    async function loadContracts(force = false) {
-        if (!backendActor) return;
-
-        try {
-            await contractsStore.load(backendActor, force);
-        } catch (error) {
-            console.error("Failed to load contracts:", error);
-            throw error;
-        }
     }
 
     // Event handlers
@@ -136,9 +73,8 @@
 
             // Refresh all data with force flag
             await Promise.all([
-                loadProposals(true),
-                loadGovernanceStats(true),
-                loadContracts(true),
+                proposalsStore.load(backendActor, [], true),
+                governanceStatsStore.load(provider, contractAddress, true),
             ]);
         } finally {
             isGlobalRefreshing = false;
@@ -150,24 +86,11 @@
         console.log("Proposal created:", id, proposal);
 
         // Refresh data
-        loadProposals(true);
-        loadGovernanceStats(true);
+        proposalsStore.load(backendActor, [], true);
+        governanceStatsStore.load(provider, contractAddress, true);
 
         // Close form
         showCreateProposal = false;
-    }
-
-    function handleContractChange() {
-        console.log("Selected contract changed to:", selectedContract);
-
-        // Refresh all data with new contract context
-        handleGlobalRefresh();
-    }
-
-    function selectContract(address) {
-        contractsStore.setSelectedContract(address);
-        showContractDropdown = false;
-        handleContractChange();
     }
 
     function handleClickOutside(event) {
@@ -197,7 +120,12 @@
 <StatusMessages />
 
 <main>
-    {#if initialized}
+    {#if !dataInitialized}
+        <div class="loading-screen">
+            <div class="spinner"></div>
+            <p>Initializing DAO Governance...</p>
+        </div>
+    {:else}
         <div class="app-container">
             <!-- App Header -->
             <header class="app-header">
@@ -222,52 +150,43 @@
                             <span class="governance-label"
                                 >Governance Token:</span
                             >
-                            {#if contractsLoading}
-                                <div class="loading-inline">
-                                    <div class="spinner-tiny"></div>
-                                    <span>Loading...</span>
-                                </div>
-                            {:else if selectedContract}
-                                <div class="inline-address">
-                                    <span class="address-full"
-                                        >{selectedContract}</span
+                            <div class="inline-address">
+                                <span class="address-full"
+                                    >{contractAddress}</span
+                                >
+                                <button
+                                    class="inline-copy-btn"
+                                    on:click={() =>
+                                        navigator.clipboard.writeText(
+                                            contractAddress
+                                        )}
+                                    title="Copy address"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        xmlns="http://www.w3.org/2000/svg"
                                     >
-                                    <button
-                                        class="inline-copy-btn"
-                                        on:click={() =>
-                                            navigator.clipboard.writeText(
-                                                selectedContract
-                                            )}
-                                        title="Copy address"
-                                    >
-                                        <svg
-                                            viewBox="0 0 24 24"
+                                        <rect
+                                            x="9"
+                                            y="9"
+                                            width="13"
+                                            height="13"
+                                            rx="2"
+                                            ry="2"
+                                            stroke="currentColor"
+                                            stroke-width="2"
                                             fill="none"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                        >
-                                            <rect
-                                                x="9"
-                                                y="9"
-                                                width="13"
-                                                height="13"
-                                                rx="2"
-                                                ry="2"
-                                                stroke="currentColor"
-                                                stroke-width="2"
-                                                fill="none"
-                                            />
-                                            <path
-                                                d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
-                                                stroke="currentColor"
-                                                stroke-width="2"
-                                                fill="none"
-                                            />
-                                        </svg>
-                                    </button>
-                                </div>
-                            {:else}
-                                <span class="no-contract">Not configured</span>
-                            {/if}
+                                        />
+                                        <path
+                                            d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            fill="none"
+                                        />
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                         <TreasuryAddress />
                     </div>
@@ -320,59 +239,6 @@
                                 />
                             </svg>
                         </button>
-
-                        {#if availableContracts.length > 1}
-                            <div
-                                class="selector-dropdown"
-                                class:open={showContractDropdown}
-                            >
-                                <button
-                                    class="change-btn"
-                                    on:click={() =>
-                                        (showContractDropdown =
-                                            !showContractDropdown)}
-                                    disabled={!walletConnected}
-                                    title="Change governance contract"
-                                >
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                    >
-                                        <path
-                                            d="M6 9L12 15L18 9"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                        />
-                                    </svg>
-                                </button>
-
-                                {#if showContractDropdown}
-                                    <div class="dropdown-menu">
-                                        {#each availableContracts as contract}
-                                            <button
-                                                class="dropdown-item"
-                                                class:selected={contract.address ===
-                                                    selectedContract}
-                                                on:click={() =>
-                                                    selectContract(
-                                                        contract.address
-                                                    )}
-                                            >
-                                                <span class="contract-label"
-                                                    >{contract.label}</span
-                                                >
-                                                <code class="contract-addr"
-                                                    >{contract.address}</code
-                                                >
-                                            </button>
-                                        {/each}
-                                    </div>
-                                {/if}
-                            </div>
-                        {/if}
 
                         <button
                             class="config-btn-inline"
@@ -428,20 +294,13 @@
                                     >
                                 </div>
                                 <div class="stat-item">
-                                    <span class="stat-label">Members:</span>
-                                    <span class="stat-value"
-                                        >{governanceStats.loading
-                                            ? "-"
-                                            : governanceStats.memberCount}</span
-                                    >
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">Voting Power:</span
+                                    <span class="stat-label"
+                                        >Total Voting Power:</span
                                     >
                                     <span class="stat-value"
                                         >{governanceStats.loading
                                             ? "-"
-                                            : governanceStats.totalVotingPower}</span
+                                            : governanceStats.totalVotingPowerFormatted}</span
                                     >
                                 </div>
                             </div>
@@ -474,6 +333,8 @@
                                 >
                                     <svg
                                         viewBox="0 0 24 24"
+                                        width="24"
+                                        height="24"
                                         fill="none"
                                         xmlns="http://www.w3.org/2000/svg"
                                     >
@@ -510,11 +371,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    {:else}
-        <div class="loading-screen">
-            <div class="spinner"></div>
-            <p>Initializing DAO Governance...</p>
         </div>
     {/if}
 </main>
@@ -669,62 +525,6 @@
         width: 14px;
         height: 14px;
     }
-    .no-contract {
-        color: var(--color-text-muted);
-        font-style: italic;
-    }
-    .selector-dropdown {
-        position: relative;
-    }
-    .change-btn {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: 6px;
-        padding: 0.25rem;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-    }
-    .dropdown-menu {
-        position: absolute;
-        top: 100%;
-        right: 0;
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        z-index: 1000;
-        min-width: 280px;
-        margin-top: 0.25rem;
-        overflow: hidden;
-    }
-    .dropdown-item {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.25rem;
-        width: 100%;
-        padding: 0.75rem 1rem;
-        background: none;
-        border: none;
-        border-bottom: 1px solid var(--color-border);
-        cursor: pointer;
-        text-align: left;
-        transition: background 0.2s ease;
-    }
-    .contract-label {
-        font-weight: 500;
-        color: var(--color-text-primary);
-        font-size: 0.9rem;
-    }
-    .contract-addr {
-        font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
-        font-size: 0.8rem;
-        color: var(--color-text-secondary);
-    }
     .refresh-btn-inline {
         display: flex;
         align-items: center;
@@ -760,20 +560,6 @@
     .config-btn-inline svg {
         width: 14px;
         height: 14px;
-    }
-    .loading-inline {
-        display: flex;
-        align-items: center;
-        gap: 0.25rem;
-        color: var(--color-text-muted);
-    }
-    .spinner-tiny {
-        width: 12px;
-        height: 12px;
-        border: 1px solid var(--color-border);
-        border-top: 1px solid var(--color-primary);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
     }
     .proposals-section {
         background: rgba(30, 33, 38, 0.6);

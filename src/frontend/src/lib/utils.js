@@ -131,14 +131,16 @@ export async function getTokenBalance(provider, contractAddress, userAddress) {
     }
 }
 
-// Get ETH balance for an address
-export async function getEthBalance(provider, userAddress) {
+
+export async function getCanisterEthereumAddress(backendActor) {
     try {
-        const balance = await provider.getBalance(userAddress);
-        return ethers.formatEther(balance);
+        // Get the canister's default Ethereum address from the default subaccount
+        // Pass empty array [] for optional Blob parameter in Candid
+        const result = await backendActor.icrc149_get_ethereum_address([]);
+        return result;
     } catch (error) {
-        console.error('Failed to get ETH balance:', error);
-        return '0.0';
+        console.error('Failed to get canister Ethereum address:', error);
+        throw new Error(`Failed to get canister address: ${error.message}`);
     }
 }
 

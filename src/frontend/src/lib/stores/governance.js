@@ -1,4 +1,6 @@
 import { writable } from 'svelte/store';
+import { getTotalSupply } from "$lib/storage-slot-security-analysis.js";
+import { formatTokenAmount, getTokenInfo } from '../utils';
 
 // Governance statistics store
 function createGovernanceStatsStore() {
@@ -12,45 +14,45 @@ function createGovernanceStatsStore() {
 
     return {
         subscribe,
-        
+
         // Load governance statistics using provided functions
-        load: async (getTotalSupplyFn, getMemberCountFn = null, forceReload = false) => {
+        load: async (provider, contractAddress, forceReload = false) => {
             // Check if we should skip loading
             let currentState;
             const unsubscribe = subscribe(state => currentState = state);
             unsubscribe();
-            
+
             // Skip loading if data exists and not forcing reload
-            if (!forceReload && currentState.lastUpdated && 
-                currentState.totalVotingPower !== '-' && 
-                currentState.memberCount !== '-' && 
+            if (!forceReload && currentState.lastUpdated &&
+                currentState.totalVotingPower !== '-' &&
+                currentState.memberCount !== '-' &&
                 !currentState.loading) {
                 return {
                     totalVotingPower: currentState.totalVotingPower,
                     memberCount: currentState.memberCount
                 };
             }
-            
+
             update(state => ({ ...state, loading: true, error: null }));
-            
+
             try {
                 // Get total supply (voting power)
-                const totalVotingPower = await getTotalSupplyFn();
-                
-                // Get member count if function provided, otherwise use placeholder
-                const memberCount = getMemberCountFn ? await getMemberCountFn() : "-";
-                
-                const stats = { totalVotingPower, memberCount };
-                
+                const [totalVotingPower, tokenInfo] = await Promise.all([
+                    getTotalSupply(provider, contractAddress),
+                    getTokenInfo(provider, contractAddress)
+                ]);
+
+                const totalVotingPowerFormatted = formatTokenAmount(totalVotingPower, tokenInfo.decimals);
+
                 update(state => ({
                     ...state,
-                    ...stats,
+                    totalVotingPower,
+                    totalVotingPowerFormatted,
                     loading: false,
                     lastUpdated: new Date(),
                     error: null
                 }));
 
-                return stats;
             } catch (error) {
                 console.error("Failed to load governance stats:", error);
                 update(state => ({
@@ -58,7 +60,6 @@ function createGovernanceStatsStore() {
                     error: error.message || "Failed to load governance stats",
                     loading: false
                 }));
-                throw error;
             }
         },
 
@@ -78,10 +79,10 @@ function createGovernanceStatsStore() {
 
         // Set error state
         setError: (error) => {
-            update(state => ({ 
-                ...state, 
+            update(state => ({
+                ...state,
                 error: error,
-                loading: false 
+                loading: false
             }));
         },
 

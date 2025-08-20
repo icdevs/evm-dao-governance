@@ -9,8 +9,6 @@
     export let isExpanded = true; // Always expanded when used as standalone page
     export let onConfigurationComplete = null; // Callback for when config is complete
 
-    const dispatch = createEventDispatcher();
-
     // Store subscriptions
     $: configData = $configStore;
 
@@ -194,9 +192,10 @@
                 rpc_service: {
                     rpc_type: newContractRpcType,
                     canister_id: "7hfb6-caaaa-aaaar-qadga-cai", // Default EVM RPC canister
-                    custom_config: newContractRpcType === "custom" 
-                        ? [["url", newContractCustomUrl]]
-                        : [],
+                    custom_config:
+                        newContractRpcType === "custom"
+                            ? [["url", newContractCustomUrl]]
+                            : [],
                 },
                 contract_type:
                     newContractType === "ERC20"
@@ -277,15 +276,18 @@
         configStore.updateField("canisterId", canisterId);
         configStore.updateField("environment", environment);
         configStore.updateField("contractAddress", contractAddress);
-        
+
         // The store will automatically calculate isConfigured
-        
+
         try {
             // Initialize canister if needed
             // await initializeCanister(canisterId, environment);
             statusStore.add("Voting interface initialized!", "success");
         } catch (e) {
-            statusStore.add(`Voting interface initialization failed: ${e.message}`, "error");
+            statusStore.add(
+                `Voting interface initialization failed: ${e.message}`,
+                "error"
+            );
         }
 
         // Show success message
@@ -576,7 +578,8 @@
                                         >
                                     </select>
                                     <div class="input-hint">
-                                        Use default for production, custom for local development
+                                        Use default for production, custom for
+                                        local development
                                     </div>
                                 </div>
 

@@ -46,11 +46,12 @@
     $: currentSigner = $walletStore.signer;
     $: currentChainId = $walletStore.chainId;
     $: isAuthenticated = $walletStore.state === "connected";
+    $: walletAddress = $walletStore.userAddress;
 
     // Check if all dependencies are available
     $: hasAllDependencies = !!(
         isAuthenticated &&
-        $walletStore.userAddress &&
+        walletAddress &&
         config.contractAddress &&
         currentProvider &&
         currentSigner &&
@@ -121,7 +122,7 @@
             // Prepare dependencies object for votingAPI
             const dependencies = {
                 backendActor: backend,
-                userAddress: auth.userAddress,
+                userAddress: walletAddress,
                 contractAddress: config.contractAddress,
                 chainId: currentChainId,
                 signer: currentSigner,

@@ -1,28 +1,32 @@
 <script>
-    import { balanceStore } from "../stores/balance.js";
+    import { configStore } from "../stores/config.js";
+    import { agentStore } from "../stores/agent.js";
     import { CopyButton } from "./ui/index.js";
+    import { treasuryBalanceStore } from "$lib/stores/balance.js";
 
     // Subscribe to balance store for treasury address
-    $: balanceData = $balanceStore;
-    $: canisterAddress = balanceData.canisterAddress;
+    $: configData = $configStore;
+    $: treasuryBalance = $treasuryBalanceStore;
 </script>
 
-{#if canisterAddress}
-    <div class="governance-info">
-        <span class="governance-label">Treasury:</span>
-        <div class="inline-address">
+<div class="governance-info">
+    <span class="governance-label">Treasury:</span>
+    <div class="inline-address">
+        {#if treasuryBalance.walletAddress}
             <span class="address-full">
-                {canisterAddress}
+                {treasuryBalance.walletAddress}
             </span>
             <CopyButton
-                value={canisterAddress}
+                value={treasuryBalance.walletAddress}
                 size="xs"
                 variant="ghost"
                 title="Copy treasury address"
             />
-        </div>
+        {:else}
+            <span class="address-full"> Loading... </span>
+        {/if}
     </div>
-{/if}
+</div>
 
 <style>
     .governance-info {
@@ -67,7 +71,7 @@
             gap: 0.5rem;
             font-size: 0.8rem;
         }
-        
+
         .address-full {
             font-size: 0.75rem;
         }

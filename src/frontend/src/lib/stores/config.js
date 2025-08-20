@@ -6,7 +6,8 @@ const defaultConfig = {
     canisterId: '',
     environment: 'local', // 'local' or 'ic'
     contractAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3', // Default for local anvil
-    isConfigured: false
+    isConfigured: false,
+    loaded: false
 };
 
 function createConfigStore() {
@@ -14,29 +15,26 @@ function createConfigStore() {
 
     return {
         subscribe,
-        
+
         // Load config from localStorage
         load: () => {
-            if (browser) {
-                try {
-                    const saved = localStorage.getItem('evm-dao-config');
-                    if (saved) {
-                        const config = JSON.parse(saved);
-                        const mergedConfig = { ...defaultConfig, ...config };
-                        set(mergedConfig);
-                        return mergedConfig;
-                    }
-                } catch (error) {
-                    console.error('Failed to load config from localStorage:', error);
+            try {
+                const saved = localStorage.getItem('evm-dao-config');
+                if (saved) {
+                    const config = JSON.parse(saved);
+                    const mergedConfig = { ...defaultConfig, ...config };
+                    set({ ...mergedConfig, loaded: true });
+                    return mergedConfig;
                 }
+            } catch (error) {
+                console.error('Failed to load config from localStorage:', error);
             }
-            return defaultConfig;
         },
-        
+
         // Save complete config
         save: (config) => {
             const configToSave = { ...config, isConfigured: isConfigurationComplete(config) };
-            
+
             if (browser) {
                 try {
                     localStorage.setItem('evm-dao-config', JSON.stringify(configToSave));
@@ -47,14 +45,14 @@ function createConfigStore() {
             set(configToSave);
             return configToSave;
         },
-        
+
         // Update a specific field
         updateField: (field, value) => {
             let newConfig;
             update(config => {
                 newConfig = { ...config, [field]: value };
                 newConfig.isConfigured = isConfigurationComplete(newConfig);
-                
+
                 if (browser) {
                     try {
                         localStorage.setItem('evm-dao-config', JSON.stringify(newConfig));
@@ -66,14 +64,14 @@ function createConfigStore() {
             });
             return newConfig;
         },
-        
+
         // Update multiple fields at once
         updateFields: (fieldsToUpdate) => {
             let newConfig;
             update(config => {
                 newConfig = { ...config, ...fieldsToUpdate };
                 newConfig.isConfigured = isConfigurationComplete(newConfig);
-                
+
                 if (browser) {
                     try {
                         localStorage.setItem('evm-dao-config', JSON.stringify(newConfig));
@@ -85,7 +83,7 @@ function createConfigStore() {
             });
             return newConfig;
         },
-        
+
         // Reset to defaults
         reset: () => {
             if (browser) {

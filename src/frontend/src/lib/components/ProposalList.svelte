@@ -7,6 +7,7 @@
     import { getNetworkInfo } from "../utils.js";
     import { agentStore } from "../stores/agent.js";
     import { getTokenBalanceInfo } from "../utils.js";
+    import { providerStore } from "../stores/provider.js";
 
     // Export filter prop
     export let filter = "any"; // any, active, executed, expired, pending, rejected
@@ -24,11 +25,12 @@
     $: isAuthenticated = walletData.state === "connected";
     $: walletAddress = walletData.userAddress;
     $: contractAddress = configData.contractAddress;
-    $: provider = walletData.provider;
+    $: provider = $providerStore;
 
     // User token balance state
-    let userTokenBalance = "0";
-    let userVotingPower = "0";
+    let userTokenBalanceFormatted = "0";
+    let userVotingPower = 0;
+    let totalTokenSupply = 0;
     let isLoadingBalance = false;
 
     // User voting state (for demo purposes - in real app this would come from backend)
@@ -82,8 +84,9 @@
 
     async function loadUserTokenBalance() {
         if (!isAuthenticated || !walletAddress || !contractAddress) {
-            userTokenBalance = "0";
-            userVotingPower = "0";
+            userTokenBalanceFormatted = "-";
+            userVotingPower = 0;
+            totalTokenSupply = 0;
             return;
         }
 
@@ -94,12 +97,14 @@
                 contractAddress,
                 walletAddress
             );
-            userTokenBalance = tokenBalanceInfo.formatted;
-            userVotingPower = tokenBalanceInfo.balance.toString();
+            userTokenBalanceFormatted = tokenBalanceInfo.formatted;
+            userVotingPower = tokenBalanceInfo.balance;
+            totalTokenSupply = tokenBalanceInfo.tokenInfo.totalSupply;
         } catch (error) {
             console.error("Failed to load user token balance:", error);
-            userTokenBalance = "0";
-            userVotingPower = "0";
+            userTokenBalanceFormatted = "-";
+            userVotingPower = 0;
+            totalTokenSupply = 0;
         } finally {
             isLoadingBalance = false;
         }
@@ -440,7 +445,9 @@
                                         {:else if !isAuthenticated}
                                             Not connected
                                         {:else}
-                                            {userTokenBalance}
+                                            {userTokenBalanceFormatted} ({(userVotingPower /
+                                                totalTokenSupply) *
+                                                100}%)
                                         {/if}
                                     </span>
                                 </div>

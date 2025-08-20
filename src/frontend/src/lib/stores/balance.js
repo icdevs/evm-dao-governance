@@ -1,94 +1,74 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
+import { getTokenBalanceInfo } from '../utils';
+import { agentStore } from './agent';
+import { walletStore } from './wallet';
+import { configStore } from './config';
+import { getCanisterEthereumAddress } from "$lib/utils.js";
 
 // Balance store that persists data across component mounts
-function createBalanceStore() {
-    const { subscribe, set, update } = writable({
-        ethBalance: "0.0",
-        tokenBalance: "0.0",
-        canisterAddress: "",
+function createBalanceStore(initializeFunc) {
+    const { subscribe, update } = writable({
+        contractAddress: null,
+        walletAddress: null,
+        ethBalance: 0,
+        tokenBalanceInfo: {},
         isLoading: false,
         isInitialLoad: true,
         lastUpdated: null,
-        chainId: null,
         error: null
+    });
+
+    initializeFunc((contractAddress, walletAddress) => {
+        update(state => ({
+            ...state,
+            contractAddress,
+            walletAddress
+        }));
     });
 
     const store = {
         subscribe,
-        
-        // Load balances using provided loader function
-        load: async (getBalancesFn, silent = false) => {
-            if (!silent) {
-                update(state => ({ ...state, isLoading: true, error: null }));
-            }
 
+        // Load balances using provided loader function
+        load: async (provider) => {
+
+            let currentState;
+            const unsubscribe = subscribe(state => currentState = state);
+            unsubscribe();
+
+            if (!currentState.contractAddress || !currentState.walletAddress) {
+                throw new Error("Balance store not initialized: Missing contract or wallet address");
+            }
             try {
-                const balances = await getBalancesFn();
-                
+
+                const [ethBalance, tokenBalanceInfo] = await Promise.all([
+                    provider.getBalance(currentState.walletAddress),
+                    getTokenBalanceInfo(
+                        provider,
+                        currentState.contractAddress,
+                        currentState.walletAddress
+                    )
+                ]);
+
                 update(state => ({
                     ...state,
-                    ethBalance: balances.ethBalance || "0.0",
-                    tokenBalance: balances.tokenBalance || "0.0",
-                    canisterAddress: balances.canisterAddress || "",
-                    chainId: balances.chainId || null,
+                    ethBalance: ethBalance,
+                    tokenBalanceInfo: tokenBalanceInfo,
                     isInitialLoad: false,
                     lastUpdated: new Date(),
                     isLoading: false,
                     error: null
                 }));
 
-                return balances;
             } catch (error) {
-                update(state => ({ 
-                    ...state, 
+                update(state => ({
+                    ...state,
                     isLoading: false,
                     error: error.message || 'Failed to load balances'
                 }));
                 throw error;
             }
         },
-
-        // Update specific balance fields
-        updateBalances: (balanceUpdates) => {
-            update(state => ({
-                ...state,
-                ...balanceUpdates,
-                lastUpdated: new Date()
-            }));
-        },
-
-        // Set loading state
-        setLoading: (loading) => {
-            update(state => ({ ...state, isLoading: loading }));
-        },
-
-        // Set error state
-        setError: (error) => {
-            update(state => ({ 
-                ...state, 
-                error: error,
-                isLoading: false 
-            }));
-        },
-
-        // Clear error
-        clearError: () => {
-            update(state => ({ ...state, error: null }));
-        },
-
-        // Clear all data
-        clear: () => {
-            set({
-                ethBalance: "0.0",
-                tokenBalance: "0.0",
-                canisterAddress: "",
-                isLoading: false,
-                isInitialLoad: true,
-                lastUpdated: null,
-                chainId: null,
-                error: null
-            });
-        }
     };
 
     return store;
@@ -98,9 +78,30 @@ function createBalanceStore() {
 export function shouldLoadBalances(currentState, maxAge = 60000) {
     if (!currentState.lastUpdated) return true;
     if (currentState.ethBalance === "0.0" && currentState.tokenBalance === "0.0") return true;
-    
+
     const age = Date.now() - currentState.lastUpdated.getTime();
     return age > maxAge;
 }
 
-export const balanceStore = createBalanceStore();
+export const walletBalanceStore = createBalanceStore(initialize => {
+    // Initialize wallet balance store
+    walletStore.subscribe(async wallet => {
+        if (wallet.userAddress) {
+            console.log("Initializing wallet balance store...");
+            let config = get(configStore); // Will be initialized if wallet store is
+            initialize(config.contractAddress, wallet.userAddress);
+        }
+    });
+
+});
+export const treasuryBalanceStore = createBalanceStore(async initialize => {
+    // Initialize treasury balance store
+    agentStore.subscribe(async agent => {
+        if (agent.actor) {
+            console.log("Initializing treasury balance store...");
+            const address = await getCanisterEthereumAddress(agent.actor);
+            let config = get(configStore); // Will be initialized if agent store is
+            initialize(config.contractAddress, address);
+        }
+    });
+});
