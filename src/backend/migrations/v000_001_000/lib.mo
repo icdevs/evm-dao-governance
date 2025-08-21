@@ -88,31 +88,13 @@ module {
           D.print("Adding admin principal: " # Principal.toText(_caller));
           ignore BTree.insert(adminTree, Principal.compare, _caller, true);
 
-          // Add a default snapshot contract for backward compatibility
-          let defaultSnapshotContract : v0_1_0.SnapshotContractConfig = {
-            contract_address = "0x0000000000000000000000000000000000000000";
-            chain = {
-              chain_id = 1;
-              network_name = "mainnet";
-            };
-            rpc_service = {
-              rpc_type = "mainnet";
-              canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // EVM RPC canister
-              custom_config = null;
-            };
-            balance_storage_slot = 1; // Default slot for ERC20 balance mapping (most common)
-            contract_type = #ERC20;
-            enabled = true;
-          };
-          ignore BTree.insert(snapshotTree, Text.compare, defaultSnapshotContract.contract_address, defaultSnapshotContract);
-
           {
             var snapshot_contracts = snapshotTree;
             var execution_contracts = executionTree;
             var approved_icp_methods = icpMethodsTree;
             var admin_principals = adminTree;
             var proposal_duration_days = 4 * 24 * 60 * 60 * 1_000_000_000; // Default 4 days in nanoseconds
-            var default_snapshot_contract = ?defaultSnapshotContract.contract_address;
+            var default_snapshot_contract = null;
             var evm_rpc_canister_id = Principal.fromText("7hfb6-caaaa-aaaar-qadga-cai"); // Default to mainnet EVM RPC canister
           };
         };

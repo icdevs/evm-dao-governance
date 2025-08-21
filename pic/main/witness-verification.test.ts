@@ -3,8 +3,8 @@ import { ethers, JsonRpcProvider } from "ethers";
 import { PocketIc, createIdentity } from "@dfinity/pic";
 import { Principal } from "@dfinity/principal";
 import { IDL } from "@dfinity/candid";
-import { idlFactory } from "../../src/declarations/main/main.did.js";
-import type { EvmDaoBridgeCanister, Witness__1, WitnessResult } from "../../src/declarations/main/main.did.js";
+import { idlFactory } from "../../src/declarations/backend/backend.did.js";
+import type { EvmDaoBridgeCanister, Witness__1, WitnessResult } from "../../src/declarations/backend/backend.did.js";
 
 const admin = createIdentity("admin");
 
@@ -63,7 +63,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
 
     // Set up ethers provider for Anvil
     provider = new JsonRpcProvider("http://127.0.0.1:8545");
-    
+
     // Verify Anvil is running
     try {
       const network = await provider.getNetwork();
@@ -82,26 +82,26 @@ describe("Anvil eth_getProof Integration Tests", () => {
 
     // Deploy MockUSDC contract
     console.log("Deploying MockUSDC contract...");
-    
+
     // Use Anvil's deterministic private key for the first account
     const privateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
     const signer = new ethers.Wallet(privateKey, provider);
-    
+
     // Simple ERC20-like contract bytecode with proper balanceOf implementation
     // This contract implements: mapping(address => uint256) public balances at slot 0
     // and function balanceOf(address) returns (uint256)
     const mockUSDCBytecode = "0x608060405234801561001057600080fd5b50336000526000602052604060002068056bc75e2d630eb20000905561025a806100396000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806370a082311461003b5780636aa3f44a14610057575b600080fd5b61005560048036038101906100509190610145565b610073565b005b610071600480360381019061006c9190610145565b6100a3565b005b806000808373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b60008060008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020549050919050565b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b600061010a826100df565b9050919050565b61011a816100ff565b811461012557600080fd5b50565b60008135905061013781610111565b92915050565b6000819050919050565b61015081610143565b811461015b57600080fd5b50565b60008135905061016d81610147565b92915050565b6000806040838503121561018a576101896100da565b5b600061019885828601610128565b92505060206101a98582860161015e565b915050929150505056fea2646970667358221220c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e8c4a7e4e864736f6c63430008070033";
-    
+
     // Deploy the contract
     const deployTx = await signer.sendTransaction({
       data: mockUSDCBytecode,
     });
     const receipt = await deployTx.wait();
-    
+
     if (!receipt || !receipt.contractAddress) {
       throw new Error("Failed to deploy MockUSDC contract");
     }
-    
+
     mockUSDC = {
       address: receipt.contractAddress,
       interface: new ethers.Interface([
@@ -109,12 +109,12 @@ describe("Anvil eth_getProof Integration Tests", () => {
         "function symbol() view returns (string)"
       ])
     };
-    
+
     console.log("MockUSDC deployed at:", mockUSDC.address);
 
     // Set up balance for testing (directly write to storage)
     const balance = ethers.parseUnits("1000", 6); // 1000 USDC
-    
+
     // Calculate storage key: keccak256(abi.encode(userAddress, slot))
     // For Solidity mappings: mapping(address => uint256) at slot 0
     // Storage key = keccak256(abi.encode(userAddress, slot))
@@ -126,21 +126,21 @@ describe("Anvil eth_getProof Integration Tests", () => {
         slotPadded      // 32 bytes - slot number
       ])
     );
-    
+
     // Use anvil_setStorageAt to set the balance
     await provider.send("anvil_setStorageAt", [
       mockUSDC.address,
       storageSlot,
       ethers.zeroPadValue(ethers.toBeHex(balance), 32)
     ]);
-    
+
     console.log(`Set balance of ${balance} USDC for ${userAddress}`);
 
     // Initialize PocketIC for canister testing
     try {
       pic = await PocketIc.create(process.env.PIC_URL);
       console.log("PocketIC initialized");
-      
+
       // Set up the canister with proper initialization arguments
       fixture = await pic.setupCanister<EvmDaoBridgeCanister>({
         sender: admin.getPrincipal(),
@@ -151,13 +151,13 @@ describe("Anvil eth_getProof Integration Tests", () => {
 
       canister = (fixture as any).actor as EvmDaoBridgeCanister;
       console.log("Canister deployed and ready");
-      
+
       // Test basic connectivity
       if (canister) {
         const hello = await canister.hello();
         console.log("Canister hello response:", hello);
       }
-      
+
     } catch (error) {
       console.log("PocketIC not available, skipping canister tests:", error);
       pic = null as any;
@@ -171,7 +171,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
       anvilProcess.kill('SIGTERM');
       console.log("Anvil process terminated");
     }
-    
+
     // Clean up PocketIC
     if (pic) {
       await pic.tearDown();
@@ -181,7 +181,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
   it("should generate storage proof using eth_getProof", async () => {
     // Calculate storage slot for user's balance in mapping(address => uint256) at slot 0
     const balanceSlot = 0;
-    
+
     // For Solidity mappings: storage key = keccak256(abi.encode(userAddress, slot))
     const addressPadded = ethers.zeroPadValue(userAddress, 32); // Pad address to 32 bytes
     const slotPadded = ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32); // slot 0, padded to 32 bytes
@@ -213,7 +213,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
     // Verify that the storage value matches the expected balance
     const expectedBalance = ethers.parseUnits("1000", 6);
     const actualBalance = BigInt(proof.storageProof[0].value);
-    
+
     expect(actualBalance).toBe(expectedBalance);
     console.log("✅ Storage proof value matches expected balance");
 
@@ -255,60 +255,60 @@ describe("Anvil eth_getProof Integration Tests", () => {
     // If canister is available, test the witness verification
     if (canister) {
       console.log("Testing canister witness verification...");
-      
+
       // First, configure the snapshot contract
       try {
         try {
-        console.log("Testing canister witness verification...");
-      
-      try {
-        console.log("Configuring snapshot contract...");
-        
-        // Set admin identity before configuration calls
-        (fixture as any).actor.setIdentity(admin);
-        
-        // Note: Since we don't have EVM RPC canister in this test, we'll create a minimal config
-        const snapshotContractConfig = {
-          contract_address: mockUSDC.address,
-          chain: { 
-            chain_id: 31337n, // Anvil chain ID 
-            network_name: "localhost" 
-          },
-          rpc_service: {
-            rpc_type: "custom",
-            canister_id: Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai"), // Dummy canister ID
-            custom_config: [[["url", "http://127.0.0.1:8545"]]] as [] | [[string, string][]]
-          },
-          contract_type: { ERC20: null },
-          balance_storage_slot: 0n,
-          enabled: true
-        };
+          console.log("Testing canister witness verification...");
 
-        await canister!.icrc149_update_snapshot_contract_config(
-          mockUSDC.address,
-          [snapshotContractConfig]
-        );
+          try {
+            console.log("Configuring snapshot contract...");
 
-        // Create test snapshot  
-        await canister!.icrc149_add_test_snapshot(
-          0n, // proposal_id (using 0 for test)
-          BigInt(blockNumber), 
-          new Uint8Array(Buffer.from(block.stateRoot?.slice(2) || block.hash?.slice(2) || '', 'hex')), // state_root as Blob
-          mockUSDC.address,
-          31337n, // chain_id
-          "localhost" // network_name
-        );
+            // Set admin identity before configuration calls
+            (fixture as any).actor.setIdentity(admin);
 
-        console.log("✅ Snapshot contract configuration complete");
-      } catch (setupError) {
-        console.log("Error setting up snapshot configuration:", setupError);
-        console.warn("Snapshot configuration failed, but test will continue");
-      }
-      } catch (setupError) {
-        console.log("Error setting up snapshot configuration:", setupError);
-        console.warn("Snapshot configuration failed, but test will continue");
-      }
-        
+            // Note: Since we don't have EVM RPC canister in this test, we'll create a minimal config
+            const snapshotContractConfig = {
+              contract_address: mockUSDC.address,
+              chain: {
+                chain_id: 31337n, // Anvil chain ID 
+                network_name: "localhost"
+              },
+              rpc_service: {
+                rpc_type: "custom",
+                canister_id: Principal.fromText("rdmx6-jaaaa-aaaaa-aaadq-cai"), // Dummy canister ID
+                custom_config: [[["url", "http://127.0.0.1:8545"]]] as [] | [[string, string][]]
+              },
+              contract_type: { ERC20: null },
+              balance_storage_slot: 0n,
+              enabled: true
+            };
+
+            await canister!.icrc149_update_snapshot_contract_config(
+              mockUSDC.address,
+              [snapshotContractConfig]
+            );
+
+            // Create test snapshot  
+            await canister!.icrc149_add_test_snapshot(
+              0n, // proposal_id (using 0 for test)
+              BigInt(blockNumber),
+              new Uint8Array(Buffer.from(block.stateRoot?.slice(2) || block.hash?.slice(2) || '', 'hex')), // state_root as Blob
+              mockUSDC.address,
+              31337n, // chain_id
+              "localhost" // network_name
+            );
+
+            console.log("✅ Snapshot contract configuration complete");
+          } catch (setupError) {
+            console.log("Error setting up snapshot configuration:", setupError);
+            console.warn("Snapshot configuration failed, but test will continue");
+          }
+        } catch (setupError) {
+          console.log("Error setting up snapshot configuration:", setupError);
+          console.warn("Snapshot configuration failed, but test will continue");
+        }
+
         // Create a test snapshot for the block
         await (canister as any).icrc149_add_test_snapshot(
           BigInt(blockNumber),
@@ -319,15 +319,15 @@ describe("Anvil eth_getProof Integration Tests", () => {
           mockUSDC.address
         );
         console.log("Test snapshot added for block", blockNumber);
-        
+
       } catch (setupError) {
         console.log("Error setting up snapshot configuration:", setupError);
         console.warn("Snapshot configuration failed, but test will continue");
       }
-      
+
       try {
         const result: WitnessResult = await canister.icrc149_verify_witness(witness, [0n]);
-        
+
         if ('Ok' in result) {
           console.log("✅ Witness verification result:");
           console.log("  Valid:", result.Ok.valid);
@@ -336,7 +336,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
           console.log("  Balance:", result.Ok.balance.toString());
           console.log("  Block number:", result.Ok.block_number.toString());
           console.log("  State root verified:", result.Ok.state_root_verified);
-          
+
           // Additional assertions
           expect(result.Ok.valid).toBe(true);
           expect(result.Ok.user_address.toLowerCase()).toBe(userAddress.toLowerCase());
@@ -377,7 +377,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
 
     try {
       const result: WitnessResult = await canister.icrc149_verify_witness(invalidWitness, [0n]);
-      
+
       if ('Err' in result) {
         console.log("✅ Invalid witness correctly rejected:", result.Err);
         // The actual error might be different, so let's be more flexible
@@ -395,11 +395,11 @@ describe("Anvil eth_getProof Integration Tests", () => {
   it("should validate proof format and requirements", async () => {
     // Test that we can generate multiple proofs for different users
     const testUser2 = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"; // Second Anvil account
-    
+
     // Set balance for second user using correct storage key calculation
     const mintAmount = ethers.parseUnits("500", 6);
     const balanceSlot = 0;
-    
+
     // Calculate storage key: keccak256(abi.encode(userAddress, slot))
     const user2AddressPadded = ethers.zeroPadValue(testUser2, 32); // Pad address to 32 bytes
     const slotPadded = ethers.zeroPadValue(ethers.toBeHex(balanceSlot), 32); // slot 0, padded to 32 bytes
@@ -435,20 +435,20 @@ describe("Anvil eth_getProof Integration Tests", () => {
     // Test canister verification for second user
     if (canister) {
       console.log("Testing canister verification for second user...");
-      
+
       // Get block details for the witness
       const block = await provider.getBlock(blockNumber);
       if (!block || !block.hash) {
         throw new Error("Failed to get block details");
       }
-      
+
       // Configure snapshot contract for second user test as well
       try {
         console.log("Configuring snapshot contract for second user test...");
-        
+
         // Set admin identity before configuration calls
         (fixture as any).actor.setIdentity(admin);
-        
+
         const snapshotConfig = {
           contract_address: mockUSDC.address,
           chain: {
@@ -470,7 +470,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
           [snapshotConfig]
         );
         console.log("Second user snapshot config result:", configResult);
-        
+
         // Add test snapshot for this block too
         await canister.icrc149_add_test_snapshot(
           0n, // proposal_id
@@ -481,7 +481,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
           "localhost" // network_name
         );
         console.log("Test snapshot added for second user test");
-        
+
       } catch (setupError) {
         console.log("Error setting up snapshot config for second user:", setupError);
       }
@@ -500,7 +500,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
 
       try {
         const result2: WitnessResult = await canister.icrc149_verify_witness(witness2, [0n]);
-        
+
         if ('Ok' in result2) {
           console.log("✅ Second user witness verification result:");
           console.log("  Valid:", result2.Ok.valid);
@@ -508,7 +508,7 @@ describe("Anvil eth_getProof Integration Tests", () => {
           console.log("  Contract address:", result2.Ok.contract_address);
           console.log("  Balance:", result2.Ok.balance.toString());
           console.log("  Block number:", result2.Ok.block_number.toString());
-          
+
           // Additional assertions for second user
           expect(result2.Ok.valid).toBe(true);
           expect(result2.Ok.user_address.toLowerCase()).toBe(testUser2.toLowerCase());

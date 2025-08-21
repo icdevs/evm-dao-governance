@@ -3,7 +3,7 @@ import { HttpAgent, Actor } from '@dfinity/agent';
 import { IDL } from '@dfinity/candid';
 import { Principal } from '@dfinity/principal';
 import { ethers } from 'ethers';
-import { idlFactory } from '../src/declarations/main/main.did.js';
+import { idlFactory } from '../declarations/backend/backend.did.js';
 
 // Global state
 let metamaskProvider = null;
@@ -170,7 +170,7 @@ function updateEnvironment() {
     const env = document.getElementById('environment').value;
     // Auto-set canister ID for local development
     if (env === 'local') {
-        document.getElementById('canisterId').value = 'rdmx6-jaaaa-aaaaa-aaadq-cai';
+        document.getElementById('canisterId').value = globalThis.process?.env?.CANISTER_ID_BACKEND || 'rdmx6-jaaaa-aaaaa-aaadq-cai';
     }
     showStatus(`Environment set to: ${env}`, 'info');
 }

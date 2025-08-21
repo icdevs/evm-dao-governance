@@ -2,11 +2,28 @@
 
 # Script to deploy governance token and fund your MetaMask address
 # This helps set up the testing environment for DAO voting
+# Usage: ./setup_tokens.sh <YOUR_METAMASK_ADDRESS>
 
 set -e
 
+# Check if MetaMask address is provided as argument
+if [ $# -eq 0 ]; then
+    echo "❌ Error: MetaMask address is required!"
+    echo "Usage: $0 <YOUR_METAMASK_ADDRESS>"
+    echo "Example: $0 0x4A7C969110f7358bF334b49A2FF1a2585ac372B8"
+    exit 1
+fi
+
 # Configuration
-YOUR_METAMASK_ADDRESS="0x4A7C969110f7358bF334b49A2FF1a2585ac372B8"
+YOUR_METAMASK_ADDRESS="$1"
+
+# Validate Ethereum address format (basic check)
+if ! [[ $YOUR_METAMASK_ADDRESS =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+    echo "❌ Error: Invalid Ethereum address format!"
+    echo "Address must be in format: 0x followed by 40 hexadecimal characters"
+    echo "Provided: $YOUR_METAMASK_ADDRESS"
+    exit 1
+fi
 # Additional addresses to fund with tokens
 ADDITIONAL_ADDRESSES=(
     "0x148311C647Ec8a584D896c04f6492b5D9Cb3a9B0"
@@ -29,6 +46,9 @@ if ! curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0
 fi
 
 echo "✅ Anvil is running"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+pushd "$SCRIPT_DIR" > /dev/null
 
 # Check if we can deploy tokens directly
 echo "📦 Creating token deployment script..."
@@ -90,6 +110,7 @@ SOLEOF
 import { ethers } from 'ethers';
 import { execSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
 
 async function deployToken() {
     // Connect to Anvil
@@ -111,7 +132,9 @@ async function deployToken() {
         execSync('forge build --contracts GovernanceToken.sol --out forge-out', { stdio: 'inherit' });
         
         // Read the compiled contract
-        const artifactPath = 'forge-out/GovernanceToken.sol/GovernanceToken.json';
+        const artifactPath = '../forge-out/GovernanceToken.sol/GovernanceToken.json';
+        const absolutePath = path.resolve(artifactPath);
+        console.log('Checking for file at:', absolutePath);
         if (fs.existsSync(artifactPath)) {
             const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
             contractBytecode = artifact.bytecode.object;
@@ -121,7 +144,7 @@ async function deployToken() {
             throw new Error('Compiled contract not found');
         }
     } catch (error) {
-        console.log('⚠️  Forge not available, using pre-compiled bytecode...');
+        console.log('⚠️  Forge not available, using pre-compiled bytecode...', error);
         
         // Fallback to basic ERC20 ABI and working bytecode
         contractABI = [
@@ -178,10 +201,10 @@ async function deployToken() {
     // Get canister Ethereum address and fund it
     console.log('🏦 Getting canister Ethereum address...');
     try {
-        const canisterResult = execSync('dfx canister call --network local main icrc149_get_eth_address "(null)"', 
+        const canisterResult = execSync('dfx canister call --network local backend icrc149_get_ethereum_address "(null)"', 
             { encoding: 'utf8', stdio: 'pipe' });
         
-        const addressMatch = canisterResult.match(/opt\\s+"([^"]+)"/);
+        const addressMatch = canisterResult.match(/"([^"]+)"/);
         if (addressMatch && addressMatch[1]) {
             const canisterAddress = addressMatch[1];
             console.log('✅ Canister Ethereum address:', canisterAddress);
@@ -192,7 +215,7 @@ async function deployToken() {
             
             const tokenNonce = await provider.getTransactionCount(deployer.address);
             const canisterTokenTx = await contract.transfer(canisterAddress, canisterTokenAmount, {
-                nonce: tokenNonce,
+                nonce: tokenNonce + 1, // TODO this was the only way i could avoid 'reuse' of a nonce???
                 gasLimit: 100000
             });
             await canisterTokenTx.wait();
@@ -227,6 +250,22 @@ async function deployToken() {
     console.log('💰 Each user address now has 100 GOV tokens');
     console.log('💰 Canister has 100 GOV tokens and 1 ETH for transactions');
     
+    
+    // Add contract to backend configuration
+    console.log('🏗️  Adding contract to backend configuration...');
+    try {
+        const result = execSync(
+            \`dfx canister call --network local backend icrc149_update_snapshot_contract_config '("\${contractAddress}", opt record { contract_address = "\${contractAddress}"; chain = record { chain_id = 31337; network_name = "anvil" }; rpc_service = record { rpc_type = "custom"; canister_id = principal "7hfb6-caaaa-aaaar-qadga-cai"; custom_config = opt vec { record { "url"; "http://127.0.0.1:8545" } } }; balance_storage_slot = 1; contract_type = variant { ERC20 }; enabled = true })'\`,
+            { encoding: 'utf8', stdio: 'pipe' }
+        );
+        
+        console.log('✅ Contract added to backend configuration!');
+        console.log('💡 Contract is now available for proposal creation');
+    } catch (error) {
+        console.log('⚠️  Failed to add contract to backend:', error.message);
+        console.log('💡 You can add it manually via the frontend configuration panel');
+    }
+    
     return contractAddress;
 }
 
@@ -253,6 +292,9 @@ EOF
         done
         echo "3. Note the contract address for use in proposals"
     fi
+
+# Return to original directory
+popd > /dev/null
 
 echo ""
 echo "✅ Setup complete!"

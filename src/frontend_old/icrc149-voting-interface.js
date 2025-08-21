@@ -4,7 +4,7 @@
 import { ethers } from 'ethers';
 import { Actor, HttpAgent, AnonymousIdentity } from '@dfinity/agent';
 import { IDL } from '@dfinity/candid';
-import { idlFactory } from '../src/declarations/main/main.did.js';
+import { idlFactory } from '../declarations/backend/backend.did.js';
 
 export class ICRC149VotingInterface {
     constructor() {
