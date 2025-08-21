@@ -109,13 +109,7 @@ export async function getTokenInfo(provider, contractAddress) {
             totalSupply: totalSupply.toString()
         };
     } catch (error) {
-        console.error('Failed to get token info:', error);
-        return {
-            name: 'Unknown Token',
-            symbol: 'UNK',
-            decimals: 18,
-            totalSupply: '0'
-        };
+        throw new Error(`Failed to get token info:`, error);
     }
 }
 

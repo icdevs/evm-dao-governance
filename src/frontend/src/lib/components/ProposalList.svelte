@@ -10,6 +10,8 @@
     import { providerStore } from "../stores/provider.js";
     import { castVote } from "../votingAPI.js";
     import { formatTokenAmount } from "../utils.js";
+    import { decode } from "@dfinity/didc";
+    import { fetchDidFromCanister } from "../canisters.js";
 
     // Export filter prop
     export let filter = "active"; // any, active, executed, expired, pending, rejected
@@ -33,6 +35,7 @@
     $: signer = $walletStore.signer;
     $: chainId = walletData.chainId;
     $: tokenInfo = $governanceStatsStore.tokenInfo;
+    $: agent = $agentStore.agent;
 
     // User token balance state
     let userTokenBalanceFormatted = "0";
@@ -153,7 +156,13 @@
         return "Unknown";
     }
 
-    function getActionDetails(action) {
+    function uint8ArrayToHex(arr) {
+        return Array.from(arr)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+    }
+
+    async function getActionDetails(action) {
         if (action.Motion) {
             return action.Motion;
         }
@@ -164,7 +173,26 @@
         }
         if (action.ICPCall) {
             const call = action.ICPCall;
-            return `${call.method} on ${call.canister}`;
+            const hexArgs = uint8ArrayToHex(call.args);
+            let candidArgs;
+            if (hexArgs == "4449444c0000") {
+                candidArgs = "`( )`";
+            } else {
+                const didText = await fetchDidFromCanister(
+                    agent,
+                    call.canister
+                );
+
+                candidArgs = decode({
+                    idl: didText,
+                    input: hexArgs,
+                    serviceMethod: call.method,
+                    inputFormat: "hex",
+                    targetFormat: "candid",
+                    useServiceMethodReturnType: false,
+                });
+            }
+            return `Call method '${call.method}' in canister '${call.canister}' with args of '${candidArgs}' (0x${hexArgs})`;
         }
         return "Unknown action";
     }
@@ -548,7 +576,13 @@
                     <!-- Description Section -->
                     <div class="proposal-content">
                         <div class="action-details">
-                            {getActionDetails(proposal.action)}
+                            {#await getActionDetails(proposal.action)}
+                                Loading...
+                            {:then actionDetails}
+                                {actionDetails}
+                            {:catch error}
+                                Error loading details: {error.message}
+                            {/await}
                         </div>
 
                         {#if proposal.metadata}

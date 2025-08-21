@@ -1,10 +1,15 @@
 <script>
-    import { createEventDispatcher } from "svelte";
+    import { createEventDispatcher, onMount } from "svelte";
     import { configStore } from "../stores/config.js";
     import { walletStore } from "../stores/wallet.js";
+    import { agentStore } from "../stores/agent.js";
     import { backend } from "../canisters.js";
     import { createProposal } from "../votingAPI.js";
     import { isValidAddress } from "../utils.js";
+    import { Principal } from "@dfinity/principal";
+    import { Actor } from "@dfinity/agent";
+    import { IDL, renderInput } from "@dfinity/candid";
+    import { fetchActorFromCanister } from "../canisters.js";
 
     const dispatch = createEventDispatcher();
 
@@ -37,6 +42,15 @@
     let icpArgs = "";
     let icpCycles = "0";
 
+    // Dynamic ICP form state
+    let icpMode = "dynamic"; // "dynamic" or "manual"
+    let loadingCanister = false;
+    let canisterActor = null;
+    let availableMethods = [];
+    let selectedMethod = "";
+    let methodInputs = [];
+    let argumentInputBoxes = [];
+
     // General fields
     let metadata = "";
 
@@ -47,6 +61,7 @@
     $: currentChainId = $walletStore.chainId;
     $: isAuthenticated = $walletStore.state === "connected";
     $: walletAddress = $walletStore.userAddress;
+    $: agent = $agentStore.agent;
 
     // Check if all dependencies are available
     $: hasAllDependencies = !!(
@@ -58,6 +73,92 @@
         currentChainId &&
         backend
     );
+
+    async function loadCanisterInterface() {
+        if (!icpCanister.trim()) {
+            error = "Please enter a canister ID";
+            return;
+        }
+        if (!agent) {
+            error = "Agent is not available";
+            return;
+        }
+
+        try {
+            loadingCanister = true;
+            error = null;
+
+            const canisterId = Principal.fromText(icpCanister);
+            canisterActor = await fetchActorFromCanister(agent, canisterId);
+
+            if (canisterActor) {
+                const interface_ = Actor.interfaceOf(canisterActor);
+                availableMethods = interface_._fields
+                    .map(([name, func]) => ({ name, func }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+
+                selectedMethod = "";
+                methodInputs = [];
+                argumentInputBoxes = [];
+            }
+        } catch (err) {
+            console.error("Failed to load canister interface:", err);
+            error = `Failed to load canister: ${err.message}`;
+            canisterActor = null;
+            availableMethods = [];
+        } finally {
+            loadingCanister = false;
+        }
+    }
+
+    function selectMethod(methodName) {
+        selectedMethod = methodName;
+        const method = availableMethods.find((m) => m.name === methodName);
+
+        if (method) {
+            // Create input boxes for each argument
+            argumentInputBoxes = method.func.argTypes.map((argType) => {
+                const inputBox = renderInput(argType);
+                return {
+                    type: argType,
+                    inputBox,
+                    element: null,
+                };
+            });
+        } else {
+            argumentInputBoxes = [];
+        }
+    }
+
+    function getMethodArguments() {
+        if (icpMode === "manual") {
+            return icpArgs;
+        }
+
+        // Parse arguments from dynamic form
+        const args = argumentInputBoxes.map((argBox) => {
+            return argBox.inputBox.parse();
+        });
+
+        // Check if any arguments are rejected
+        const hasErrors = argumentInputBoxes.some((argBox) =>
+            argBox.inputBox.isRejected()
+        );
+        if (hasErrors) {
+            throw new Error("Invalid arguments provided");
+        }
+
+        // Convert to candid blob hex
+        const method = availableMethods.find((m) => m.name === selectedMethod);
+        if (method) {
+            const encoded = IDL.encode(method.func.argTypes, args);
+            return Array.from(encoded)
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join("");
+        }
+
+        return "";
+    }
 
     async function handleSubmit() {
         if (!isAuthenticated) {
@@ -113,8 +214,9 @@
 
                 case "icp_call":
                     proposalData.icpCanister = icpCanister;
-                    proposalData.icpMethod = icpMethod;
-                    proposalData.icpArgs = icpArgs;
+                    proposalData.icpMethod =
+                        icpMode === "dynamic" ? selectedMethod : icpMethod;
+                    proposalData.icpArgs = getMethodArguments();
                     proposalData.icpCycles = icpCycles;
                     break;
             }
@@ -176,9 +278,17 @@
                     error = "Canister ID is required";
                     return false;
                 }
-                if (!icpMethod.trim()) {
-                    error = "Method name is required";
-                    return false;
+
+                if (icpMode === "dynamic") {
+                    if (!selectedMethod) {
+                        error = "Please select a method";
+                        return false;
+                    }
+                } else {
+                    if (!icpMethod.trim()) {
+                        error = "Method name is required";
+                        return false;
+                    }
                 }
                 break;
         }
@@ -196,6 +306,11 @@
         icpCanister = "";
         icpMethod = "";
         icpArgs = "";
+        icpMode = "dynamic";
+        canisterActor = null;
+        availableMethods = [];
+        selectedMethod = "";
+        argumentInputBoxes = [];
         metadata = "";
     }
 
@@ -204,6 +319,42 @@
         erc20Recipient = "";
         erc20Amount = "";
         ethData = "";
+    }
+
+    // Reset ICP form when mode changes
+    $: if (icpMode === "dynamic") {
+        icpMethod = "";
+        icpArgs = "";
+    } else {
+        canisterActor = null;
+        availableMethods = [];
+        selectedMethod = "";
+        argumentInputBoxes = [];
+    }
+
+    // Reference to the arguments container
+    let argumentsContainer;
+
+    $: if (argumentsContainer) {
+        argumentsContainer.innerHTML = "";
+        if (argumentInputBoxes && argumentInputBoxes.length > 0) {
+            argumentInputBoxes.forEach((argBox, index) => {
+                const wrapper = document.createElement("div");
+                wrapper.className = "method-arg-group";
+                const label = document.createElement("label");
+                label.textContent = `Argument ${index + 1} (${argBox.type.display()})`;
+                wrapper.appendChild(label);
+                if (argBox.inputBox && argBox.inputBox.render) {
+                    argBox.inputBox.render(wrapper);
+                }
+                argumentsContainer.appendChild(wrapper);
+            });
+        } else {
+            const noneDiv = document.createElement("div");
+            noneDiv.className = "method-arg-group";
+            noneDiv.textContent = "None";
+            argumentsContainer.appendChild(noneDiv);
+        }
     }
 </script>
 
@@ -439,40 +590,122 @@
             <div class="icp-call-section">
                 <h3>ICP Canister Call Details</h3>
 
+                <!-- Dynamic/Manual Mode Toggle -->
+                <fieldset class="form-group">
+                    <legend>Input Mode</legend>
+                    <div class="toggle-group">
+                        <button
+                            type="button"
+                            class:active={icpMode === "dynamic"}
+                            on:click={() => (icpMode = "dynamic")}
+                            disabled={isSubmitting || !hasAllDependencies}
+                            >Dynamic Form</button
+                        >
+                        <button
+                            type="button"
+                            class:active={icpMode === "manual"}
+                            on:click={() => (icpMode = "manual")}
+                            disabled={isSubmitting || !hasAllDependencies}
+                            >Manual</button
+                        >
+                    </div>
+                </fieldset>
+
                 <div class="form-group">
                     <label for="icpCanister">Canister ID</label>
-                    <input
-                        id="icpCanister"
-                        type="text"
-                        bind:value={icpCanister}
-                        placeholder="rdmx6-jaaaa-aaaaa-aaadq-cai"
-                        disabled={isSubmitting || !hasAllDependencies}
-                        required
-                    />
+                    <div class="canister-input-group">
+                        <input
+                            id="icpCanister"
+                            type="text"
+                            bind:value={icpCanister}
+                            placeholder="rdmx6-jaaaa-aaaaa-aaadq-cai"
+                            disabled={isSubmitting || !hasAllDependencies}
+                            required
+                        />
+                        {#if icpMode === "dynamic"}
+                            <button
+                                type="button"
+                                class="load-canister-btn"
+                                on:click={loadCanisterInterface}
+                                disabled={isSubmitting ||
+                                    !hasAllDependencies ||
+                                    loadingCanister ||
+                                    !icpCanister.trim()}
+                            >
+                                {#if loadingCanister}
+                                    Loading...
+                                {:else}
+                                    Load Interface
+                                {/if}
+                            </button>
+                        {/if}
+                    </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="icpMethod">Method Name</label>
-                    <input
-                        id="icpMethod"
-                        type="text"
-                        bind:value={icpMethod}
-                        placeholder="transfer"
-                        disabled={isSubmitting || !hasAllDependencies}
-                        required
-                    />
-                </div>
+                {#if icpMode === "dynamic"}
+                    <!-- Dynamic Interface -->
+                    {#if availableMethods.length > 0}
+                        <div class="form-group">
+                            <label for="methodSelect">Method</label>
+                            <select
+                                id="methodSelect"
+                                class="form-control"
+                                bind:value={selectedMethod}
+                                on:change={() => selectMethod(selectedMethod)}
+                                disabled={isSubmitting || !hasAllDependencies}
+                                required
+                            >
+                                <option value="">Select a method...</option>
+                                {#each availableMethods as method}
+                                    <option value={method.name}>
+                                        {method.name}
+                                    </option>
+                                {/each}
+                            </select>
+                        </div>
 
-                <div class="form-group">
-                    <label for="icpArgs">Arguments (Candid blob hex)</label>
-                    <textarea
-                        id="icpArgs"
-                        bind:value={icpArgs}
-                        placeholder="4449444c..."
-                        rows="3"
-                        disabled={isSubmitting || !hasAllDependencies}
-                    ></textarea>
-                </div>
+                        {#if selectedMethod}
+                            <div class="method-arguments">
+                                <h4>Method Arguments</h4>
+                                <div
+                                    class="arguments-container"
+                                    bind:this={argumentsContainer}
+                                ></div>
+                            </div>
+                        {/if}
+                    {:else if canisterActor !== null}
+                        <div class="alert alert-warning">
+                            <p>
+                                No methods found or canister interface could not
+                                be loaded.
+                            </p>
+                        </div>
+                    {/if}
+                {:else}
+                    <!-- Manual Mode -->
+                    <div class="form-group">
+                        <label for="icpMethod">Method Name</label>
+                        <input
+                            id="icpMethod"
+                            type="text"
+                            bind:value={icpMethod}
+                            placeholder="transfer"
+                            disabled={isSubmitting || !hasAllDependencies}
+                            required
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="icpArgs">Arguments (Candid blob hex)</label>
+                        <textarea
+                            id="icpArgs"
+                            bind:value={icpArgs}
+                            placeholder="4449444c..."
+                            rows="3"
+                            disabled={isSubmitting || !hasAllDependencies}
+                        ></textarea>
+                    </div>
+                {/if}
 
                 <div class="form-group">
                     <label for="icpCycles">Cycles</label>
@@ -721,6 +954,80 @@
         opacity: 0.6;
     }
 
+    .canister-input-group {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+    }
+
+    .canister-input-group input {
+        flex: 1;
+    }
+
+    .load-canister-btn {
+        padding: 0.75rem 1rem;
+        background: var(--color-primary);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+
+    .load-canister-btn:hover:not(:disabled) {
+        background: var(--color-primary-dark);
+    }
+
+    .load-canister-btn:disabled {
+        background: var(--color-text-muted);
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .method-arguments {
+        background: rgba(0, 210, 255, 0.05);
+        border: 1px solid rgba(0, 210, 255, 0.2);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-top: 1rem;
+    }
+
+    .arguments-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    :global(.method-arg-group) {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+
+    :global(.method-arg-group label) {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        font-size: 0.85rem;
+    }
+
+    :global(.method-arg-group input),
+    :global(.method-arg-group textarea),
+    :global(.method-arg-group select) {
+        width: 100%;
+        padding: 0.5rem;
+        background: var(--color-surface-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        color: var(--color-text-primary);
+        font-size: 0.85rem;
+    }
+
     @media (max-width: 768px) {
         .proposal-form {
             padding: 1.5rem;
@@ -737,6 +1044,18 @@
 
         .erc20-helper {
             padding: 1rem;
+        }
+
+        .method-arguments {
+            padding: 1rem;
+        }
+
+        .canister-input-group {
+            flex-direction: column;
+        }
+
+        .load-canister-btn {
+            align-self: stretch;
         }
     }
 </style>
