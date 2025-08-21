@@ -10,8 +10,9 @@
     import { providerStore } from "../stores/provider.js";
     import { castVote } from "../votingAPI.js";
     import { formatTokenAmount } from "../utils.js";
-    import { decode } from "@dfinity/didc";
-    import { fetchDidFromCanister } from "../canisters.js";
+    import MotionDetails from "./MotionDetails.svelte";
+    import EthTransactionDetails from "./EthTransactionDetails.svelte";
+    import ICPCallDetails from "./ICPCallDetails.svelte";
 
     // Export filter prop
     export let filter = "active"; // any, active, executed, expired, pending, rejected
@@ -156,46 +157,7 @@
         return "Unknown";
     }
 
-    function uint8ArrayToHex(arr) {
-        return Array.from(arr)
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
-    }
-
-    async function getActionDetails(action) {
-        if (action.Motion) {
-            return action.Motion;
-        }
-        if (action.EthTransaction) {
-            const tx = action.EthTransaction;
-            const networkInfo = getNetworkInfo(Number(tx.chain.chain_id));
-            return `To: ${tx.to.slice(0, 10)}... on ${networkInfo.name}`;
-        }
-        if (action.ICPCall) {
-            const call = action.ICPCall;
-            const hexArgs = uint8ArrayToHex(call.args);
-            let candidArgs;
-            if (hexArgs == "4449444c0000") {
-                candidArgs = "`( )`";
-            } else {
-                const didText = await fetchDidFromCanister(
-                    agent,
-                    call.canister
-                );
-
-                candidArgs = decode({
-                    idl: didText,
-                    input: hexArgs,
-                    serviceMethod: call.method,
-                    inputFormat: "hex",
-                    targetFormat: "candid",
-                    useServiceMethodReturnType: false,
-                });
-            }
-            return `Call method '${call.method}' in canister '${call.canister}' with args of '${candidArgs}' (0x${hexArgs})`;
-        }
-        return "Unknown action";
-    }
+    // getActionDetails removed; now using child components
 
     function getStatusBadgeClass(proposal) {
         if (proposal.isExecuted) return "status-executed";
@@ -576,13 +538,22 @@
                     <!-- Description Section -->
                     <div class="proposal-content">
                         <div class="action-details">
-                            {#await getActionDetails(proposal.action)}
-                                Loading...
-                            {:then actionDetails}
-                                {actionDetails}
-                            {:catch error}
-                                Error loading details: {error.message}
-                            {/await}
+                            {#if proposal.action.Motion}
+                                <MotionDetails
+                                    motion={proposal.action.Motion}
+                                />
+                            {:else if proposal.action.EthTransaction}
+                                <EthTransactionDetails
+                                    tx={proposal.action.EthTransaction}
+                                />
+                            {:else if proposal.action.ICPCall}
+                                <ICPCallDetails
+                                    call={proposal.action.ICPCall}
+                                    {agent}
+                                />
+                            {:else}
+                                <span>Unknown action</span>
+                            {/if}
                         </div>
 
                         {#if proposal.metadata}
