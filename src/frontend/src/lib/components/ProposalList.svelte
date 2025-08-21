@@ -10,6 +10,9 @@
     import { providerStore } from "../stores/provider.js";
     import { castVote } from "../votingAPI.js";
     import { formatTokenAmount } from "../utils.js";
+    import MotionDetails from "./MotionDetails.svelte";
+    import EthTransactionDetails from "./EthTransactionDetails.svelte";
+    import ICPCallDetails from "./ICPCallDetails.svelte";
 
     // Export filter prop
     export let filter = "active"; // any, active, executed, expired, pending, rejected
@@ -33,6 +36,7 @@
     $: signer = $walletStore.signer;
     $: chainId = walletData.chainId;
     $: tokenInfo = $governanceStatsStore.tokenInfo;
+    $: agent = $agentStore.agent;
 
     // User token balance state
     let userTokenBalanceFormatted = "0";
@@ -153,21 +157,7 @@
         return "Unknown";
     }
 
-    function getActionDetails(action) {
-        if (action.Motion) {
-            return action.Motion;
-        }
-        if (action.EthTransaction) {
-            const tx = action.EthTransaction;
-            const networkInfo = getNetworkInfo(Number(tx.chain.chain_id));
-            return `To: ${tx.to.slice(0, 10)}... on ${networkInfo.name}`;
-        }
-        if (action.ICPCall) {
-            const call = action.ICPCall;
-            return `${call.method} on ${call.canister}`;
-        }
-        return "Unknown action";
-    }
+    // getActionDetails removed; now using child components
 
     function getStatusBadgeClass(proposal) {
         if (proposal.isExecuted) return "status-executed";
@@ -548,7 +538,22 @@
                     <!-- Description Section -->
                     <div class="proposal-content">
                         <div class="action-details">
-                            {getActionDetails(proposal.action)}
+                            {#if proposal.action.Motion}
+                                <MotionDetails
+                                    motion={proposal.action.Motion}
+                                />
+                            {:else if proposal.action.EthTransaction}
+                                <EthTransactionDetails
+                                    tx={proposal.action.EthTransaction}
+                                />
+                            {:else if proposal.action.ICPCall}
+                                <ICPCallDetails
+                                    call={proposal.action.ICPCall}
+                                    {agent}
+                                />
+                            {:else}
+                                <span>Unknown action</span>
+                            {/if}
                         </div>
 
                         {#if proposal.metadata}
