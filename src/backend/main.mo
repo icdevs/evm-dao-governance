@@ -17,9 +17,9 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
     evmdaobridgeArgs : ?EvmDaoBridge.InitArgs;
     ttArgs : ?TT.InitArgList;
   }
-) = this {
+) : async Service.Service = this {
   transient let thisPrincipal = Principal.fromActor(this);
-  stable var _owner = deployer.caller;
+  var _owner = deployer.caller;
 
   transient let initManager = ClassPlus.ClassPlusInitializationManager(_owner, thisPrincipal, true);
   transient let evmdaobridgeInitArgs = do ? { args!.evmdaobridgeArgs! };
@@ -35,7 +35,7 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
     null;
   };
 
-  stable var tt_migration_state : TT.State = TT.Migration.migration.initialState;
+  var tt_migration_state : TT.State = TT.Migration.migration.initialState;
 
   transient let tt = TT.Init<system>({
     manager = initManager;
@@ -62,7 +62,7 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
     onStorageChange = func(state : TT.State) { tt_migration_state := state };
   });
 
-  stable var localLog_migration_state : Log.State = Log.initialState();
+  var localLog_migration_state : Log.State = Log.initialState();
   transient let localLog = Log.Init<system>({
     args = ?{
       min_level = ?#Debug;
@@ -87,7 +87,7 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
 
   transient let _d = localLog().log_debug;
 
-  stable var evmdaobridge_migration_state : EvmDaoBridge.State = EvmDaoBridge.initialState();
+  var evmdaobridge_migration_state : EvmDaoBridge.State = EvmDaoBridge.initialState();
 
   transient let evmdaobridge = EvmDaoBridge.Init<system>({
     manager = initManager;
