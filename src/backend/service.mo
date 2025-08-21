@@ -277,9 +277,6 @@ module {
     icrc149_update_admin_principal : (Principal, Bool) -> async Result<(), Text>;
     icrc149_update_evm_rpc_canister : (Principal) -> async Result<(), Text>;
 
-    // Get proposals with pagination and filtering
-    icrc149_get_proposals : query (?Nat, ?Nat, [ProposalInfoFilter]) -> async [ProposalWithTally];
-
     // Get proposal snapshot for a specific proposal
     icrc149_proposal_snapshot : query (Nat) -> async ProposalSnapshot;
 
@@ -289,32 +286,73 @@ module {
     // Witness Verification for ETH Proofs
     icrc149_verify_witness : (Witness, ?Nat) -> async WitnessResult;
 
+    // Test helper function to add snapshots for testing with chain_id
+    icrc149_add_test_snapshot : (Nat, Nat, Blob, Text, Nat, Text) -> async ();
+
     // Proposal - Updated to include snapshot_contract
     icrc149_create_proposal : (CreateProposalRequest) -> async Result<Nat, Text>;
     icrc149_vote_proposal : (VoteArgs) -> async Result<(), Text>;
-    // Deprecated: Tally data is now included in icrc149_get_proposals
-    // icrc149_tally_votes: (Nat) -> async TallyResult;
     icrc149_execute_proposal : (Nat) -> async Result<Text, Text>;
 
-    // ETH Integration
-    icrc149_get_eth_tx_status : query (Text) -> async Text;
+    // Helper functions for getting proposals
+    icrc149_get_proposal : (Nat) -> async ?Proposal;
+    icrc149_get_proposals : query (?Nat, ?Nat, [ProposalInfoFilter]) -> async [ProposalWithTally];
 
-    // ECDSA Address Management
-    icrc149_get_ethereum_address : query (?Blob) -> async Text;
+    // User Vote Queries
+    icrc149_get_user_votes : query ([{ proposal_id : Nat; user_address : Text }]) -> async [{
+      proposal_id : Nat;
+      user_address : Text;
+      vote : ?{ #Yes; #No; #Abstain };
+    }];
+    icrc149_get_user_vote : query (Nat, Text) -> async ?{ #Yes; #No; #Abstain };
+    icrc149_has_user_voted : query (Nat, Text) -> async Bool;
+    icrc149_get_proposal_with_user_vote : query (Nat, ?Text) -> async ?{
+      proposal : Proposal;
+      user_vote : ?{ #Yes; #No; #Abstain };
+      user_has_voted : Bool;
+    };
 
     // Admin
     icrc149_set_controller : (Principal) -> async Result<(), Text>;
-    icrc149_set_default_snapshot_contract : (?Text) -> async Result<(), Text>;
     icrc149_health_check : query () -> async Text;
-
-    // Test function for parallel RPC calls
-    test_parallel_rpc_calls : (Text) -> async {
-      #Ok : (Nat, Nat, Nat);
-      #Err : Text;
-    };
 
     // Standard Compliance
     icrc10_supported_standards : query () -> async [{ name : Text; url : Text }];
+
+    // Testing helpers
+    test_add_snapshot : (Text, Nat, Text) -> async Result<(), Text>;
+    icrc149_calculate_test_storage_key : query (Blob, Nat) -> async Blob;
+    test_get_snapshot_info : query (Text) -> async ?{
+      block_number : Nat;
+      root_hash : Text;
+    };
+
+    // ECDSA Address Management
+    icrc149_get_ethereum_address : (?Blob) -> async Text;
+
+    // Admin function to set default snapshot contract
+    icrc149_set_default_snapshot_contract : (?Text) -> async Result<(), Text>;
+
+    // Admin function to update proposal duration in nanoseconds
+    icrc149_update_proposal_duration : (Nat) -> async Result<(), Text>;
+
+    // Test function for parallel RPC calls
+    test_parallel_rpc_calls : (Principal) -> async Result<(Nat, Nat, Nat), Text>;
+
+    // Admin function to manually fix stuck proposals
+    icrc149_admin_fix_stuck_proposal : (Nat) -> async Result<Text, Text>;
+
+    // Debug function to check queue status
+    debug_queue_status : query () -> async {
+      queue_size : Nat;
+      processed_size : Nat;
+      last_processed_sequence : Nat;
+      queue_entries : [(Nat, { proposal_id : Nat; status : Text; hash : ?Text })];
+      processed_entries : [(Nat, { proposal_id : Nat; status : Text; hash : ?Text })];
+    };
+
+    // Sample function
+    hello : () -> async Text;
   };
 
 };
