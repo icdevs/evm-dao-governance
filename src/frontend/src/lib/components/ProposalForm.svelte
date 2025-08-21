@@ -199,13 +199,11 @@
         metadata = "";
     }
 
-    function toggleErc20Mode() {
-        erc20Mode = !erc20Mode;
-        if (!erc20Mode) {
-            erc20Recipient = "";
-            erc20Amount = "";
-            ethData = "";
-        }
+    // Reactive statement to reset ERC20 fields when unchecked
+    $: if (!erc20Mode) {
+        erc20Recipient = "";
+        erc20Amount = "";
+        ethData = "";
     }
 </script>
 
@@ -272,17 +270,25 @@
             <div class="eth-transaction-section">
                 <h3>Ethereum Transaction Details</h3>
 
-                <!-- ERC20 Helper Toggle -->
+                <!-- ERC20/Manual Mode Toggle -->
                 <div class="form-group">
-                    <label class="checkbox-label">
-                        <input
-                            type="checkbox"
-                            bind:checked={erc20Mode}
-                            on:change={toggleErc20Mode}
+                    <label>Transaction Mode</label>
+                    <div class="toggle-group">
+                        <button
+                            type="button"
+                            class:active={!erc20Mode}
+                            on:click={() => (erc20Mode = false)}
                             disabled={isSubmitting || !hasAllDependencies}
-                        />
-                        Use ERC20 Token Transfer Helper
-                    </label>
+                            >Manual</button
+                        >
+                        <button
+                            type="button"
+                            class:active={erc20Mode}
+                            on:click={() => (erc20Mode = true)}
+                            disabled={isSubmitting || !hasAllDependencies}
+                            >ERC20 Token</button
+                        >
+                    </div>
                 </div>
 
                 {#if erc20Mode}
@@ -689,6 +695,40 @@
         cursor: not-allowed;
         transform: none;
         box-shadow: none;
+        opacity: 0.6;
+    }
+
+    .toggle-group {
+        display: flex;
+        gap: 1rem;
+        margin-top: 0.5rem;
+    }
+
+    .toggle-group button {
+        padding: 0.5rem 1.5rem;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        background: var(--color-surface-secondary);
+        color: var(--color-text-primary);
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        outline: none;
+    }
+
+    .toggle-group button.active,
+    .toggle-group button:active {
+        background: var(--color-primary);
+        color: white;
+        border-color: var(--color-primary);
+    }
+
+    .toggle-group button:disabled {
+        background: var(--color-bg-secondary);
+        color: var(--color-text-muted);
+        border-color: var(--color-border-light);
+        cursor: not-allowed;
         opacity: 0.6;
     }
 

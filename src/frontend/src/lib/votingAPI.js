@@ -3,6 +3,7 @@
 import { ethers } from 'ethers';
 import { createTransferData, parseTokenAmount, getNetworkInfo } from './utils.js';
 import { getERC20BalanceStorageKey } from "./storageUtils.js"
+import { Principal } from "@dfinity/principal";
 
 // Get contract configuration from canister
 export async function getContractConfig(backendActor, contractAddress) {
@@ -88,7 +89,7 @@ export async function createProposal(proposalData, dependencies) {
 
         case 'icp_call':
             proposal.type = 'icp_call';
-            proposal.canister = proposalData.icpCanister;
+            proposal.canister = Principal.fromText(proposalData.icpCanister);
             proposal.method = proposalData.icpMethod;
             proposal.args = proposalData.icpArgs.startsWith('0x')
                 ? proposalData.icpArgs
@@ -136,9 +137,7 @@ function getActionVariant(proposal) {
                 EthTransaction: {
                     to: proposal.to,
                     value: BigInt(proposal.value),
-                    data: new Uint8Array(
-                        Buffer.from(proposal.data.slice(2), 'hex')
-                    ),
+                    data: hexToBytes(proposal.data),
                     chain: {
                         chain_id: BigInt(proposal.chainId),
                         network_name: proposal.networkName,
@@ -157,9 +156,7 @@ function getActionVariant(proposal) {
                 ICPCall: {
                     canister: proposal.canister,
                     method: proposal.method,
-                    args: new Uint8Array(
-                        Buffer.from(proposal.args.replace('0x', ''), 'hex')
-                    ),
+                    args: hexToBytes(proposal.args),
                     cycles: BigInt(proposal.cycles),
                     best_effort_timeout: [],
                     result: [],
@@ -169,6 +166,17 @@ function getActionVariant(proposal) {
         default:
             throw new Error(`Unknown proposal type: ${proposal.type}`);
     }
+}
+
+// Helper: convert hex string to Uint8Array
+function hexToBytes(hex) {
+    hex = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (hex.length === 0) return new Uint8Array();
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    }
+    return bytes;
 }
 
 // Load proposals with optional filtering

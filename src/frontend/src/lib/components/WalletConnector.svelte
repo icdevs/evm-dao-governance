@@ -57,6 +57,11 @@
     async function handleNetworkSelected(chainId) {
         await handleSwitchNetwork(chainId);
     }
+
+    // Ensure networkInfo is always up-to-date when wallet is connected and chainId changes
+    $: if ($walletStore.state === "connected" && currentChainId) {
+        networkInfo = getNetworkInfo(currentChainId);
+    }
     // Auto-connect MetaMask on page load if available, not already connected, and user previously connected
     $: if (
         metamaskAvailable &&

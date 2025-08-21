@@ -18,7 +18,7 @@
     // State
     let showCreateProposal = false;
     let showContractDropdown = false;
-    let proposalFilter = "any";
+    let proposalFilter = "active";
     let dashboardRefreshFn = null;
     let isDashboardLoading = false;
     let isGlobalRefreshing = false;

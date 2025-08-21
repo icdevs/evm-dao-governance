@@ -1,5 +1,5 @@
 <script>
-    import { proposalsStore } from "../stores/proposals.js";
+    import { proposalsStore, getUserVotingData } from "../stores/proposals.js";
     import { walletStore } from "../stores/wallet.js";
     import { configStore } from "../stores/config.js";
     import { statusStore } from "../stores/status.js";
@@ -12,7 +12,7 @@
     import { formatTokenAmount } from "../utils.js";
 
     // Export filter prop
-    export let filter = "any"; // any, active, executed, expired, pending, rejected
+    export let filter = "active"; // any, active, executed, expired, pending, rejected
 
     // Store subscriptions
     $: proposalsData = $proposalsStore;
@@ -21,7 +21,9 @@
     $: backendActor = $agentStore.actor;
 
     // Derived values
-    $: proposals = proposalsData.proposals || [];
+    $: proposals = (proposalsData.proposals || [])
+        .slice()
+        .sort((a, b) => b.createdAt - a.createdAt);
     $: loading = proposalsData.loading;
     $: error = proposalsData.error;
     $: isAuthenticated = walletData.state === "connected";
@@ -38,8 +40,36 @@
     let totalTokenSupply = 0;
     let isLoadingBalance = false;
 
-    // User voting state (for demo purposes - in real app this would come from backend)
-    let userVotes = {}; // proposalId -> 'yes' | 'no' | null
+    // User voting state (loaded from backend)
+    let userVotes = {}; // proposalId -> 'Yes' | 'No' | 'Abstain' | null
+
+    // Load user votes when proposals, user, or backendActor change
+    $: if (
+        isAuthenticated &&
+        userAddress &&
+        proposals.length > 0 &&
+        backendActor
+    ) {
+        loadUserVotes();
+    }
+
+    async function loadUserVotes() {
+        try {
+            const result = await getUserVotingData(
+                backendActor,
+                userAddress,
+                proposals
+            );
+            // Convert Map to plain object for Svelte reactivity
+            userVotes = {};
+            for (const [proposalId, vote] of result.existingVotes.entries()) {
+                userVotes[proposalId] = vote;
+            }
+        } catch (err) {
+            console.error("Failed to load user votes:", err);
+            userVotes = {};
+        }
+    }
 
     // Filter proposals based on selected filter
     $: filteredProposals =
@@ -157,7 +187,7 @@
 
     function getTallyPercentage(votes, total) {
         if (total === 0 || !votes || !total) return 0;
-        const percentage = Math.round((Number(votes) / Number(total)) * 100);
+        const percentage = (Number(votes) / Number(total)) * 100;
         return isNaN(percentage) ? 0 : percentage;
     }
 
@@ -323,7 +353,7 @@
                                         <div class="percentage">
                                             {getTallyPercentage(
                                                 proposal.tally.yes,
-                                                proposal.tally.total
+                                                totalTokenSupply
                                             )}%
                                         </div>
                                     </div>
@@ -335,7 +365,7 @@
                                         <div class="percentage">
                                             {getTallyPercentage(
                                                 proposal.tally.no,
-                                                proposal.tally.total
+                                                totalTokenSupply
                                             )}%
                                         </div>
                                     </div>
@@ -362,20 +392,20 @@
                                         aria-valuemin="0"
                                         aria-valuenow={proposal.tally.yes +
                                             proposal.tally.no}
-                                        aria-valuemax={proposal.tally.total}
+                                        aria-valuemax={totalTokenSupply}
                                     >
                                         <div
                                             class="Yes"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.yes,
-                                                proposal.tally.total
+                                                totalTokenSupply
                                             )}%;"
                                         ></div>
                                         <div
                                             class="No"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.no,
-                                                proposal.tally.total
+                                                totalTokenSupply
                                             )}%;"
                                         ></div>
                                     </div>
@@ -776,19 +806,16 @@
         overflow: hidden;
     }
 
-    .progressbar .yes {
-        background: linear-gradient(90deg, #28a745, #34ce57);
+    .progressbar .Yes {
+        background: var(--color-success, #28a745);
         height: 100%;
-        transition: width 0.3s ease;
-        border-radius: 7px 0 0 7px;
+        transition: width 0.4s;
     }
 
-    .progressbar .no {
-        background: linear-gradient(90deg, #dc3545, #e74c61);
+    .progressbar .No {
+        background: var(--color-danger, #dc3545);
         height: 100%;
-        transition: width 0.3s ease;
-        border-radius: 0 7px 7px 0;
-        margin-left: auto;
+        transition: width 0.4s;
     }
 
     /* Vote Counts */

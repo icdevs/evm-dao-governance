@@ -1318,7 +1318,6 @@
     .add-contract-section {
         margin-top: 1.5rem;
         padding-top: 1.5rem;
-        border-top: 1px solid var(--color-border-light, #e0e0e0);
     }
 
     .add-contract-form {
