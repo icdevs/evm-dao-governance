@@ -269,60 +269,59 @@ module {
   };
   public type ValidationError = { #Custom : Text; #InvalidHex : Text };
 
-    //user defined
+  //user defined
   public type RequestResponse = {
     jsonrpc : Text;
     result : Text;
     id : Nat;
   };
-  
 
-  public type Service =  actor {
+  public type Service = actor {
     eth_call : shared (
-        RpcServices,
-        ?RpcConfig,
-        CallArgs,
-      ) -> async MultiCallResult;
+      RpcServices,
+      ?RpcConfig,
+      CallArgs,
+    ) -> async MultiCallResult;
     eth_feeHistory : shared (
-        RpcServices,
-        ?RpcConfig,
-        FeeHistoryArgs,
-      ) -> async MultiFeeHistoryResult;
+      RpcServices,
+      ?RpcConfig,
+      FeeHistoryArgs,
+    ) -> async MultiFeeHistoryResult;
     eth_getBlockByNumber : shared (
-        RpcServices,
-        ?RpcConfig,
-        BlockTag,
-      ) -> async MultiGetBlockByNumberResult;
+      RpcServices,
+      ?RpcConfig,
+      BlockTag,
+    ) -> async MultiGetBlockByNumberResult;
     eth_getLogs : shared (
-        RpcServices,
-        ?RpcConfig,
-        GetLogsArgs,
-      ) -> async MultiGetLogsResult;
+      RpcServices,
+      ?RpcConfig,
+      GetLogsArgs,
+    ) -> async MultiGetLogsResult;
     eth_getTransactionCount : shared (
-        RpcServices,
-        ?RpcConfig,
-        GetTransactionCountArgs,
-      ) -> async MultiGetTransactionCountResult;
+      RpcServices,
+      ?RpcConfig,
+      GetTransactionCountArgs,
+    ) -> async MultiGetTransactionCountResult;
     eth_getTransactionReceipt : shared (
-        RpcServices,
-        ?RpcConfig,
-        Text,
-      ) -> async MultiGetTransactionReceiptResult;
+      RpcServices,
+      ?RpcConfig,
+      Text,
+    ) -> async MultiGetTransactionReceiptResult;
     eth_sendRawTransaction : shared (
-        RpcServices,
-        ?RpcConfig,
-        Text,
-      ) -> async MultiSendRawTransactionResult;
+      RpcServices,
+      ?RpcConfig,
+      Text,
+    ) -> async MultiSendRawTransactionResult;
     getMetrics : shared query () -> async Metrics;
     getNodesInSubnet : shared query () -> async Nat32;
     getProviders : shared query () -> async [Provider];
     getServiceProviderMap : shared query () -> async [(RpcService, ProviderId)];
     request : shared (RpcService, Text, Nat64) -> async RequestResult;
     requestCost : shared query (
-        RpcService,
-        Text,
-        Nat64,
-      ) -> async RequestCostResult;
+      RpcService,
+      Text,
+      Nat64,
+    ) -> async RequestCostResult;
     updateApiKeys : shared [(ProviderId, ?Text)] -> async ();
-  }
-}
+  };
+};

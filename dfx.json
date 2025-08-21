@@ -17,15 +17,6 @@
         "src/frontend/dist"
       ],
       "type": "assets"
-    },
-    "frontend_old": {
-      "dependencies": [
-        "backend"
-      ],
-      "source": [
-        "src/frontend_old/dist"
-      ],
-      "type": "assets"
     }
   },
   "defaults": {
