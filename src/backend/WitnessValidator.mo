@@ -82,7 +82,7 @@ module {
     // Pad user address to 32 bytes (left-padded with zeros for abi.encode semantics)
     var paddedUserBytes = Array.init<Nat8>(32, 0);
     if (userBytes.size() <= 32) {
-      let startIndex = 32 - userBytes.size();
+      let startIndex : Nat = 32 - userBytes.size();
       for (i in Iter.range(0, userBytes.size() - 1)) {
         paddedUserBytes[startIndex + i] := userBytes[i];
       };

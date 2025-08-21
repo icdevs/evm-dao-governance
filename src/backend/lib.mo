@@ -448,7 +448,7 @@ module {
                       case (_) 6; // All other chains
                     };
 
-                    let targetBlockNumber = if (latestBlock.number > confirmationBlocks) {
+                    let targetBlockNumber : Nat = if (latestBlock.number > confirmationBlocks) {
                       latestBlock.number - confirmationBlocks;
                     } else {
                       latestBlock.number;
@@ -669,7 +669,6 @@ module {
                       D.print("🔧 TOTAL_SUPPLY: Trimmed hex string: " # finalHex # " (removed leading zeros)");
 
                       var totalSupply : Nat = 0;
-                      var multiplier : Nat = 1;
                       let chars = Text.toArray(cleanHex);
                       var i = chars.size();
 
@@ -2008,8 +2007,9 @@ module {
         let parts = Text.split(statement, #text(" "));
         let partsArray = Iter.toArray(parts);
         var found_contract = false;
-        for (i in Iter.range(0, partsArray.size() - 1)) {
-          if (i < partsArray.size() - 1 and partsArray[i] == "contract") {
+        let lastIndex : Nat = partsArray.size() - 1;
+        for (i in Iter.range(0, lastIndex)) {
+          if (i < lastIndex and partsArray[i] == "contract") {
             contract_address := partsArray[i + 1];
             found_contract := true;
             D.print("✅ SIWE: Found contract address: " # contract_address);
@@ -2183,13 +2183,6 @@ module {
       };
 
       #Ok((vote_choice, proposal_id, contract_address));
-    };
-
-    // Helper function to parse ISO 8601 timestamp to nanoseconds
-    private func parseTimestamp(timestamp : Text) : Nat {
-      // For now, return current time as a placeholder
-      // TODO: Implement proper ISO 8601 parsing
-      natNow();
     };
 
     // CRITICAL: Real SIWE signature verification - NO MOCKING ALLOWED
@@ -2384,7 +2377,8 @@ module {
       let hashArray = keccak.finalize();
 
       // Take the last 20 bytes as the Ethereum address
-      let addressBytes = Array.subArray(hashArray, hashArray.size() - 20, 20);
+      let startIndex : Nat = hashArray.size() - 20;
+      let addressBytes = Array.subArray(hashArray, startIndex, 20);
 
       // Convert to hex string with 0x prefix
       BaseX.toHex(addressBytes.vals(), { isUpper = true; prefix = #single("0x") });
@@ -2576,7 +2570,7 @@ module {
                 case (null) {
                   return #Err("No stored snapshot found for block number " # Nat.toText(witness.blockNumber));
                 };
-                case (?(pid, snapshot)) { snapshot.state_root };
+                case (?(_, snapshot)) { snapshot.state_root };
               };
             };
           };

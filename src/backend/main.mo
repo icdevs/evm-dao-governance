@@ -6,7 +6,6 @@ import Nat "mo:base/Nat";
 import Principal "mo:base/Principal";
 import ClassPlus "mo:class-plus";
 import TT "mo:timer-tool";
-import ICRC10 "mo:icrc10-mo";
 import Log "mo:stable-local-log";
 
 import EvmDaoBridge ".";
@@ -18,15 +17,13 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
     evmdaobridgeArgs : ?EvmDaoBridge.InitArgs;
     ttArgs : ?TT.InitArgList;
   }
-) : Service = this {
+) = this {
   transient let thisPrincipal = Principal.fromActor(this);
   stable var _owner = deployer.caller;
 
   transient let initManager = ClassPlus.ClassPlusInitializationManager(_owner, thisPrincipal, true);
   transient let evmdaobridgeInitArgs = do ? { args!.evmdaobridgeArgs! };
   transient let ttInitArgs : ?TT.InitArgList = do ? { args!.ttArgs! };
-
-  stable var icrc10 = ICRC10.initCollection();
 
   private func reportTTExecution(execInfo : TT.ExecutionReport) : Bool {
     D.print("CANISTER: TimerTool Execution: " # debug_show (execInfo));
@@ -107,7 +104,7 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
       }
     );
     onInitialize = ?(
-      func(newClass : EvmDaoBridge.EvmDaoBridge) : async* () {
+      func(_ : EvmDaoBridge.EvmDaoBridge) : async* () {
         D.print("Initializing EvmDaoBridge Class");
       }
     );
@@ -206,7 +203,14 @@ shared (deployer) persistent actor class EvmDaoBridgeCanister<system>(
   };
 
   // Test helper function to add snapshots for testing with chain_id
-  public shared (msg) func icrc149_add_test_snapshot(proposal_id : Nat, block_number : Nat, state_root : Blob, contract_address : Text, chain_id : Nat, network_name : Text) : async () {
+  public shared func icrc149_add_test_snapshot(
+    proposal_id : Nat,
+    block_number : Nat,
+    state_root : Blob,
+    contract_address : Text,
+    chain_id : Nat,
+    network_name : Text,
+  ) : async () {
     D.print("Adding test snapshot for validation testing with chain_id: " # Nat.toText(chain_id));
     evmdaobridge.icrc149_add_test_snapshot_with_chain(proposal_id, block_number, state_root, contract_address, chain_id, network_name);
   };
