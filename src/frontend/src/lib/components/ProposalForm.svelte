@@ -271,8 +271,8 @@
                 <h3>Ethereum Transaction Details</h3>
 
                 <!-- ERC20/Manual Mode Toggle -->
-                <div class="form-group">
-                    <label>Transaction Mode</label>
+                <fieldset class="form-group">
+                    <legend>Transaction Mode</legend>
                     <div class="toggle-group">
                         <button
                             type="button"
@@ -289,7 +289,7 @@
                             >ERC20 Token</button
                         >
                     </div>
-                </div>
+                </fieldset>
 
                 {#if erc20Mode}
                     <!-- ERC20 Transfer Helper -->
@@ -589,17 +589,6 @@
         font-weight: 600;
         color: var(--color-text-primary);
         font-size: 0.9rem;
-    }
-
-    .checkbox-label {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        cursor: pointer;
-    }
-
-    .checkbox-label input[type="checkbox"] {
-        margin: 0;
     }
 
     .form-control,
