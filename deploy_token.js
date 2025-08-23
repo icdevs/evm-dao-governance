@@ -129,9 +129,25 @@ async function deployToken() {
         console.log('⚠️  Could not get or fund canister address:', error.message);
     }
     
-    console.log('�📍 Contract Address:', contractAddress);
+    
+    console.log('📍 Contract Address:', contractAddress);
     console.log('💰 Each user address now has 100 GOV tokens');
     console.log('💰 Canister has 100 GOV tokens and 1 ETH for transactions');
+    
+    // Add contract to backend configuration
+    console.log('🏗️  Adding contract to backend configuration...');
+    try {
+        const result = execSync(
+            `dfx canister call --network local backend icrc149_update_snapshot_contract_config '("${contractAddress}", opt record { contract_address = "${contractAddress}"; chain = record { chain_id = 31337; network_name = "anvil" }; rpc_service = record { rpc_type = "local"; canister_id = principal "7hfb6-caaaa-aaaar-qadga-cai"; custom_config = null }; balance_storage_slot = 1; contract_type = variant { ERC20 }; enabled = true })'`,
+            { encoding: 'utf8', stdio: 'pipe' }
+        );
+        
+        console.log('✅ Contract added to backend configuration!');
+        console.log('💡 Contract is now available for proposal creation');
+    } catch (error) {
+        console.log('⚠️  Failed to add contract to backend:', error.message);
+        console.log('💡 You can add it manually via the frontend configuration panel');
+    }
     
     return contractAddress;
 }

@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EthDAOs</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #333;
+            font-size: 1.5em;
+            font-weight: 500;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .combo-input {
+            position: relative;
+        }
+        
+        .combo-input select {
+            appearance: none;
+            background: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") no-repeat right 0.75rem center/1.25rem 1.25rem;
+            padding-right: 2.5rem;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #e83e8c 100%);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-weight: 500;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .status.warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        
+        .proposal-card {
+            background: white;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            transition: all 0.3s;
+        }
+        
+        .proposal-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.1);
+        }
+        
+        .proposal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .proposal-id {
+            font-weight: 700;
+            color: #667eea;
+            font-size: 1.1em;
+        }
+        
+        .proposal-status {
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-active {
+            background: #e7f5e7;
+            color: #2d7d2d;
+        }
+        
+        .status-passed {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-executed {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .vote-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .vote-buttons button {
+            flex: 1;
+            margin: 0;
+        }
+        
+        .network-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .network-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+        
+        .network-indicator.connected {
+            background: #28a745;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .vote-tally {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .tally-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .tally-bar {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        
+        .tally-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+        
+        .tally-yes { background: #28a745; }
+        .tally-no { background: #dc3545; }
+        .tally-abstain { background: #6c757d; }
+        
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        
+        /* Pagination Styles */
+        .pagination-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+        }
+        
+        .pagination-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-weight: 500;
+            color: #555;
+        }
+        
+        .per-page-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .per-page-selector label {
+            margin: 0;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .per-page-selector select {
+            width: auto;
+            min-width: 60px;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .pagination-controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-top: 30px;
+            padding: 20px;
+        }
+        
+        .pagination-btn {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            color: #555;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            margin: 0;
+        }
+        
+        .pagination-btn:hover:not(.disabled) {
+            background: #f8f9fa;
+            border-color: #667eea;
+            color: #667eea;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .pagination-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+        }
+        
+        .pagination-btn.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #f8f9fa;
+            color: #999;
+        }
+        
+        .pagination-ellipsis {
+            padding: 8px 4px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .page-btn {
+            min-width: 40px;
+        }
+        
+        .proposals-list {
+            margin: 0;
+        }
+        
+        @media (max-width: 768px) {
+            .form-row {
+                flex-direction: column;
+            }
+            
+            .proposal-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .vote-buttons {
+                flex-direction: column;
+            }
+            
+            .pagination-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+            
+            .pagination-info {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+                width: 100%;
+            }
+            
+            .pagination-controls {
+                flex-wrap: wrap;
+                gap: 5px;
+            }
+            
+            .pagination-btn {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            
+            .page-btn {
+                min-width: 35px;
+            }
+        }
+        
+        /* Balance Section Styles */
+        .balance-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .balance-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .balance-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        
+        .balance-item label {
+            font-weight: 600;
+            color: #495057;
+            min-width: 150px;
+        }
+        
+        .address-display {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #667eea;
+            max-width: 200px;
+            word-break: break-all;
+            margin-right: 10px;
+        }
+        
+        .balance-display {
+            font-weight: 700;
+            color: #28a745;
+            font-size: 1.1em;
+        }
+        
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 0.8em;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-small:hover {
+            background: #5a67d8;
+        }
+        
+        #refreshBalancesBtn {
+            margin-top: 15px;
+            padding: 8px 16px;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .balance-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+            
+            .address-display {
+                max-width: 100%;
+                margin-right: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗳️ EthDAOs</h1>
+            <p>Vote with tokens</p>
+        </div>
+        
+        <div class="content">
+            <!-- Connection Status -->
+            <div class="network-status">
+                <div class="network-indicator" id="networkIndicator"></div>
+                <span id="networkStatus">Disconnected</span>
+                <button id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+            </div>
+            
+            <!-- Configuration Section -->
+            <div class="section">
+                <h2>🔧 Configuration</h2>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="canisterId">DAO Canister ID</label>
+                        <input type="text" id="canisterId" placeholder="u6s2n-gx777-77774-qaaba-cai" value="" maxlength="64" oninput="onCanisterIdChange()">
+                    </div>
+                    <div class="form-group">
+                        <label for="environment">Environment</label>
+                        <select id="environment" onchange="updateEnvironment()">
+                            <option value="local">Local Development</option>
+                            <option value="ic">Internet Computer</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="chainId">Chain ID</label>
+                        <div class="combo-input">
+                            <select id="chainIdSelect" onchange="updateChainId()" value="42161">
+                                <option value="">Select Chain...</option>
+                                <option value="1">Ethereum Mainnet (1)</option>
+                                <option value="11155111">Sepolia Testnet (11155111)</option>
+                                <option value="137">Polygon Mainnet (137)</option>
+                                <option value="80001">Polygon Mumbai (80001)</option>
+                                <option value="42161">Arbitrum One (42161)</option>
+                                <option value="421613">Arbitrum Goerli (421613)</option>
+                                <option value="10">Optimism (10)</option>
+                                <option value="420">Optimism Goerli (420)</option>
+                                <option value="31337">Local/Anvil (31337)</option>
+                                <option value="custom">Custom...</option>
+                            </select>
+                        </div>
+                        <input type="number" id="chainIdInput" placeholder="Enter custom chain ID" value="42161" class="hidden">
+                    </div>
+                    <div class="form-group">
+                        <label for="contractAddress">Contract Address</label>
+                        <input type="text" id="contractAddress" placeholder="0x..." value="0x5FbDB2315678afecb367f032d93F642f64180aa3" maxlength="42">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="loadProposals()" id="loadProposalsBtn">
+                        <span class="loading hidden" id="loadingSpinner"></span>
+                        Load Proposals
+                    </button>
+                    <button onclick="discoverStorageSlot()" class="btn-warning" id="discoverSlotBtn">
+                        Discover Storage Slot
+                    </button>
+                </div>
+            </div>
+            
+            <!-- DAO Balance Section -->
+            <div class="section">
+                <h2>💰 DAO Canister Balance</h2>
+                <div id="balanceContainer">
+                    <div class="balance-info">
+                        <div class="balance-item">
+                            <label>Canister Ethereum Address:</label>
+                            <span id="canisterAddress" class="address-display">-</span>
+                            <button id="copyAddressBtn" class="btn-small" title="Copy address">📋</button>
+                        </div>
+                        <div class="balance-item">
+                            <label>Native ETH Balance:</label>
+                            <span id="ethBalance" class="balance-display">-</span>
+                        </div>
+                        <div class="balance-item">
+                            <label>Token Balance:</label>
+                            <span id="tokenBalance" class="balance-display">-</span>
+                        </div>
+                        <button id="refreshBalancesBtn" class="btn-small">
+                            <span class="loading hidden" id="balanceLoadingSpinner"></span>
+                            🔄 Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>            <!-- Proposals Section -->
+            <div class="section">
+                <h2>📋 Proposals</h2>
+                <div id="proposalsContainer">
+                    <div class="status info">
+                        Configure the settings above and click "Load Proposals" to view available proposals.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Status Messages -->
+            <div id="statusMessages"></div>
+        </div>
+    </div>
+
+    <script type="module" src="./index.js"></script>
+</body>
+</html>

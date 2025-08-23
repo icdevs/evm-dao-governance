@@ -3,7 +3,8 @@ package-lock.json
 .mops/
 .dfx/
 node_modules
-js/dist/
+src/frontend/dist/
+src/frontend_old/dist/
 cache/
 
 # Token deployment artifacts
@@ -13,3 +14,6 @@ check_contract.js
 transfer_tokens.js
 forge-out/
 package.json
+
+.svelte-kit/
+.env

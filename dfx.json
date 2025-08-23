@@ -1,7 +1,7 @@
 {
   "canisters": {
-    "main": {
-      "main": "./src/main.mo",
+    "backend": {
+      "main": "./src/backend/main.mo",
       "type": "motoko",
       "gzip": true
     },
@@ -11,15 +11,12 @@
     },
     "frontend": {
       "dependencies": [
-        "main"
+        "backend"
       ],
       "source": [
-        "js/dist"
+        "src/frontend/dist"
       ],
-      "type": "assets",
-      "declarations": {
-        "output": "js/declarations"
-      }
+      "type": "assets"
     }
   },
   "defaults": {
@@ -28,5 +25,6 @@
       "packtool": "mops sources"
     }
   },
+  "output_env_file": ".env",
   "version": 1
 }
