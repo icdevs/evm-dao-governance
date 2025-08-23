@@ -14,39 +14,34 @@ async function deployToken() {
     
     // Check if forge is available for compilation
     let contractBytecode, contractABI;
+    
+    console.log('📦 Compiling contract with forge...');
     try {
-        console.log('📦 Compiling contract with forge...');
         execSync('forge --version', { stdio: 'pipe' });
-        
-        // Compile the contract
-        execSync('forge build --contracts GovernanceToken.sol --out forge-out', { stdio: 'inherit' });
-        
-        // Read the compiled contract
-        const artifactPath = 'forge-out/GovernanceToken.sol/GovernanceToken.json';
-        if (fs.existsSync(artifactPath)) {
-            const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-            contractBytecode = artifact.bytecode.object;
-            contractABI = artifact.abi;
-            console.log('✅ Contract compiled successfully with forge');
-        } else {
-            throw new Error('Compiled contract not found');
-        }
     } catch (error) {
-        console.log('⚠️  Forge not available, using pre-compiled bytecode...');
-        
-        // Fallback to basic ERC20 ABI and working bytecode
-        contractABI = [
-            "constructor(uint256 _initialSupply)",
-            "function transfer(address _to, uint256 _value) returns (bool)",
-            "function balanceOf(address) view returns (uint256)",
-            "function totalSupply() view returns (uint256)",
-            "function name() view returns (string)",
-            "function symbol() view returns (string)",
-            "function decimals() view returns (uint8)"
-        ];
-        
-        // Working simple ERC20 bytecode
-        contractBytecode = "0x608060405234801561001057600080fd5b5060405161059338038061059383398101604081905261002f91610054565b600281905533600081815260208190526040808220849055518392907fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef908290a35061006c565b60006020828403121561006657600080fd5b5051919050565b610518806100796000396000f3fe608060405234801561001057600080fd5b50600436106100885760003560e01c8063313ce5671161005b578063313ce567146100fe57806370a082311461010c57806395d89b4114610135578063a9059cbb1461013d57600080fd5b806306fdde031461008d57806318160ddd146100ab57806323b872dd146100bd57806327e235e3146100d0575b600080fd5b610095610150565b6040516100a291906103b8565b60405180910390f35b6002545b6040519081526020016100a2565b6100af6100cb366004610422565b610187565b005b6100af6100de36600461045e565b73ffffffffffffffffffffffffffffffffffffffff1660009081526020819052604090205490565b60405160128152602001610100a2565b6100af61011a36600461045e565b73ffffffffffffffffffffffffffffffffffffffff1660009081526020819052604090205490565b6100956102ba565b61014b61014b366004610479565b6102f1565b6040519015158152602001610100a2565b60408051808201909152601081527f476f7665726e616e636520546f6b656e00000000000000000000000000000000602082015290565b73ffffffffffffffffffffffffffffffffffffffff831660009081526020819052604090205481111561021b5760405162461bcd60e51b815260206004820152601360248201527f496e73756666696369656e742062616c616e636500000000000000000000000060448201526064015b60405180910390fd5b73ffffffffffffffffffffffffffffffffffffffff8084166000908152600160209081526040808320339094168352929052205481111561029e5760405162461bcd60e51b815260206004820152601560248201527f496e73756666696369656e7420616c6c6f77616e6365000000000000000000006044820152606401610212565b73ffffffffffffffffffffffffffffffffffffffff808416600081815260208181526040808320805487900390559386168083529184902080548601905592825260018152828220339093168252919091522080548390039055565b60408051808201909152600381527f474f560000000000000000000000000000000000000000000000000000000000602082015290565b600073ffffffffffffffffffffffffffffffffffffffff83166000908152602081905260409020548211156103685760405162461bcd60e51b815260206004820152601360248201527f496e73756666696369656e742062616c616e6365000000000000000000000000006044820152606401610212565b73ffffffffffffffffffffffffffffffffffffffff831660008181526020818152604080832080548790039055938616808352918490208054860190559251848152919290917fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef910160405180910390a350600192915050565b600060208083528351808285015260005b818110156103e5578581018301518582016040015282016103c9565b818111156103f7576000604083870101525b50601f01601f1916929092016040019392505050565b803573ffffffffffffffffffffffffffffffffffffffff8116811461041d57600080fd5b919050565b60008060006060848603121561043757600080fd5b610440846103f9565b925061044e602085016103f9565b9150604084013590509250925092565b60006020828403121561047057600080fd5b610479826103f9565b9392505050565b6000806040838503121561048c57600080fd5b610495836103f9565b94602093909301359350505056fea26469706673582212208a8de1f6e8b4e7d9d7b7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e764736f6c634300080d0033";
+        console.error('❌ Forge is required but not installed!');
+        console.error('');
+        console.error('Please install Foundry (which includes forge):');
+        console.error('curl -L https://foundry.paradigm.xyz | bash');
+        console.error('foundryup');
+        console.error('');
+        console.error('Then run this script again.');
+        process.exit(1);
+    }
+    
+    // Compile the contract
+    execSync('forge build --contracts GovernanceToken.sol --out forge-out', { stdio: 'inherit' });
+    
+    // Read the compiled contract
+    const artifactPath = 'forge-out/GovernanceToken.sol/GovernanceToken.json';
+    if (fs.existsSync(artifactPath)) {
+        const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+        contractBytecode = artifact.bytecode.object;
+        contractABI = artifact.abi;
+        console.log('✅ Contract compiled successfully with forge');
+    } else {
+        console.error('❌ Compiled contract not found at:', artifactPath);
+        process.exit(1);
     }
     
     // Deploy the contract
