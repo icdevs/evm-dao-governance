@@ -163,7 +163,7 @@ sequenceDiagram
 
 *[Original Video](https://youtu.be/Jbq0xfrzsPQ)*
 *[Quick Pitch](https://youtu.be/ddf5CDAK5BM)*
-*[Tech Dive](https://youtu.be/2ijebwRq2_w)
+*[Tech Dive](https://youtu.be/2ijebwRq2_w)*
 
 ## 🛠️ Build and Deployment Instructions
 
@@ -930,6 +930,6 @@ This project represents a significant advancement in cross-chain governance tech
 
 **🚀 Built with innovation, deployed with confidence**
 
-*For questions, collaboration opportunities, or technical support, please reach out through [GitHub Issues](https://github.com/icdevs/evm-dao-governance/issues) or connect with our team on the [IC Developer Discord](https://discord.gg/internetcomputer).*
+*For questions, collaboration opportunities, or technical support, please reach out through [GitHub Issues](https://github.com/icdevs/evm-dao-governance/issues).*
 
 **WCHL25 Team**: *Building the future of decentralized governance, one block at a time* ⛓️
