@@ -162,6 +162,8 @@ sequenceDiagram
 5. **Future Vision**: Roadmap for multi-chain governance expansion
 
 *[Original Video](https://youtu.be/Jbq0xfrzsPQ)*
+*[Quick Pitch](https://youtu.be/ddf5CDAK5BM)*
+*[Tech Dive](https://youtu.be/2ijebwRq2_w)
 
 ## 🛠️ Build and Deployment Instructions
 
@@ -170,7 +172,6 @@ sequenceDiagram
 -   [DFX](https://internetcomputer.org/docs/current/developer-docs/setup/install/) 0.15.0+
 -   [Mops](https://mops.one/) package manager
 -   [Node.js](https://nodejs.org/) 18+
--   [Vessel](https://github.com/dfinity/vessel) (alternative package manager)
 
 ### Installation
 
