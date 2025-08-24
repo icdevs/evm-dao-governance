@@ -152,16 +152,16 @@ sequenceDiagram
     F->>U: Show Updated Results
 ```
 
-### 🎬 Demo Video Quality
+### 🎬 Demo Video 
 
-**Watch our comprehensive demo** showcasing:
+**Watch our comprehensive demos** showcasing:
 1. **Problem Overview**: Why cross-chain governance matters
 2. **Live System Demo**: Complete voting workflow from MetaMask to IC
 3. **Technical Deep Dive**: Code walkthrough of key components
 4. **Architecture Explanation**: How ChainFusion enables trustless bridging
 5. **Future Vision**: Roadmap for multi-chain governance expansion
 
-*[Demo Video Link - To be added upon submission]*
+*[Original Video](https://youtu.be/Jbq0xfrzsPQ)*
 
 ## 🛠️ Build and Deployment Instructions
 
@@ -412,14 +412,9 @@ suite("ICRC149 Bridge Tests", func() {
 ### Success Metrics & KPIs
 
 **📈 Adoption Targets:**
-- **10+ Major DAOs** integrated within first year
-- **$100M+ in governed assets** across connected treasuries  
+- **2+ Major DAOs** integrated within first year
+- **$10M+ in governed assets** across connected treasuries  
 - **50,000+ cross-chain votes** facilitated through platform
-
-**💰 Revenue Projections:**
-- **Year 1**: $500K ARR from early adopter partnerships
-- **Year 2**: $2M ARR with expanded feature set and multi-chain support
-- **Year 3**: $10M ARR as cross-chain governance becomes standard
 
 ## 🎯 Utility & Real-World Value
 
@@ -465,7 +460,8 @@ suite("ICRC149 Bridge Tests", func() {
 
 1. **Austin Fatheree - Lead Backend Developer & Blockchain Architecture**
    - **Organization**: ICDevs.org / Pan Industrial
-   - **GitHub**: [@afat](https://github.com/afat)
+   - **GitHub**: [@skilesare](https://github.com/skilesare)
+   - **Twitter**: @afat
    - **Contributions**: 
      - ICRC-149 backend implementation and core governance logic
      - ChainFusion HTTP outcalls integration with EVM RPC
@@ -475,7 +471,8 @@ suite("ICRC149 Bridge Tests", func() {
 
 2. **Ethan Celletti - Frontend Developer & Proposal Engine**  
    - **Organization**: edgCase, DAOBall, DAOVenture
-   - **GitHub**: [@Gekctek](https://github.com/Gekctek)
+   - **GitHub**: [@Edjcase](https://github.com/Edjcase)
+   - **Twitter**: @Gekctek
    - **Contributions**:
      - Proposal engine architecture and lifecycle management
      - Modern Svelte frontend with MetaMask integration
@@ -483,26 +480,6 @@ suite("ICRC149 Bridge Tests", func() {
      - Real-time voting dashboard and proposal visualization
      - DAO ecosystem expertise from DAOBall and DAOVenture projects
 
-**Team Eligibility Compliance:**
-- ✅ **Team Size**: 2 members (within 2-5 requirement)
-- ✅ **Original Work**: All code developed during hackathon period
-- ✅ **IC Integration**: Extensive use of Internet Computer features
-- ✅ **Submission Deadline**: Completed within hackathon timeframe
-- ✅ **Experience**: Combined expertise in IC development and DAO governance ecosystems
-
-## 🏆 Bonus Points Achieved
-
-### ✅ Architecture & Flow Diagrams
-
-**System Architecture Diagram**: Comprehensive Mermaid diagrams showing:
-- Cross-chain interaction flows  
-- Component relationships and data flow
-- Security boundaries and trust assumptions
-
-**User Flow Diagrams**: Detailed sequence diagrams illustrating:
-- Complete voting workflow from wallet to execution
-- Error handling and edge cases
-- Real-time state synchronization
 
 ### ✅ Comprehensive Test Coverage
 
@@ -512,28 +489,13 @@ suite("ICRC149 Bridge Tests", func() {
 - **HTTP outcall verification** with actual blockchain interaction
 - **95%+ code coverage** across critical business logic
 
-### ✅ Frontend Deployed on ICP
+### Pending: Frontend Deployed on ICP
 
 **Modern Svelte Application**:
 - **Asset canister deployment** for decentralized hosting
 - **MetaMask integration** with seamless wallet connection
 - **Real-time updates** via WebSocket-like polling
 - **Responsive design** optimized for mobile and desktop
-
-### ✅ Exceptional UX Design
-
-**User-Centric Interface**:
-- **One-click governance** - Connect wallet, view proposals, vote with signature
-- **Real-time feedback** - Instant vote confirmation and result updates  
-- **Progressive disclosure** - Complex crypto operations hidden behind simple UI
-- **Accessibility compliance** - WCAG 2.1 standards for inclusive design
-- **Error recovery** - Clear error messages and suggested actions
-
-**Performance Optimization**:
-- **Lazy loading** for optimal bundle sizes
-- **Caching strategies** for frequently accessed data
-- **Optimistic updates** for improved perceived performance
-- **Progressive web app** features for mobile experience
 
 ### Basic Usage
 
