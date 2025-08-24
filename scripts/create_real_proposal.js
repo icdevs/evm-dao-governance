@@ -15,7 +15,7 @@ const governanceTokenArtifact = JSON.parse(fs.readFileSync(governanceTokenPath, 
 
 // Configuration
 const CONFIG = {
-    CANISTER_NAME: "main",
+    CANISTER_NAME: "backend",
     YOUR_ADDRESS: "0x4A7C969110f7358bF334b49A2FF1a2585ac372B8",
     // Additional addresses to fund with tokens
     ADDITIONAL_ADDRESSES: [

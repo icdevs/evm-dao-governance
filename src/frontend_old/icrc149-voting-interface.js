@@ -82,7 +82,7 @@ export class ICRC149VotingInterface {
         if (this.isLocal) {
             // Local development configuration with best practices
             agent = new HttpAgent({
-                host: 'http://127.0.0.1:8080',
+                host: 'http://127.0.0.1:4943',
                 identity: new AnonymousIdentity()
             });
             

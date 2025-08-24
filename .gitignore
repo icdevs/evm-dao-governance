@@ -17,3 +17,5 @@ package.json
 
 .svelte-kit/
 .env
+scripts/lib/
+scripts/out/

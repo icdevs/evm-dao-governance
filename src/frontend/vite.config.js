@@ -10,9 +10,11 @@ dotenv.config({ path: '../../.env' });
 export default defineConfig({
   build: {
     emptyOutDir: true,
+    target: 'es2022', // Support top-level await
   },
   optimizeDeps: {
     esbuildOptions: {
+      target: 'es2022', // Support top-level await in dependencies
       define: {
         global: "globalThis",
       },

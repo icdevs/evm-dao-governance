@@ -224,7 +224,7 @@ async function initializeDfxAgent() {
         if (env === 'local') {
             // Local development configuration
             agent = new HttpAgent({
-                host: 'http://127.0.0.1:8080'
+                host: 'http://127.0.0.1:4943'
             });
             
             // Fetch root key for local development
