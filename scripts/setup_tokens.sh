@@ -256,6 +256,7 @@ async function deployToken() {
         }
     } catch (error) {
         console.log('⚠️  Could not get or fund canister address:', error.message);
+        process.exit(1);
     }
     
     console.log('�📍 Contract Address:', contractAddress);
@@ -276,13 +277,17 @@ async function deployToken() {
     } catch (error) {
         console.log('⚠️  Failed to add contract to backend:', error.message);
         console.log('💡 You can add it manually via the frontend configuration panel');
+        process.exit(1);
     }
     
     return contractAddress;
 }
 
 // Run the deployment
-deployToken().catch(console.error);
+deployToken().catch(err => {
+    console.error(err);
+    process.exit(1);
+});
 EOF
 
     # Install ethers if needed (assuming Node.js is available)
