@@ -2,41 +2,36 @@
 
 # Script to deploy governance token and fund your MetaMask address
 # This helps set up the testing environment for DAO voting
-# Usage: ./setup_tokens.sh <YOUR_METAMASK_ADDRESS>
+# Usage: ./setup_tokens.sh <YOUR_METAMASK_ADDRESS_1> [YOUR_METAMASK_ADDRESS_2] ...
 
 set -e
 
 # Check if MetaMask address is provided as argument
 if [ $# -eq 0 ]; then
-    echo "❌ Error: MetaMask address is required!"
-    echo "Usage: $0 <YOUR_METAMASK_ADDRESS>"
-    echo "Example: $0 0x4A7C969110f7358bF334b49A2FF1a2585ac372B8"
+    echo "❌ Error: At least one MetaMask address is required!"
+    echo "Usage: $0 <YOUR_METAMASK_ADDRESS_1> [YOUR_METAMASK_ADDRESS_2] ..."
+    echo "Example: $0 0x4A7C969110f7358bF334b49A2FF1a2585ac372B8 0x148311C647Ec8a584D896c04f6492b5D9Cb3a9B0"
     exit 1
 fi
 
 # Configuration
-YOUR_METAMASK_ADDRESS="$1"
+ALL_ADDRESSES=("$@")
 
 # Validate Ethereum address format (basic check)
-if ! [[ $YOUR_METAMASK_ADDRESS =~ ^0x[a-fA-F0-9]{40}$ ]]; then
-    echo "❌ Error: Invalid Ethereum address format!"
-    echo "Address must be in format: 0x followed by 40 hexadecimal characters"
-    echo "Provided: $YOUR_METAMASK_ADDRESS"
-    exit 1
-fi
-# Additional addresses to fund with tokens
-ADDITIONAL_ADDRESSES=(
-    "0x148311C647Ec8a584D896c04f6492b5D9Cb3a9B0"
-    "0x36311a95623ddf14De0c7C07250de259E118Cc2e"
-    "0x2BBd20672EAE1dE51fA49088b7bc1D421b7b3FEC"
-)
+for addr in "${ALL_ADDRESSES[@]}"; do
+    if ! [[ $addr =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+        echo "❌ Error: Invalid Ethereum address format!"
+        echo "Address must be in format: 0x followed by 40 hexadecimal characters"
+        echo "Provided: $addr"
+        exit 1
+    fi
+done
 ANVIL_DEPLOYER_PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"  # First Anvil account
 INITIAL_SUPPLY="1000000000000000000000000"  # 1M tokens (18 decimals)
 TRANSFER_AMOUNT="100000000000000000000"     # 100 tokens to each address
 
 echo "🏗️  Setting up governance token for multiple addresses..."
-echo "📍 Primary MetaMask address: $YOUR_METAMASK_ADDRESS"
-echo "📍 Additional addresses: ${ADDITIONAL_ADDRESSES[*]}"
+echo "📍 Addresses to fund: ${ALL_ADDRESSES[*]}"
 
 # Check if Anvil is running
 if ! curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' http://127.0.0.1:8545 > /dev/null; then
