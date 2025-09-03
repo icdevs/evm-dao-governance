@@ -4,7 +4,6 @@ package-lock.json
 .dfx/
 node_modules
 src/frontend/dist/
-src/frontend_old/dist/
 cache/
 
 # Token deployment artifacts
