@@ -45,6 +45,19 @@ echo "✅ Anvil is running"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 pushd "$SCRIPT_DIR" > /dev/null
 
+# Convert bash array to a JSON array string
+all_addresses_json="["
+first=true
+for addr in "${ALL_ADDRESSES[@]}"; do
+    if [ "$first" = true ]; then
+        all_addresses_json+="\"$addr\""
+        first=false
+    else
+        all_addresses_json+=",\"$addr\""
+    fi
+done
+all_addresses_json+="]"
+
 # Check if we can deploy tokens directly
 echo "📦 Creating token deployment script..."
 
@@ -117,42 +130,56 @@ async function deployToken() {
     console.log('🚀 Deploying from:', deployer.address);
     console.log('💰 Balance:', ethers.formatEther(await provider.getBalance(deployer.address)), 'ETH');
     
-    // Check if forge is available for compilation
     let contractBytecode, contractABI;
+    let isForgeAvailable = false;
     try {
-        console.log('📦 Compiling contract with forge...');
         execSync('forge --version', { stdio: 'pipe' });
-        
-        // Initialize forge project if needed
-        if (!fs.existsSync('./foundry.toml')) {
-            console.log('🔧 Initializing minimal forge project...');
-            execSync('forge init --no-git .', { stdio: 'pipe' });
-        }
-        
-        // Copy our contract to src directory
-        if (!fs.existsSync('./src')) {
-            execSync('mkdir -p src', { stdio: 'pipe' });
-        }
-        execSync('cp GovernanceToken.sol src/', { stdio: 'pipe' });
-        
-        // Compile the contract
-        execSync('forge build', { stdio: 'inherit' });
-        
-        // Read the compiled contract
-        const artifactPath = './out/GovernanceToken.sol/GovernanceToken.json';
-        const absolutePath = path.resolve(artifactPath);
-        console.log('Checking for file at:', absolutePath);
-        if (fs.existsSync(artifactPath)) {
-            const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
-            contractBytecode = artifact.bytecode.object;
-            contractABI = artifact.abi;
-            console.log('✅ Contract compiled successfully with forge');
-        } else {
-            throw new Error('Compiled contract not found');
-        }
+        isForgeAvailable = true;
     } catch (error) {
-        console.log('⚠️  Forge not available, using pre-compiled bytecode...', error);
-        
+        console.log('⚠️  Forge CLI not found, using pre-compiled bytecode...');
+    }
+
+    if (isForgeAvailable) {
+        try {
+            console.log('📦 Compiling contract with forge...');
+            
+            // Initialize forge project if needed
+            if (!fs.existsSync('./foundry.toml')) {
+                console.log('🔧 Initializing minimal forge project...');
+                execSync('forge init --no-git .', { stdio: 'inherit' });
+            }
+            
+            if (!fs.existsSync('./lib/forge-std')) {
+                console.log('📦 Installing forge-std...');
+                execSync('forge install foundry-rs/forge-std --no-git', { stdio: 'inherit' });
+            } else {
+                console.log('✅ forge-std already installed, skipping.');
+            }
+            
+            // Copy our contract to src directory
+            if (!fs.existsSync('./src')) {
+                execSync('mkdir -p src', { stdio: 'inherit' });
+            }
+            execSync('cp GovernanceToken.sol src/', { stdio: 'inherit' });
+            
+            // Compile the contract
+            execSync('forge build', { stdio: 'inherit' });
+            
+            // Read the compiled contract
+            const artifactPath = './out/GovernanceToken.sol/GovernanceToken.json';
+            if (fs.existsSync(artifactPath)) {
+                const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+                contractBytecode = artifact.bytecode.object;
+                contractABI = artifact.abi;
+                console.log('✅ Contract compiled successfully with forge');
+            } else {
+                throw new Error('Compiled contract not found after build');
+            }
+        } catch (error) {
+            console.error('❌ Forge compilation failed. Aborting.', error);
+            process.exit(1);
+        }
+    } else {
         // Fallback to basic ERC20 ABI and working bytecode
         contractABI = [
             "constructor(uint256 _initialSupply)",
@@ -179,7 +206,7 @@ async function deployToken() {
     console.log('✅ GovernanceToken deployed at:', contractAddress);
     
     // Fund all addresses with tokens
-    const allAddresses = ['$YOUR_METAMASK_ADDRESS', '${ADDITIONAL_ADDRESSES[0]}', '${ADDITIONAL_ADDRESSES[1]}', '${ADDITIONAL_ADDRESSES[2]}'];
+    const allAddresses = JSON.parse('${all_addresses_json}');
     
     for (let i = 0; i < allAddresses.length; i++) {
         const address = allAddresses[i];
@@ -208,7 +235,7 @@ async function deployToken() {
     // Get canister Ethereum address and fund it
     console.log('🏦 Getting canister Ethereum address...');
     try {
-        const canisterResult = execSync('dfx canister call --network local backend icrc149_get_ethereum_address "(null)"', 
+        const canisterResult = execSync('dfx canister call backend icrc149_get_ethereum_address "(null)"', 
             { encoding: 'utf8', stdio: 'pipe' });
         
         const addressMatch = canisterResult.match(/"([^"]+)"/);
@@ -263,7 +290,7 @@ async function deployToken() {
     console.log('🏗️  Adding contract to backend configuration...');
     try {
         const result = execSync(
-            \`dfx canister call --network local backend icrc149_update_snapshot_contract_config '("\${contractAddress}", opt record { contract_address = "\${contractAddress}"; chain = record { chain_id = 31337; network_name = "anvil" }; rpc_service = record { rpc_type = "custom"; canister_id = principal "7hfb6-caaaa-aaaar-qadga-cai"; custom_config = opt vec { record { "url"; "http://127.0.0.1:8545" } } }; balance_storage_slot = 0; contract_type = variant { ERC20 }; enabled = true })'\`,
+            \`dfx canister call backend icrc149_update_snapshot_contract_config '("\${contractAddress}", opt record { contract_address = "\${contractAddress}"; chain = record { chain_id = 31337; network_name = "anvil" }; rpc_service = record { rpc_type = "custom"; canister_id = principal "7hfb6-caaaa-aaaar-qadga-cai"; custom_config = opt vec { record { "url"; "http://127.0.0.1:8545" } } }; balance_storage_slot = 0; contract_type = variant { ERC20 }; enabled = true })'\`,
             { encoding: 'utf8', stdio: 'pipe' }
         );
         
@@ -313,8 +340,7 @@ PKGEOF
         echo "📋 Manual deployment steps:"
         echo "1. Deploy an ERC20 token contract to Anvil"
         echo "2. Transfer some tokens to all addresses:"
-        echo "   - $YOUR_METAMASK_ADDRESS"
-        for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
+        for addr in "${ALL_ADDRESSES[@]}"; do
             echo "   - $addr"
         done
         echo "3. Note the contract address for use in proposals"
@@ -330,8 +356,7 @@ echo "📋 Next steps:"
 echo "1. Make sure your MetaMask is connected to localhost:8545"
 echo "2. Add the governance token to MetaMask using the contract address above"
 echo "3. Verify you have governance tokens in all MetaMask wallets:"
-echo "   - $YOUR_METAMASK_ADDRESS"
-for addr in "${ADDITIONAL_ADDRESSES[@]}"; do
+for addr in "${ALL_ADDRESSES[@]}"; do
     echo "   - $addr"
 done
 echo "4. Verify the canister has funds for executing transactions"
