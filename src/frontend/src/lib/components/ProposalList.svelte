@@ -96,13 +96,37 @@
                   }
               });
 
+    // Load governance stats when provider and contract are available
+    $: if (provider && contractAddress && !tokenInfo) {
+        loadGovernanceStats();
+    }
+
     // Reactive statement to load balance when auth/config changes
-    $: if (isAuthenticated && userAddress && contractAddress) {
+    $: if (isAuthenticated && userAddress && contractAddress && tokenInfo) {
         loadUserTokenBalance();
     }
 
     $: if (backendActor) {
         load();
+    }
+
+    async function loadGovernanceStats() {
+        if (!provider || !contractAddress) return;
+
+        console.log("Loading governance stats in ProposalList:", {
+            provider: !!provider,
+            contractAddress,
+        });
+
+        try {
+            await governanceStatsStore.load(provider, contractAddress, false);
+            console.log(
+                "Governance stats loaded, tokenInfo:",
+                $governanceStatsStore.tokenInfo
+            );
+        } catch (error) {
+            console.error("Failed to load governance stats:", error);
+        }
     }
 
     async function load() {
@@ -122,12 +146,25 @@
     }
 
     async function loadUserTokenBalance() {
-        if (!isAuthenticated || !userAddress || !contractAddress) {
+        if (
+            !isAuthenticated ||
+            !userAddress ||
+            !contractAddress ||
+            !provider ||
+            !tokenInfo
+        ) {
             userTokenBalanceFormatted = "-";
             userVotingPower = 0;
             totalTokenSupply = 0;
             return;
         }
+
+        console.log("Loading user token balance:", {
+            userAddress,
+            contractAddress,
+            provider: !!provider,
+            tokenInfo: !!tokenInfo,
+        });
 
         isLoadingBalance = true;
         try {
@@ -137,6 +174,7 @@
                 userAddress,
                 tokenInfo
             );
+            console.log("Token balance loaded:", tokenBalanceInfo);
             userTokenBalanceFormatted = tokenBalanceInfo.formatted;
             userVotingPower = tokenBalanceInfo.balance;
             totalTokenSupply = tokenBalanceInfo.tokenInfo.totalSupply;
@@ -407,7 +445,7 @@
                                         <span class="count-value"
                                             >{formatTokenAmount(
                                                 proposal.tally.yes,
-                                                tokenInfo.decimals
+                                                tokenInfo?.decimals || 18
                                             )}</span
                                         >
                                     </div>
@@ -415,7 +453,7 @@
                                         <span class="count-value"
                                             >{formatTokenAmount(
                                                 proposal.tally.no,
-                                                tokenInfo.decimals
+                                                tokenInfo?.decimals || 18
                                             )}</span
                                         >
                                     </div>

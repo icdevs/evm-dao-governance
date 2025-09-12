@@ -1,7 +1,7 @@
 <script>
     import "../index.scss";
     import { goto } from "$app/navigation";
-    import SiweWalletConnector from "$lib/components/SiweWalletConnector.svelte";
+    import AppHeader from "$lib/components/AppHeader.svelte";
     import TreasuryAddress from "$lib/components/TreasuryAddress.svelte";
     import BalanceDisplay from "$lib/components/BalanceDisplay.svelte";
     import StatusMessages from "$lib/components/StatusMessages.svelte";
@@ -31,7 +31,6 @@
     let showContractDropdown = false;
     let proposalFilter = "active";
     let dashboardRefreshFn = null;
-    let isDashboardLoading = false;
     let isGlobalRefreshing = false;
     let lastLoadAttemptKey = ""; // Track load attempts to prevent loops
 
@@ -52,6 +51,16 @@
         walletConnected,
         chainId: $walletStore.chainId,
         walletState: $walletStore.state,
+        timestamp: new Date().toISOString(),
+    });
+
+    // DEBUG: Track treasury balance store state
+    $: console.log("🏦 Treasury balance store state:", {
+        walletAddress: $treasuryBalanceStore.walletAddress,
+        isInitialLoad: $treasuryBalanceStore.isInitialLoad,
+        isLoading: $treasuryBalanceStore.isLoading,
+        ethBalance: $treasuryBalanceStore.ethBalance,
+        error: $treasuryBalanceStore.error,
         timestamp: new Date().toISOString(),
     });
 
@@ -131,6 +140,16 @@
         }
 
         // Load treasury balance
+        console.log("Checking treasury balance loading conditions:", {
+            tokenInfo: !!tokenInfo,
+            walletAddress: $treasuryBalanceStore.walletAddress,
+            loadingTreasury: loadingTracker.treasury,
+            shouldLoad:
+                tokenInfo &&
+                $treasuryBalanceStore.walletAddress &&
+                !loadingTracker.treasury,
+        });
+
         if (
             tokenInfo &&
             $treasuryBalanceStore.walletAddress &&
@@ -262,23 +281,11 @@
     </div>
 {/if}
 
+<!-- Shared App Header -->
+<AppHeader />
+
 <main>
     <div class="app-container">
-        <!-- App Header -->
-        <header class="app-header">
-            <div class="header-content">
-                <div class="brand">
-                    <h1>🗳️ DAO Governance</h1>
-                    <p class="subtitle">
-                        Cross-chain voting on Internet Computer
-                    </p>
-                </div>
-                <div class="header-actions">
-                    <SiweWalletConnector showNetworkInfo={true} />
-                </div>
-            </div>
-        </header>
-
         {#if !hasNetworkSelected}
             <!-- Network Selection Prompt -->
             <div class="network-selection-prompt">
@@ -353,10 +360,7 @@
                 </div>
 
                 <div class="dashboard-center">
-                    <BalanceDisplay
-                        onRefresh={setDashboardRefreshFn}
-                        bind:isLoading={isDashboardLoading}
-                    />
+                    <BalanceDisplay onRefresh={setDashboardRefreshFn} />
                 </div>
 
                 <div class="dashboard-right">
@@ -638,37 +642,7 @@
         padding: 1.5rem;
         position: relative;
     }
-    .app-header {
-        background: rgba(30, 33, 38, 0.8);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--color-border);
-        border-radius: 16px;
-        padding: 2rem;
-        margin-bottom: 2rem;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        position: relative;
-        overflow: visible; /* Allow dropdowns to extend beyond header */
-    }
-    .header-content {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1.5rem;
-        width: 100%;
-    }
-    .brand h1 {
-        margin: 0;
-        font-size: 2.25rem;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-    }
-    .subtitle {
-        margin: 0.5rem 0 0 0;
-        color: var(--color-text-secondary);
-        font-size: 1rem;
-        font-weight: 500;
-        opacity: 0.9;
-    }
+
     .main-content {
         background: rgba(30, 33, 38, 0.6);
         backdrop-filter: blur(20px);
