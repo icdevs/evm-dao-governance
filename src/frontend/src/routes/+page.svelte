@@ -529,9 +529,6 @@
                         <div class="create-proposal-form">
                             <ProposalForm
                                 on:proposalCreated={handleProposalCreated}
-                                {authenticatedActor}
-                                userEthAddress={$identityAddress}
-                                userPrincipal={getCurrentPrincipal()}
                             />
                         </div>
                     {/if}

@@ -187,22 +187,25 @@ deploy() {
     fi
     echo "✅ Backend canister found: $BACKEND_CANISTER_ID"
 
-    # Check if ic_siwe_provider canister exists (it's okay if it doesn't, we'll create it)
-    SIWE_CANISTER_ID=""
-    if SIWE_CANISTER_ID=$(dfx canister id ic_siwe_provider "${DFX_ARGS[@]}" 2>/dev/null); then
-        echo "✅ ic_siwe_provider canister found: $SIWE_CANISTER_ID (will be upgraded)"
+    # Check if ic_siwe_provider canister exists, create if not
+    if ! SIWE_CANISTER_ID=$(dfx canister id ic_siwe_provider "${DFX_ARGS[@]}" 2>/dev/null); then
+        echo "ℹ️  ic_siwe_provider canister not found, creating it..."
+        dfx canister create ic_siwe_provider "${DFX_ARGS[@]}"
+        
+        # Try to get the canister ID again after creation
+        if ! SIWE_CANISTER_ID=$(dfx canister id ic_siwe_provider "${DFX_ARGS[@]}" 2>/dev/null); then
+            echo "❌ Failed to create ic_siwe_provider canister on network '$NETWORK'"
+            exit 1
+        fi
+        echo "✅ ic_siwe_provider canister created: $SIWE_CANISTER_ID"
     else
-        echo "ℹ️  ic_siwe_provider canister not found (will be created)"
+        echo "✅ ic_siwe_provider canister found: $SIWE_CANISTER_ID (will be upgraded)"
     fi
 
     echo ""
 
-    # Build the deployment argument (no optional fields)
-    # Note: If SIWE canister doesn't exist yet, we'll only include backend in targets
-    TARGETS_LIST="\"$BACKEND_CANISTER_ID\""
-    if [[ -n "$SIWE_CANISTER_ID" ]]; then
-        TARGETS_LIST="\"$SIWE_CANISTER_ID\"; $TARGETS_LIST"
-    fi
+    # Build the deployment argument with both canisters in targets
+    TARGETS_LIST="\"$SIWE_CANISTER_ID\"; \"$BACKEND_CANISTER_ID\""
 
     DEPLOY_ARG="record {
         domain = \"$DOMAIN\";
