@@ -401,13 +401,8 @@
 
                                 <div
                                     class="progressbar-container"
-                                    style="--quorum-threshold: 25%; --majority-threshold: 50%;"
+                                    style="--majority-threshold: 50%;"
                                 >
-                                    <!-- Quorum threshold marker -->
-                                    <div class="threshold quorum-threshold">
-                                        <div class="threshold-icon"></div>
-                                    </div>
-
                                     <!-- Majority threshold marker -->
                                     <div class="threshold majority-threshold">
                                         <div class="threshold-icon"></div>
@@ -818,11 +813,6 @@
         bottom: 0;
         width: 1px;
         z-index: 2;
-    }
-
-    .quorum-threshold {
-        left: var(--quorum-threshold);
-        background: var(--color-warning, #ffc107);
     }
 
     .majority-threshold {
