@@ -141,7 +141,9 @@
         // If no provider, can't sync
         if (!provider) return;
 
-        console.log("SIWE logged in but wallet store not connected - attempting sync");
+        console.log(
+            "SIWE logged in but wallet store not connected - attempting sync"
+        );
         isSyncingWallet = true;
 
         try {
@@ -151,16 +153,23 @@
             });
 
             if (accounts?.length > 0) {
-                console.log("MetaMask has connected accounts, syncing wallet store...");
+                console.log(
+                    "MetaMask has connected accounts, syncing wallet store..."
+                );
                 await attemptCreateWalletConnection();
             } else {
-                console.log("MetaMask has no connected accounts, SIWE session may be stale");
+                console.log(
+                    "MetaMask has no connected accounts, SIWE session may be stale"
+                );
                 // SIWE session might be stale if wallet is not connected
                 // Clear the SIWE session since wallet is disconnected
                 siweActions.clear();
             }
         } catch (error) {
-            console.warn("Could not sync wallet store after SIWE login:", error);
+            console.warn(
+                "Could not sync wallet store after SIWE login:",
+                error
+            );
         } finally {
             // Reset flag after a delay to ensure wallet connection stabilizes
             setTimeout(() => {

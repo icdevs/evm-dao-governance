@@ -13,9 +13,9 @@ function createWalletStore() {
 
     // Debug wrapper for set
     const debugSet = (newState) => {
-        console.log('WALLET STORE SET:', { 
-            from: 'direct set', 
-            newState: { ...newState, signer: !!newState.signer } 
+        console.log('WALLET STORE SET:', {
+            from: 'direct set',
+            newState: { ...newState, signer: !!newState.signer }
         });
         set(newState);
     };
@@ -24,7 +24,7 @@ function createWalletStore() {
     const debugUpdate = (updater) => {
         update(currentState => {
             const newState = updater(currentState);
-            console.log('WALLET STORE UPDATE:', { 
+            console.log('WALLET STORE UPDATE:', {
                 from: 'update function',
                 currentState: { ...currentState, signer: !!currentState.signer },
                 newState: { ...newState, signer: !!newState.signer }

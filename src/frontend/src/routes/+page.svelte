@@ -47,12 +47,12 @@
     $: hasNetworkSelected = walletConnected && $walletStore.chainId;
 
     // DEBUG: Track when hasNetworkSelected changes and what caused it
-    $: console.log('🔄 hasNetworkSelected changed:', {
+    $: console.log("🔄 hasNetworkSelected changed:", {
         hasNetworkSelected,
         walletConnected,
         chainId: $walletStore.chainId,
         walletState: $walletStore.state,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
     });
 
     // SIWE-enhanced state
