@@ -343,7 +343,7 @@
                                         <div class="percentage">
                                             {getTallyPercentage(
                                                 proposal.tally.yes,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%
                                         </div>
                                     </div>
@@ -355,7 +355,7 @@
                                         <div class="percentage">
                                             {getTallyPercentage(
                                                 proposal.tally.no,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%
                                         </div>
                                     </div>
@@ -388,14 +388,14 @@
                                             class="Yes"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.yes,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%;"
                                         ></div>
                                         <div
                                             class="No"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.no,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%;"
                                         ></div>
                                     </div>
@@ -488,7 +488,7 @@
                                             Not connected
                                         {:else}
                                             {userTokenBalanceFormatted} ({(userVotingPower /
-                                                totalTokenSupply) *
+                                                Number(proposal.tally.total)) *
                                                 100}%)
                                         {/if}
                                     </span>

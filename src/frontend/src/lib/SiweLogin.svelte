@@ -1,13 +1,19 @@
-<script lang="ts">
-    import { onMount } from "svelte";
+<script>
+    import { onMount, onDestroy } from "svelte";
     import {
         siweActions,
         initSiwe,
         isLoggedIn,
         loginStatus,
+        prepareLoginStatus,
+        isLoggingIn,
+        isPreparingLogin,
         identityAddress,
         loginError,
-    } from "../lib/siwe";
+        prepareLoginError,
+        signMessageError,
+        cleanupSiwe,
+    } from "./siwe";
     import {
         connectWallet,
         disconnectWallet,
@@ -15,25 +21,38 @@
         isWalletConnected,
         walletAddress,
         isMetaMaskAvailable,
-    } from "../lib/wallet";
+    } from "./wallet";
 
     // Props
-    export let canisterId: string;
+    export let canisterId;
+    export let httpAgentOptions = {};
+    export let actorOptions = {};
 
     // Local state
     let loading = false;
     let error = "";
 
     onMount(async () => {
-        // Initialize SIWE
-        initSiwe(canisterId);
-
-        // Check if wallet is already connected
         try {
+            console.log("Initializing SIWE with canister ID:", canisterId);
+
+            // Initialize SIWE with options
+            initSiwe(canisterId, {
+                httpAgentOptions,
+                actorOptions,
+            });
+
+            // Check if wallet is already connected
             await checkWalletConnection();
         } catch (e) {
-            console.error("Error checking wallet connection:", e);
+            console.error("Error during initialization:", e);
+            error = `Initialization error: ${e.message}`;
         }
+    });
+
+    onDestroy(() => {
+        // Clean up SIWE resources when component is destroyed
+        cleanupSiwe();
     });
 
     async function handleConnectWallet() {
@@ -46,7 +65,7 @@
             loading = true;
             error = "";
             await connectWallet();
-        } catch (e: any) {
+        } catch (e) {
             error = e.message || "Failed to connect wallet";
             console.error("Wallet connection error:", e);
         } finally {
@@ -63,12 +82,59 @@
         try {
             loading = true;
             error = "";
-            await siweActions.login();
-        } catch (e: any) {
+
+            // Prepare login first if not already prepared
+            if ($prepareLoginStatus !== "success") {
+                console.log("Preparing login first...");
+                siweActions.prepareLogin();
+
+                // Wait for preparation to complete by polling status
+                const maxWait = 30000; // 30 seconds max
+                const startTime = Date.now();
+
+                while (
+                    $prepareLoginStatus !== "success" &&
+                    Date.now() - startTime < maxWait
+                ) {
+                    await new Promise((resolve) => setTimeout(resolve, 100)); // Check every 100ms
+                }
+
+                if ($prepareLoginStatus !== "success") {
+                    throw new Error("Login preparation timed out");
+                }
+            }
+
+            // Perform the actual login
+            console.log("Performing SIWE login...");
+            const identity = await siweActions.login();
+
+            if (identity) {
+                console.log(
+                    "SIWE login successful!",
+                    identity.getPrincipal().toString()
+                );
+            }
+        } catch (e) {
             error = e.message || "Login failed";
             console.error("SIWE login error:", e);
         } finally {
             loading = false;
+        }
+    }
+
+    async function handlePrepareLogin() {
+        if (!$isWalletConnected) {
+            error = "Please connect your wallet first";
+            return;
+        }
+
+        try {
+            error = "";
+            console.log("Preparing SIWE login...");
+            siweActions.prepareLogin();
+        } catch (e) {
+            error = e.message || "Failed to prepare login";
+            console.error("Prepare login error:", e);
         }
     }
 
@@ -77,7 +143,7 @@
             siweActions.clear();
             disconnectWallet();
             error = "";
-        } catch (e: any) {
+        } catch (e) {
             error = e.message || "Logout failed";
             console.error("Logout error:", e);
         }
@@ -85,21 +151,37 @@
 
     // Reactive statements
     $: isConnecting = loading && !$isWalletConnected;
-    $: isLoggingIn = $loginStatus === "logging-in";
-    $: canLogin = $isWalletConnected && !$isLoggedIn && !isLoggingIn;
+    $: canLogin =
+        $isWalletConnected &&
+        !$isLoggedIn &&
+        !$isLoggingIn &&
+        !$isPreparingLogin;
+    $: canPrepareLogin =
+        $isWalletConnected &&
+        !$isLoggedIn &&
+        !$isPreparingLogin &&
+        $prepareLoginStatus !== "success";
+
+    // Combine all possible errors for display
+    $: allErrors = [
+        error,
+        $loginError?.message,
+        $prepareLoginError?.message,
+        $signMessageError?.message,
+    ].filter(Boolean);
 </script>
 
 <div class="siwe-login">
-    {#if error}
+    {#if allErrors.length > 0}
         <div class="error">
-            <p>{error}</p>
-            <button on:click={() => (error = "")}>Dismiss</button>
-        </div>
-    {/if}
-
-    {#if $loginError}
-        <div class="error">
-            <p>Login Error: {$loginError.message}</p>
+            {#each allErrors as errorMsg}
+                <p>{errorMsg}</p>
+            {/each}
+            <button
+                on:click={() => {
+                    error = "";
+                }}>Dismiss</button
+            >
         </div>
     {/if}
 
@@ -139,15 +221,44 @@
                     <p><strong>Address:</strong> {$walletAddress}</p>
                 </div>
 
-                <!-- Step 2: SIWE Login -->
+                <!-- Step 2: Prepare Login (optional) -->
+                {#if $prepareLoginStatus !== "success"}
+                    <div class="step">
+                        <h4>Step 2a: Prepare Login</h4>
+                        <button
+                            on:click={handlePrepareLogin}
+                            disabled={!canPrepareLogin}
+                            class="prepare-btn"
+                        >
+                            {#if $isPreparingLogin}
+                                Preparing...
+                            {:else}
+                                Prepare SIWE Message
+                            {/if}
+                        </button>
+                        <p class="help-text">
+                            (Optional) Load the SIWE message from the backend.
+                        </p>
+                    </div>
+                {:else}
+                    <div class="step completed">
+                        <h4>✅ Step 2a: Login Prepared</h4>
+                    </div>
+                {/if}
+
+                <!-- Step 3: SIWE Login -->
                 <div class="step">
-                    <h4>Step 2: Sign Message</h4>
+                    <h4>
+                        {$prepareLoginStatus === "success"
+                            ? "Step 2b"
+                            : "Step 2"}: Sign Message
+                    </h4>
                     <button
                         on:click={handleSiweLogin}
-                        disabled={!canLogin || isLoggingIn}
+                        disabled={!canLogin}
                         class="login-btn"
                     >
-                        {#if isLoggingIn}
+                        {#if $isLoggingIn}
                             Signing in...
                         {:else}
                             Sign in with Ethereum
@@ -157,6 +268,17 @@
                         You'll be asked to sign a message with your wallet to
                         authenticate.
                     </p>
+
+                    <!-- Status indicators -->
+                    {#if $prepareLoginStatus === "preparing"}
+                        <p class="status preparing">
+                            Preparing SIWE message...
+                        </p>
+                    {:else if $prepareLoginStatus === "success"}
+                        <p class="status success">✅ SIWE message ready</p>
+                    {:else if $loginStatus === "logging-in"}
+                        <p class="status logging-in">🔄 Authenticating...</p>
+                    {/if}
                 </div>
             {/if}
         </div>
@@ -295,5 +417,39 @@
 
     .logout-btn:hover {
         background: #da190b;
+    }
+
+    .prepare-btn {
+        background: #2196f3;
+    }
+
+    .prepare-btn:hover:not(:disabled) {
+        background: #1976d2;
+    }
+
+    .status {
+        margin-top: 8px;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-size: 0.85em;
+        font-weight: 500;
+    }
+
+    .status.preparing {
+        background: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+    }
+
+    .status.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+
+    .status.logging-in {
+        background: #cce7ff;
+        color: #004085;
+        border: 1px solid #b3d7ff;
     }
 </style>

@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { Actor, HttpAgent, AnonymousIdentity } from '@dfinity/agent';
-import { idlFactory } from '../../../../declarations/backend/backend.did.js';
+import { idlFactory } from 'declarations/backend/backend.did.js';
 import { configStore } from './config.js';
 
 function createAgentStore() {

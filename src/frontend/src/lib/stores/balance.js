@@ -39,8 +39,15 @@ function createBalanceStore(initializeFunc) {
             if (!currentState.contractAddress || !currentState.walletAddress) {
                 throw new Error("Balance store not initialized: Missing contract or wallet address");
             }
-            try {
 
+            console.log('Loading balances with context:', {
+                contractAddress: currentState.contractAddress,
+                walletAddress: currentState.walletAddress,
+                tokenInfo,
+                networkId: await provider.getNetwork().then(n => n.chainId).catch(() => 'unknown')
+            });
+
+            try {
                 const [ethBalance, tokenBalanceInfo] = await Promise.all([
                     provider.getBalance(currentState.walletAddress),
                     getTokenBalanceInfo(
@@ -50,6 +57,11 @@ function createBalanceStore(initializeFunc) {
                         tokenInfo
                     )
                 ]);
+
+                console.log('Balances loaded successfully:', {
+                    ethBalance: ethBalance.toString(),
+                    tokenBalanceInfo
+                });
 
                 update(state => ({
                     ...state,
@@ -62,12 +74,24 @@ function createBalanceStore(initializeFunc) {
                 }));
 
             } catch (error) {
+                console.error('Balance loading failed:', error);
+                console.error('Balance error context:', {
+                    contractAddress: currentState.contractAddress,
+                    walletAddress: currentState.walletAddress,
+                    tokenInfo,
+                    errorMessage: error.message,
+                    errorCode: error.code
+                });
+
                 update(state => ({
                     ...state,
                     isLoading: false,
                     error: error.message || 'Failed to load balances'
                 }));
-                throw error;
+
+                // Don't re-throw the error, just log it and update state
+                // This prevents the error from bubbling up and crashing the UI
+                return;
             }
         },
     };

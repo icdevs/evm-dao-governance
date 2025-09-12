@@ -10,7 +10,7 @@ set -e
 # Default configurations for different networks
 deploy_local() {
     echo "🏠 Deploying to local network..."
-    PORT=$(dfx info webserver-port)
+    PORT=3008
     
     # Call the main deployment logic with local-specific parameters
     deploy \
@@ -208,12 +208,12 @@ deploy() {
         domain = \"$DOMAIN\";
         uri = \"$URI\";
         salt = \"$SALT\";
-        chain_id = $CHAIN_ID;
-        scheme = \"$SCHEME\";
-        statement = \"$STATEMENT\";
-        sign_in_expires_in = $SIGN_IN_EXPIRES_IN;
-        session_expires_in = $SESSION_EXPIRES_IN;
-        targets = vec { $TARGETS_LIST };
+        chain_id = opt $CHAIN_ID;
+        scheme = opt \"$SCHEME\";
+        statement = opt \"$STATEMENT\";
+        sign_in_expires_in = opt $SIGN_IN_EXPIRES_IN;
+        session_expires_in = opt $SESSION_EXPIRES_IN;
+        targets = opt vec { $TARGETS_LIST };
     }"
 
     echo "🔧 Deploying with argument:"

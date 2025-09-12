@@ -11,12 +11,34 @@ function createWalletStore() {
         error: null
     });
 
+    // Debug wrapper for set
+    const debugSet = (newState) => {
+        console.log('WALLET STORE SET:', { 
+            from: 'direct set', 
+            newState: { ...newState, signer: !!newState.signer } 
+        });
+        set(newState);
+    };
+
+    // Debug wrapper for update
+    const debugUpdate = (updater) => {
+        update(currentState => {
+            const newState = updater(currentState);
+            console.log('WALLET STORE UPDATE:', { 
+                from: 'update function',
+                currentState: { ...currentState, signer: !!currentState.signer },
+                newState: { ...newState, signer: !!newState.signer }
+            });
+            return newState;
+        });
+    };
+
 
     // Subscribe to providerStore and initialize when provider changes
     providerStore.subscribe(async (provider) => {
         if (provider) {
             console.log("Initializing wallet...");
-            update(state => ({ ...state, provider }));
+            debugUpdate(state => ({ ...state, provider }));
 
             // Account changes
             if (window.ethereum) {
@@ -26,14 +48,14 @@ function createWalletStore() {
                     } else {
                         try {
                             const signerInstance = await provider.getSigner();
-                            update(state => ({
+                            debugUpdate(state => ({
                                 ...state,
                                 userAddress: accounts[0],
                                 signer: signerInstance,
                                 state: 'connected'
                             }));
                         } catch (error) {
-                            update(state => ({
+                            debugUpdate(state => ({
                                 ...state,
                                 signer: null,
                                 state: 'error',
@@ -44,7 +66,7 @@ function createWalletStore() {
                 });
 
                 window.ethereum.on('chainChanged', (newChainId) => {
-                    update(state => ({
+                    debugUpdate(state => ({
                         ...state,
                         chainId: parseInt(newChainId, 16)
                     }));
@@ -52,7 +74,7 @@ function createWalletStore() {
                 });
             }
         } else {
-            update(state => ({
+            debugUpdate(state => ({
                 ...state,
                 signer: null,
                 userAddress: null,
@@ -67,7 +89,7 @@ function createWalletStore() {
         subscribe,
         // Connect wallet
         connect: async (provider) => {
-            update(s => ({ ...s, state: 'connecting', error: null }));
+            debugUpdate(s => ({ ...s, state: 'connecting', error: null }));
             try {
                 await provider.send("eth_requestAccounts", []);
                 const signerInstance = await provider.getSigner();
@@ -82,10 +104,10 @@ function createWalletStore() {
                     state: 'connected',
                     error: null
                 };
-                set(walletData);
+                debugSet(walletData);
                 return walletData;
             } catch (error) {
-                update(s => ({
+                debugUpdate(s => ({
                     ...s,
                     state: 'error',
                     error: error.message || 'Failed to connect wallet'
@@ -96,7 +118,7 @@ function createWalletStore() {
 
         // Clear all wallet data
         disconnect: () => {
-            update(s => ({
+            debugUpdate(s => ({
                 ...s,
                 signer: null,
                 userAddress: null,
