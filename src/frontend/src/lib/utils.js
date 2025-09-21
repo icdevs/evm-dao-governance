@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { debugNetworkAndContract, logBalanceError } from './debug.js';
 
 // ERC20 ABI for common functions
 const ERC20_ABI = [
@@ -116,12 +117,43 @@ export async function getTokenInfo(provider, contractAddress) {
 // Get token balance for a specific address
 export async function getTokenBalance(provider, contractAddress, userAddress) {
     try {
+        // Validate inputs
+        if (!provider) {
+            throw new Error('Provider is required');
+        }
+        if (!contractAddress || contractAddress === '0x' || contractAddress === '0x0000000000000000000000000000000000000000') {
+            throw new Error(`Invalid contract address: ${contractAddress}`);
+        }
+        if (!userAddress || userAddress === '0x' || userAddress === '0x0000000000000000000000000000000000000000') {
+            throw new Error(`Invalid user address: ${userAddress}`);
+        }
+
+        console.log('Getting token balance for:', {
+            contractAddress,
+            userAddress,
+            providerNetwork: await provider.getNetwork().catch(() => 'unknown')
+        });
+
         const contract = new ethers.Contract(contractAddress, ERC20_ABI, provider);
+
+        // First, check if the contract exists by trying to get its code
+        const code = await provider.getCode(contractAddress);
+        if (code === '0x') {
+            throw new Error(`No contract found at address ${contractAddress}. Make sure the contract is deployed on the current network.`);
+        }
+
         const balance = await contract.balanceOf(userAddress);
+        console.log('Token balance retrieved successfully:', balance.toString());
         return balance.toString();
     } catch (error) {
-        console.error('Failed to get token balance:', error);
-        return '0';
+        // Enhanced debugging for balance errors
+        await debugNetworkAndContract(provider, contractAddress, userAddress);
+        logBalanceError(error, {
+            contractAddress,
+            userAddress,
+            function: 'getTokenBalance'
+        });
+        throw error; // Re-throw the error instead of returning '0' to make debugging easier
     }
 }
 
@@ -141,7 +173,13 @@ export async function getCanisterEthereumAddress(backendActor) {
 // Get formatted token balance with symbol
 export async function getTokenBalanceInfo(provider, contractAddress, userAddress, tokenInfo) {
     try {
-        const balance = await getTokenBalance(provider, contractAddress, userAddress)
+        console.log('Getting token balance info:', {
+            contractAddress,
+            userAddress,
+            tokenInfo
+        });
+
+        const balance = await getTokenBalance(provider, contractAddress, userAddress);
 
         const formattedBalance = formatTokenAmount(balance, tokenInfo.decimals);
         return {
@@ -151,7 +189,18 @@ export async function getTokenBalanceInfo(provider, contractAddress, userAddress
         };
     } catch (error) {
         console.error('Failed to get formatted token balance:', error);
-        return 'Error';
+        console.error('Token balance error context:', {
+            contractAddress,
+            userAddress,
+            tokenInfo,
+            errorMessage: error.message
+        });
+        return {
+            balance: '0',
+            tokenInfo: tokenInfo,
+            formatted: `Error: ${error.message}`,
+            error: error.message
+        };
     }
 }
 

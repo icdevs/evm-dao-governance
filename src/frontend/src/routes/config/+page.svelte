@@ -1,16 +1,29 @@
 <script>
     import "../../index.scss";
     import { goto } from "$app/navigation";
+    import { onMount } from "svelte";
+    import AppHeader from "$lib/components/AppHeader.svelte";
     import ConfigurationPanel from "$lib/components/ConfigurationPanel.svelte";
     import { configStore } from "$lib/stores/config.js";
 
     let configCompleted = false;
+    let configLoaded = false;
 
     // Subscribe to config changes
     $: if ($configStore.isConfigured && configCompleted) {
         // Redirect to dashboard when configuration is complete
         goto("/");
     }
+
+    // Track when config is loaded
+    $: configLoaded = $configStore.loaded;
+
+    onMount(async () => {
+        // Ensure config is loaded when directly accessing this page
+        if (!$configStore.loaded) {
+            configStore.load();
+        }
+    });
 
     function handleConfigurationComplete() {
         configCompleted = true;
@@ -22,55 +35,60 @@
     <meta name="description" content="Configure your DAO governance settings" />
 </svelte:head>
 
+<!-- Shared App Header -->
+<AppHeader
+    title="⚙️ Configuration"
+    subtitle="Set up your DAO governance parameters"
+/>
+
 <main>
     <div class="config-container">
-        <!-- Header -->
-        <header class="config-header">
-            <div class="header-content">
-                <div class="brand">
-                    <h1>⚙️ Configuration</h1>
-                    <p class="subtitle">
-                        Set up your DAO governance parameters
-                    </p>
+        {#if !configLoaded}
+            <!-- Loading state while config is being loaded -->
+            <div class="loading-container">
+                <div class="loading-content">
+                    <div class="loading-spinner"></div>
+                    <p>Loading configuration...</p>
                 </div>
-
+            </div>
+        {:else}
+            <!-- Configuration Content -->
+            <div class="config-content">
                 {#if $configStore.isConfigured}
-                    <button class="back-btn" on:click={() => goto("/")}>
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                        >
-                            <path
-                                d="M19 12H5"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                            <path
-                                d="M12 19L5 12L12 5"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            />
-                        </svg>
-                        Back to Dashboard
-                    </button>
+                    <div class="back-button-container">
+                        <button class="back-btn" on:click={() => goto("/")}>
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    d="M19 12H5"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                                <path
+                                    d="M12 19L5 12L12 5"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                            Back to Dashboard
+                        </button>
+                    </div>
                 {/if}
+                <div class="config-wrapper">
+                    <ConfigurationPanel
+                        isExpanded={true}
+                        onConfigurationComplete={handleConfigurationComplete}
+                    />
+                </div>
             </div>
-        </header>
-
-        <!-- Configuration Content -->
-        <div class="config-content">
-            <div class="config-wrapper">
-                <ConfigurationPanel
-                    isExpanded={true}
-                    onConfigurationComplete={handleConfigurationComplete}
-                />
-            </div>
-        </div>
+        {/if}
     </div>
 </main>
 
@@ -155,71 +173,47 @@
         pointer-events: none;
     }
 
-    /* Header */
-    .config-header {
-        background: rgba(30, 33, 38, 0.8);
-        backdrop-filter: blur(20px);
-        border: 1px solid var(--color-border);
-        border-radius: 16px;
-        padding: 2rem 2.5rem;
-        margin-bottom: 2rem;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        position: relative;
-        z-index: 1;
-    }
-
-    .config-header::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: linear-gradient(
-            90deg,
-            var(--color-primary),
-            var(--color-success)
-        );
-        opacity: 0.7;
-    }
-
-    .header-content {
+    /* Loading State */
+    .loading-container {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        flex-wrap: nowrap;
-        gap: 1.5rem;
-        position: relative;
-        z-index: 1;
-        width: 100%;
+        justify-content: center;
+        min-height: 50vh;
+        padding: 2rem;
     }
 
-    .brand {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .brand h1 {
-        margin: 0;
-        font-size: 2.25rem;
-        font-weight: 800;
-        background: linear-gradient(
-            135deg,
-            var(--color-primary) 0%,
-            var(--color-success) 100%
-        );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        letter-spacing: -0.02em;
-    }
-
-    .subtitle {
-        margin: 0.5rem 0 0 0;
+    .loading-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
         color: var(--color-text-secondary);
-        font-size: 1rem;
-        font-weight: 500;
-        opacity: 0.9;
+    }
+
+    .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid var(--color-border);
+        border-top: 3px solid var(--color-primary);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* Back Button Container */
+    .back-button-container {
+        margin-bottom: 2rem;
+        display: flex;
+        justify-content: flex-start;
+        padding: 0 1rem;
     }
 
     .back-btn {
@@ -267,46 +261,18 @@
     }
 
     /* Responsive Design */
-    @media (min-width: 769px) {
-        .header-content {
-            flex-direction: row;
-            flex-wrap: nowrap;
-            text-align: left;
-        }
-
-        .brand {
-            text-align: left;
-        }
-    }
-
     @media (max-width: 768px) {
         .config-container {
             padding: 1rem;
         }
 
-        .config-header {
-            padding: 1.5rem;
-            border-radius: 12px;
-        }
-
-        .header-content {
-            flex-direction: column;
-            text-align: center;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-
-        .brand {
-            width: 100%;
-            text-align: center;
-        }
-
-        .brand h1 {
-            font-size: 2rem;
+        .back-button-container {
+            padding: 0 0.5rem;
         }
 
         .back-btn {
             justify-content: center;
+            width: 100%;
         }
     }
 </style>

@@ -96,13 +96,37 @@
                   }
               });
 
+    // Load governance stats when provider and contract are available
+    $: if (provider && contractAddress && !tokenInfo) {
+        loadGovernanceStats();
+    }
+
     // Reactive statement to load balance when auth/config changes
-    $: if (isAuthenticated && userAddress && contractAddress) {
+    $: if (isAuthenticated && userAddress && contractAddress && tokenInfo) {
         loadUserTokenBalance();
     }
 
     $: if (backendActor) {
         load();
+    }
+
+    async function loadGovernanceStats() {
+        if (!provider || !contractAddress) return;
+
+        console.log("Loading governance stats in ProposalList:", {
+            provider: !!provider,
+            contractAddress,
+        });
+
+        try {
+            await governanceStatsStore.load(provider, contractAddress, false);
+            console.log(
+                "Governance stats loaded, tokenInfo:",
+                $governanceStatsStore.tokenInfo
+            );
+        } catch (error) {
+            console.error("Failed to load governance stats:", error);
+        }
     }
 
     async function load() {
@@ -122,12 +146,25 @@
     }
 
     async function loadUserTokenBalance() {
-        if (!isAuthenticated || !userAddress || !contractAddress) {
+        if (
+            !isAuthenticated ||
+            !userAddress ||
+            !contractAddress ||
+            !provider ||
+            !tokenInfo
+        ) {
             userTokenBalanceFormatted = "-";
             userVotingPower = 0;
             totalTokenSupply = 0;
             return;
         }
+
+        console.log("Loading user token balance:", {
+            userAddress,
+            contractAddress,
+            provider: !!provider,
+            tokenInfo: !!tokenInfo,
+        });
 
         isLoadingBalance = true;
         try {
@@ -137,6 +174,7 @@
                 userAddress,
                 tokenInfo
             );
+            console.log("Token balance loaded:", tokenBalanceInfo);
             userTokenBalanceFormatted = tokenBalanceInfo.formatted;
             userVotingPower = tokenBalanceInfo.balance;
             totalTokenSupply = tokenBalanceInfo.tokenInfo.totalSupply;
@@ -343,7 +381,7 @@
                                         <div class="percentage">
                                             {getTallyPercentage(
                                                 proposal.tally.yes,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%
                                         </div>
                                     </div>
@@ -355,7 +393,7 @@
                                         <div class="percentage">
                                             {getTallyPercentage(
                                                 proposal.tally.no,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%
                                         </div>
                                     </div>
@@ -363,13 +401,8 @@
 
                                 <div
                                     class="progressbar-container"
-                                    style="--quorum-threshold: 25%; --majority-threshold: 50%;"
+                                    style="--majority-threshold: 50%;"
                                 >
-                                    <!-- Quorum threshold marker -->
-                                    <div class="threshold quorum-threshold">
-                                        <div class="threshold-icon"></div>
-                                    </div>
-
                                     <!-- Majority threshold marker -->
                                     <div class="threshold majority-threshold">
                                         <div class="threshold-icon"></div>
@@ -388,14 +421,14 @@
                                             class="Yes"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.yes,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%;"
                                         ></div>
                                         <div
                                             class="No"
                                             style="width: {getTallyPercentage(
                                                 proposal.tally.no,
-                                                totalTokenSupply
+                                                proposal.tally.total
                                             )}%;"
                                         ></div>
                                     </div>
@@ -407,7 +440,7 @@
                                         <span class="count-value"
                                             >{formatTokenAmount(
                                                 proposal.tally.yes,
-                                                tokenInfo.decimals
+                                                tokenInfo?.decimals || 18
                                             )}</span
                                         >
                                     </div>
@@ -415,7 +448,7 @@
                                         <span class="count-value"
                                             >{formatTokenAmount(
                                                 proposal.tally.no,
-                                                tokenInfo.decimals
+                                                tokenInfo?.decimals || 18
                                             )}</span
                                         >
                                     </div>
@@ -488,7 +521,7 @@
                                             Not connected
                                         {:else}
                                             {userTokenBalanceFormatted} ({(userVotingPower /
-                                                totalTokenSupply) *
+                                                Number(proposal.tally.total)) *
                                                 100}%)
                                         {/if}
                                     </span>
@@ -780,11 +813,6 @@
         bottom: 0;
         width: 1px;
         z-index: 2;
-    }
-
-    .quorum-threshold {
-        left: var(--quorum-threshold);
-        background: var(--color-warning, #ffc107);
     }
 
     .majority-threshold {

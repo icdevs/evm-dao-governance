@@ -24,10 +24,36 @@
     $: isLoading = treasuryBalanceData?.isLoading || true;
     $: isInitialLoad = treasuryBalanceData.isInitialLoad;
 
+    // Auto-load balances when dependencies are ready
+    $: if (
+        provider &&
+        tokenInfo &&
+        treasuryBalanceData.walletAddress &&
+        treasuryBalanceData.isInitialLoad
+    ) {
+        loadBalancesIfNeeded();
+    }
+
+    async function loadBalancesIfNeeded() {
+        // Only load if this is the initial load and we're not already loading
+        if (
+            treasuryBalanceData.isInitialLoad &&
+            !treasuryBalanceData.isLoading
+        ) {
+            console.log("BalanceDisplay: Auto-loading treasury balances...");
+            await refreshBalances();
+        }
+    }
+
     onMount(async () => {
         // Expose refresh function to parent
         if (onRefresh) {
             onRefresh(() => refreshBalances());
+        }
+
+        // Try to load balances on mount if conditions are met
+        if (provider && tokenInfo && treasuryBalanceData.walletAddress) {
+            await loadBalancesIfNeeded();
         }
     });
 
